@@ -1,0 +1,22 @@
+{
+  "name": "octoperator",
+  "version": "0.1.0",
+  "description": "Autonomous GitHub project execution for Claude Code: turn natural-language requests into epics, issues, branches, PRs, reviews, and project status updates so agentic work is traceable end to end.",
+  "author": {
+    "name": "zeikar",
+    "email": "zeikar.dev@gmail.com"
+  },
+  "homepage": "https://github.com/zeikar/octoperator",
+  "repository": "https://github.com/zeikar/octoperator",
+  "license": "MIT",
+  "keywords": [
+    "github",
+    "issues",
+    "projects",
+    "pull-requests",
+    "milestones",
+    "project-management",
+    "automation",
+    "workflow"
+  ]
+}

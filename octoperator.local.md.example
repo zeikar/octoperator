@@ -1,0 +1,40 @@
+---
+# Octoperator per-project settings.
+# Copy this file to `.claude/octoperator.local.md` in your repo and edit the values.
+# It is git-ignored by the plugin (.claude/*.local.md) — never commit it.
+
+# Target repository (owner/name). Defaults to the current repo if omitted.
+repo: your-org/your-repo
+
+# Projects v2 board. project_owner may differ from the repo owner (user vs org projects).
+project_owner: your-org
+project_number: 1
+project_url: https://github.com/orgs/your-org/projects/1
+
+# Default milestone applied to new issues (optional).
+milestone: v0.1
+
+# Branch name pattern. Tokens: {number}, {slug}. Default: "{number}-{slug}".
+branch_pattern: "{number}-{slug}"
+
+# Default reviewers requested on new PRs (GitHub logins). Optional.
+reviewers: []
+
+# Status field option names on the board, in flow order.
+# Override only if your board uses different names (resolved case-insensitively).
+statuses:
+  todo: Todo
+  in_progress: In Progress
+  in_review: In Review
+  blocked: Blocked
+  done: Done
+
+# Label taxonomy (optional; defaults shown).
+labels:
+  types: [epic, feature, bug, chore, docs]
+  priorities: [p0, p1, p2, p3]
+  default_priority: p2
+---
+
+# Notes
+Free-form project notes for humans. Octoperator ignores this section.

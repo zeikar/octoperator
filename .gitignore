@@ -1,0 +1,5 @@
+# Octoperator per-project settings (machine/project-specific, may contain repo + project IDs)
+.claude/*.local.md
+
+# OS / editor noise
+.DS_Store
