@@ -21,7 +21,8 @@ status flow. Octoperator is autonomous: act immediately unless `--dry-run` is pa
    `gh issue view <n> --repo <repo> --json title,number,url`. If no number was given, list open issues
    assigned to the user and ask which to start.
 
-3. **Compute the branch name.** Slugify the title (lowercase, hyphenated, ASCII, ~50 chars) and apply
+3. **Compute the branch name.** Slugify the title (lowercase, hyphenated, ASCII), then truncate to
+   ≤50 chars **at a hyphen boundary** (drop whole `-` segments — never cut mid-word), and apply
    `branch_pattern` → e.g. `42-add-oauth-login`. See `references/conventions.md`.
 
 4. **Dry-run gate.** If `--dry-run` is present, print the branch name and commands, then stop.
