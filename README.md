@@ -3,13 +3,14 @@
 **Autonomous GitHub project execution for Claude Code.**
 
 Octoperator turns Claude Code work into a GitHub-native workflow. It converts natural-language requests
-into epics, issues, sub-issues, milestones, branches, pull requests, reviews, and Projects v2 status
-updates — so agentic coding stays traceable from **request → issue → branch → PR → review → project
-status**, with GitHub as the source of truth.
+into epics, issues, sub-issues, milestones, branches, pull requests, and reviews — so agentic coding
+stays traceable from **request → issue → branch → PR → review**, with GitHub as the source of truth.
+An optional Projects v2 board mirrors that status when one is available (auto-detected via
+`/octoperator:setup`).
 
-Built for solo developers, small teams, and AI-assisted workflows that already use GitHub Issues,
-Projects, Pull Requests, and Milestones, and want Claude Code to behave like a GitHub-native project
-operator instead of a one-off coding assistant.
+Built for solo developers, small teams, and AI-assisted workflows that already use GitHub Issues, Pull
+Requests, and Milestones — and, optionally, Projects — and want Claude Code to behave like a
+GitHub-native project operator instead of a one-off coding assistant.
 
 ## How it works
 
