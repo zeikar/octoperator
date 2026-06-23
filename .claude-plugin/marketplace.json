@@ -1,0 +1,33 @@
+{
+  "name": "zeikar-plugins",
+  "owner": {
+    "name": "zeikar",
+    "email": "zeikar.dev@gmail.com"
+  },
+  "metadata": {
+    "description": "Plugins by zeikar.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "octoperator",
+      "source": "./",
+      "description": "Autonomous GitHub-native execution for Claude Code: requests → issues → branches → PRs → reviews, traceable end to end (Projects v2 optional).",
+      "version": "0.1.0",
+      "author": {
+        "name": "zeikar",
+        "email": "zeikar.dev@gmail.com"
+      },
+      "homepage": "https://github.com/zeikar/octoperator",
+      "license": "MIT",
+      "keywords": [
+        "github",
+        "issues",
+        "pull-requests",
+        "projects",
+        "automation",
+        "workflow"
+      ]
+    }
+  ]
+}
