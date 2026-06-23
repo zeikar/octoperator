@@ -5,7 +5,7 @@
     "email": "zeikar.dev@gmail.com"
   },
   "metadata": {
-    "description": "Plugins by zeikar.",
+    "description": "Autonomous GitHub-native execution for Claude Code: requests → issues → branches → PRs → reviews, traceable end to end (Projects v2 optional).",
     "version": "0.1.0"
   },
   "plugins": [
