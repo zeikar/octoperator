@@ -38,7 +38,7 @@ when an issue must signal state without a project (e.g. repos without a project 
 branch.
 
 - Lowercase, hyphen-separated, ASCII only; strip punctuation.
-- Truncate the slug to ~50 characters.
+- Truncate the slug to ≤50 characters at a hyphen boundary (drop whole `-` segments; never cut mid-word).
 - Examples: issue #42 "Add OAuth login" → `42-add-oauth-login`; issue #7 "Fix flaky upload test" →
   `7-fix-flaky-upload-test`.
 - The pattern is configurable via `branch_pattern` in settings using the tokens `{number}` and

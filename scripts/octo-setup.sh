@@ -32,6 +32,9 @@ DEFAULT=$(gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBranchRef.n
 [ -n "$POWNER" ] || POWNER="${REPO%%/*}"
 
 # Read-only Projects v2 capability probe: list boards for the owner.
+# NOTE: success here means READ access only. A token can list projects yet still lack write
+# (board creation / item edits) — write is proven only by attempting those operations, so the
+# setup skill must handle a later create/edit failure gracefully.
 ERRF=$(mktemp)
 trap 'rm -f "$ERRF"' EXIT
 if BOARDS=$(gh project list --owner "$POWNER" --format json --jq '[.projects[] | {number, title, url}]' 2>"$ERRF"); then
