@@ -27,6 +27,7 @@ echoes the issue/PR numbers and URLs it created so the trail stays auditable.
 
 | Skill | Command | What it does |
 |-------|---------|--------------|
+| Setup | `/octoperator:setup` | One-time onboarding: detect repo, auto-detect Projects v2 access, optionally create/link a board, write `.claude/octoperator.local.md` |
 | Plan Epic | `/octoperator:plan-epic <request>` | Decompose a request into an epic + linked child issues, milestone, labels, board items |
 | Create Issue | `/octoperator:issue <request>` | Create one well-formed issue (labels, acceptance criteria, milestone, board) |
 | Start Work | `/octoperator:start <issue#>` | Create a conventionally named branch and move the issue to *In Progress* |
@@ -42,6 +43,7 @@ echoes the issue/PR numbers and URLs it created so the trail stays auditable.
 
 ### Helper scripts (`scripts/`)
 
+- **`octo-setup.sh`** — read-only probe used by `/octoperator:setup`: detect repo + default branch and whether the token can access Projects v2 (lists existing boards).
 - **`octo-doctor.sh`** — verify auth/repo/project access and print the board's Status options.
 - **`octo-subissue.sh`** — link a child issue to its epic as a native sub-issue (falls back to a task list).
 - **`octo-project-status.sh`** — add an issue/PR to the board and set its Status by name.
@@ -49,8 +51,12 @@ echoes the issue/PR numbers and URLs it created so the trail stays auditable.
 ## Prerequisites
 
 - **GitHub CLI** (`gh`) installed and authenticated: `gh auth login`.
-- For Projects v2 board updates, a token with the **`project`** scope: `gh auth refresh -s project`.
-- A GitHub repository (and optionally a Projects v2 board) you can write to.
+- A GitHub repository you can write to. **This is all Octoperator needs** — issues, branches, PRs,
+  reviews, and traceability work without a project board.
+- *(Optional)* a Projects v2 board for status tracking. Note: **user-owned Projects v2 require a
+  classic PAT** with the `repo` + `project` scopes — fine-grained PATs do not support user-owned
+  projects (org-owned projects work via a fine-grained token's Projects permission). `/octoperator:setup`
+  auto-detects this and enables board features only when available.
 
 ## Installation
 
@@ -64,27 +70,30 @@ Or install via a marketplace that lists Octoperator, then enable it in Claude Co
 
 ## Configuration
 
-Octoperator reads per-project settings from `.claude/octoperator.local.md` (git-ignored). Bootstrap it:
+The easiest path is the **setup skill**, which detects your repo, auto-detects whether your token can
+use Projects v2, optionally creates or links a board, and writes the config:
 
-```bash
-# 1. (optional) create or find a Projects v2 board
-gh project list --owner <owner>
-
-# 2. verify access and discover your board's Status options
-bash scripts/octo-doctor.sh --repo <owner>/<repo> --project <number>
-
-# 3. copy the template and fill it in
-mkdir -p .claude
-cp octoperator.local.md.example .claude/octoperator.local.md
+```text
+/octoperator:setup
 ```
 
-> The `scripts/...` paths above are relative for running by hand from a clone. Inside Claude Code the
-> skills invoke these scripts via `${CLAUDE_PLUGIN_ROOT}/scripts/...`, which resolves wherever the
-> plugin is installed.
+Projects v2 is **optional and auto-detected** — when no board is available or configured, Octoperator
+simply skips board status updates and everything else works unchanged.
 
-Only `repo` (or a discoverable current repo) is required. Board operations additionally need
+Prefer to configure by hand? Settings live in `.claude/octoperator.local.md` (git-ignored):
+
+```bash
+bash scripts/octo-doctor.sh --repo <owner>/<repo> [--project <number>]   # verify access
+mkdir -p .claude
+cp octoperator.local.md.example .claude/octoperator.local.md             # then edit
+```
+
+> The `scripts/...` paths are relative for running by hand from a clone. Inside Claude Code the skills
+> invoke them via `${CLAUDE_PLUGIN_ROOT}/scripts/...`, which resolves wherever the plugin is installed.
+
+Only `repo` (or a discoverable current repo) is required; board operations additionally need
 `project_owner` + `project_number`. No GraphQL field/option IDs are stored by hand — Octoperator
-resolves them by name at call time. See the full schema in
+resolves them by name at call time. Full schema:
 [`skills/github-conventions/references/settings.md`](skills/github-conventions/references/settings.md).
 
 ## Usage example
@@ -118,7 +127,11 @@ traceability matrix). They live in
 ## Troubleshooting
 
 - **`gh: command not found`** — install the GitHub CLI: <https://cli.github.com>.
-- **Project commands fail with a permission error** — run `gh auth refresh -s project`.
+- **Project commands fail with a permission error (`Resource not accessible`, `createProjectV2`)** —
+  user-owned Projects v2 are **not supported by fine-grained PATs**. Use a **classic PAT** with the
+  `repo` + `project` scopes (or an org-owned project with a fine-grained token's Projects permission).
+  If `gh` authenticates via the `GITHUB_TOKEN` env var, swap in the new token there and restart the
+  session. Octoperator works fine without a board — board steps are skipped automatically.
 - **`Status "X" not found`** — your board uses different option names; set them under `statuses:` in
   `.claude/octoperator.local.md` (run `octo-doctor.sh` to list the real options).
 - **Sub-issues not linking** — the account/plan may lack the sub-issue API; Octoperator falls back to a

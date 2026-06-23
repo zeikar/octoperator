@@ -4,6 +4,11 @@ Per-project configuration lives in `.claude/octoperator.local.md`, relative to t
 It is git-ignored (it is machine/project-specific) and read as YAML frontmatter followed by optional
 notes. Octoperator reads it at the start of every action to resolve targets and defaults.
 
+The easiest way to create it is `/octoperator:setup`, which detects the repo, auto-detects Projects v2
+access, optionally links/creates a board, and writes this file. The Projects v2 board is **optional**:
+when `project_owner`/`project_number` are absent, Octoperator skips all board steps and everything else
+works unchanged.
+
 ## Schema
 
 ```markdown

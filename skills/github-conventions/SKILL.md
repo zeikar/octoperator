@@ -39,9 +39,10 @@ Surface errors plainly — never silently swallow a failed `gh` call.
 Octoperator drives the `gh` CLI. Before the first write in a session, verify:
 
 - `gh auth status` succeeds (the user is authenticated).
-- Projects v2 operations need a token with the `project` scope (classic) or Projects read/write
-  (fine-grained). When a `gh project ...` call fails with a permission error, report it and point
-  the user to `gh auth refresh -s project`.
+- Projects v2 board operations are **optional**. They need a **classic PAT** with the `project` scope
+  (user-owned Projects v2 are not supported by fine-grained PATs; org-owned projects work via a
+  fine-grained token's Projects permission). When a `gh project ...` call fails with a permission
+  error, **skip the board step and continue** — report it and suggest `/octoperator:setup`.
 
 Run `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-doctor.sh --repo <owner>/<name> --project <number>` to
 verify auth, repo access, project access, and to print the board's Status options.
