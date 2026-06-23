@@ -1,6 +1,6 @@
 # Octoperator
 
-**Autonomous GitHub project execution for Claude Code.**
+**Autonomous GitHub-native execution for Claude Code.**
 
 Octoperator turns Claude Code work into a GitHub-native workflow. It converts natural-language requests
 into epics, issues, sub-issues, milestones, branches, pull requests, and reviews — so agentic coding
