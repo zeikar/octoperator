@@ -15,6 +15,11 @@ All notable changes to Octoperator are documented in this file. The format is ba
 - `auto` skill (`/octoperator:auto`): full lifecycle end-to-end — implement → review → merge — for one
   or more issues. Merges use a regular merge commit (history preserved) and are gated on the PR being
   mergeable with passing required checks.
+- `research` skill (`/octoperator:research`): analyze the repo and produce a ranked list of proposed
+  improvements; with `--create`, file the top ones as `proposed` issues for triage.
+- `autopilot` skill (`/octoperator:autopilot`): bounded orchestration loop over `auto` + `research`.
+  `semi` mode (default) builds only `ready`-labeled issues then proposes more for human triage; `full`
+  mode runs unattended to the `--cycles` cap. Adds the `ready` / `proposed` issue labels.
 
 ## [0.1.0] - 2026-06-23
 
