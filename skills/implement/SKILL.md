@@ -142,7 +142,8 @@ run would act on.
 
 **Single-issue in-tree path:**
 - Branch checked out in the **current** worktree → proceed in place (user is already on it).
-- Branch not checked out in any worktree AND no local branch → create and switch (like `start`).
+- Branch not checked out in any worktree AND no local branch → create and switch (branch from the
+  default branch per `github-conventions`).
 - Branch checked out in a **different** worktree → **REJECT** (cannot check it out in two places).
 - Branch exists only as a local branch not checked out → `git switch <branch>` (reuse it).
 - Remote branch exists (`git ls-remote` exit 0) → **deterministic REJECT** regardless of mode;
@@ -291,8 +292,9 @@ Use a conventional commit message referencing `#<issue_number>`.
 
 #### (f) Open the PR
 
-The single-issue path uses all of `pr`'s PR-creation rules (`Closes #<issue>`, `## Summary` body,
-test-status line, reviewers, self-skip) plus one additional draft trigger. Net draft rule — open as
+The single-issue path uses the standard PR-creation rules from `github-conventions` (see
+`references/gh-cli-cookbook.md`): `Closes #<issue>`, `## Summary` body, test-status line, reviewers,
+self-skip — plus one additional draft trigger. Net draft rule — open as
 `--draft` when ANY of the following hold:
 - No commits beyond base (`git rev-list --count "origin/$DEFAULT"..HEAD` equals `"0"`) — re-run
   fresh immediately before PR creation.
