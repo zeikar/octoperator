@@ -6,6 +6,16 @@ All notable changes to Octoperator are documented in this file. The format is ba
 
 ## [Unreleased]
 
+### Added
+- `implement` skill (`/octoperator:implement`): take one or more issues from issue to PR — a single
+  issue inline in the current tree, or many in parallel git worktrees (capped by `--max`, default 3).
+- `issue-implementer` agent: write-capable subagent that implements one issue inside a pre-created
+  worktree and opens its own `Closes #N` PR (never writes the board).
+- `octo-worktree.sh` helper: explicit per-issue worktree lifecycle (`add` / `remove` / `list`).
+- `auto` skill (`/octoperator:auto`): full lifecycle end-to-end — implement → review → merge — for one
+  or more issues. Merges use a regular merge commit (history preserved) and are gated on the PR being
+  mergeable with passing required checks.
+
 ## [0.1.0] - 2026-06-23
 
 ### Added

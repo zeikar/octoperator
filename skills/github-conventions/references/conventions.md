@@ -98,6 +98,17 @@ Status names are resolved against the board's actual single-select options by na
 so boards using slightly different labels (e.g. "In progress") still work. If a configured status name
 has no matching option, report it rather than guessing.
 
+## Merging pull requests
+
+Merge with a **regular merge commit** (`gh pr merge <pr#> --merge --delete-branch`) — never `--squash`
+or `--rebase`. A merge commit preserves the full per-commit history on the default branch (e.g. the
+per-task commits behind a feature). Gate the merge on a single authoritative signal: merge only when
+the PR is `OPEN`, not draft, and its `mergeStateStatus` is **`CLEAN`** (GitHub's "ready to merge" — no
+conflicts, all required checks green, not blocked by protection, not behind). Any other state
+(`DIRTY` / `BLOCKED` / `BEHIND` / `UNSTABLE` / `UNKNOWN`) → do not merge; report the reason. Never
+force-merge. The PR's `Closes #N` auto-closes the issue; move its board item to `Done` afterward with
+`octo-project-status.sh ... --status "Done"`.
+
 ## Traceability matrix
 
 | From → To              | Mechanism                                   |
