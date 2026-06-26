@@ -36,7 +36,7 @@ echoes the issue/PR numbers and URLs it created so the trail stays auditable.
 | Open PR | `/octoperator:pr [issue#]` | Push the branch, open a PR with `Closes #N`, request reviewers, move to *In Review* |
 | Review PR | `/octoperator:review <pr#>` | Run a structured review and post the verdict + findings to the PR |
 | Auto | `/octoperator:auto <issue#...> [--max N] [--dry-run]` | End-to-end lifecycle: implement → review → merge for one or more issues (regular merge, gated on CI + mergeable) |
-| Research | `/octoperator:research [--create] [--count N] [--dry-run]` | Analyze the repo and produce a ranked list of proposed improvements; with `--create`, file the top ones as `proposed` issues |
+| Research | `/octoperator:research [--create] [--count N] [--focus <feature\|refactor\|debt\|tests\|docs\|dx\|all>] [--dry-run]` | Analyze the repo and produce a ranked list of proposals balanced across features, refactoring, tech debt, tests, docs, and DX; with `--create`, file the top ones as `proposed` issues |
 | Autopilot | `/octoperator:autopilot [--mode semi\|full] [--cycles N] [--max M] [--dry-run]` | Bounded loop: discover work → `auto` (implement→review→merge) → when empty, `research` refills. `semi` builds only `ready` issues then proposes; `full` runs unattended to the cycle cap |
 | Sync Status | `/octoperator:sync` | Standup-style status report; auto-reconciles board drift |
 | GitHub Conventions | *(auto-loaded)* | Source-of-truth conventions, `gh` cookbook, settings schema shared by all actions |
