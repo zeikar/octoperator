@@ -16,7 +16,9 @@ All notable changes to Octoperator are documented in this file. The format is ba
   or more issues. Merges use a regular merge commit (history preserved) and are gated on the PR being
   mergeable with passing required checks.
 - `research` skill (`/octoperator:research`): analyze the repo and produce a ranked list of proposed
-  improvements; with `--create`, file the top ones as `proposed` issues for triage.
+  work balanced across categories — new features, refactoring, tech debt, test coverage, docs, and DX
+  (not just features) — with a `--focus` flag to bias a run; with `--create`, file the top ones as
+  `proposed` issues for triage.
 - `autopilot` skill (`/octoperator:autopilot`): bounded orchestration loop over `auto` + `research`.
   `semi` mode (default) builds only `ready`-labeled issues then proposes more for human triage; `full`
   mode runs unattended to the `--cycles` cap. Adds the `ready` / `proposed` issue labels.
