@@ -91,17 +91,20 @@ alone; the draft rule below is the single source of truth.
 
 ## Step 4 — Commit, push, and open PR
 
-### Execution flow (three terminal paths — follow in order)
+### Execution flow (four terminal paths — follow in order)
 
-- **(a) No changes** — `status --porcelain` is empty AND `rev-list --count` equals `0` → return
+- **(A) No changes** — `status --porcelain` is empty AND `rev-list --count` equals `0` → return
   `status: no-changes`; stop. Do not commit, push, or open a PR.
-- **(b) Real uncommitted work** — `status --porcelain` is non-empty AND staging produces at least
+- **(B) Clean tree, existing commits** — `status --porcelain` is empty AND `rev-list --count` is
+  greater than `0` (branch already has commits from a prior run) → SKIP staging and commit; go
+  directly to push + open PR for the existing commits.
+- **(C) Real uncommitted work** — `status --porcelain` is non-empty AND staging produces at least
   one staged file → commit → push → open PR.
-- **(c) No staged files but existing commits** — `status --porcelain` was non-empty but all changes
+- **(D) No staged files but existing commits** — `status --porcelain` was non-empty but all changes
   were excluded artifacts, AND `rev-list --count` is greater than `0` (existing commits already on
   branch) → SKIP `git commit` → push → open PR for the existing commits.
 
-Never reorder these paths. Evaluate (a) first; only proceed to (b)/(c) when (a) does not hold.
+Never reorder these paths. Evaluate (A) first; only proceed to (B)/(C)/(D) when (A) does not hold.
 
 ### No-changes check (evaluate BEFORE attempting a commit)
 
@@ -118,6 +121,10 @@ when there are no commits — check for the string `0` explicitly.
 
 When the no-changes predicate holds → return `status: no-changes`. Do not commit, push, or open
 a PR.
+
+**Clean tree with existing commits (path B):** if `status --porcelain` is EMPTY AND
+`rev-list --count` is greater than `0`, skip staging and commit entirely — go directly to push
+and PR creation for the existing commits. Do not attempt `git add` or `git commit`.
 
 ### Selective staging (only when `status --porcelain` is non-empty)
 
@@ -245,7 +252,7 @@ Return Markdown in exactly this shape so the orchestrator can parse it without r
 
 Field rules:
 
-- `files changed` — count of files modified in the commit; or, when skipping the commit (path (c) above), count and list of files changed across ALL commits from `<rev_base>` to HEAD via `git -C <worktree> diff --name-only <rev_base>..HEAD`.
+- `files changed` — count of files modified in the commit; or, when the commit is skipped because the branch already has commits (paths B and D above), count and list of files changed across ALL commits from `<rev_base>` to HEAD via `git -C <worktree> diff --name-only <rev_base>..HEAD`.
 - `test result` — `pass` when tests ran and all passed; `fail` when any failed; `none` when no test command was found or run.
 - `PR URL` — the URL returned by `gh pr create`; `none` on `no-changes` or `error`.
 - `status` — `success` when a PR was opened and tests passed or were absent; `tests-failed` when a PR was opened but tests failed; `no-changes` when the no-changes predicate held; `error` when push/PR creation failed.

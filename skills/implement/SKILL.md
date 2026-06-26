@@ -114,14 +114,14 @@ itself a worktree, so that condition would block the happy path. Instead, **reco
 - Whether a remote branch exists — use the **authoritative** check. Capture the exit code WITHOUT
   letting `set -e` abort the script on exit 2 (which is the normal "not found" result):
   ```bash
-  git ls-remote --exit-code --heads origin "<branch>" >/dev/null; rc=$?
+  if git ls-remote --exit-code --heads origin "<branch>" >/dev/null; then rc=0; else rc=$?; fi
   # rc==0  → branch EXISTS on remote (collision)
   # rc==2  → no match → branch ABSENT (free to create); do NOT treat as error
   # other  → network/auth/remote error → validation ERROR (reject this issue or stop);
   #           never treat an unknown error as "branch absent"
   ```
-  Handle each exit code **explicitly** with the three-way branch above. Run the command as shown so
-  a non-zero exit does not abort the overall flow (capture `rc` first, then act on it).
+  Handle each exit code **explicitly** with the three-way branch above. The `if/else` form ensures
+  `set -e` cannot abort on exit 2 (branch absent) before `rc` is captured.
 
 Report rejected issues with their reason and continue with the remaining valid set.
 
@@ -393,15 +393,21 @@ shared step 4 slug logic. Worktree paths are chosen under `.octoperator/worktree
 ### P2. Create worktrees (FIRST, branch-existence aware)
 
 For each issue in the valid set (after the shared branch-collision policy, step 5), create its
-worktree before any board write or subagent dispatch:
+worktree before any board write or subagent dispatch. Resolve the absolute path first so that the
+`Task` subagent can use it from any working directory:
 
 ```bash
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+wt="${REPO_ROOT}/.octoperator/worktrees/<b>"
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-worktree.sh" \
   add \
   --branch <b> \
-  --path ".octoperator/worktrees/<b>" \
+  --path "$wt" \
   --base "origin/$DEFAULT"
 ```
+
+Store `$wt` (the absolute path) in the `CREATED` set and pass it as the `worktree` parameter to the
+corresponding `Task` invocation.
 
 The `add` command exits non-zero if the branch is already checked out in any worktree OR already
 exists as a local branch (branch-existence aware). If `add` reports such a collision, do NOT proceed
@@ -509,6 +515,17 @@ a clean tree with nothing to recover). Use `remove` WITHOUT `--force`:
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-worktree.sh" \
   remove --path "<absolute-worktree-path>"
 ```
+
+For `no-changes` worktrees only, also delete the now-unused local branch after the worktree is
+removed (the worktree must be fully removed first, or `git branch -D` will refuse):
+
+```bash
+git branch -D <branch>
+```
+
+This prevents the parallel collision policy from rejecting the same issue on a future re-run because
+a stale local branch remains. Do NOT delete the local branch for `success` worktrees — those have
+an open PR and the remote branch must remain intact for review and merge.
 
 Preserve a worktree when it is dirty OR its status is `tests-failed` OR `error`. For every
 preserved worktree, print exact recovery commands using the absolute path so they are

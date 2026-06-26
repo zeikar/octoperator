@@ -32,6 +32,7 @@ echoes the issue/PR numbers and URLs it created so the trail stays auditable.
 | Plan Epic | `/octoperator:plan-epic <request>` | Decompose a request into an epic + linked child issues, milestone, labels, board items |
 | Create Issue | `/octoperator:issue <request>` | Create one well-formed issue (labels, acceptance criteria, milestone, board) |
 | Start Work | `/octoperator:start <issue#>` | Create a conventionally named branch and move the issue to *In Progress* |
+| Implement | `/octoperator:implement <issue#...> [--max N] [--draft] [--dry-run]` | Implement one or more issues end-to-end: branch, code, test, and PR. Single issue runs in-tree; multiple issues run in parallel worktrees (up to `--max`, default 3) |
 | Open PR | `/octoperator:pr [issue#]` | Push the branch, open a PR with `Closes #N`, request reviewers, move to *In Review* |
 | Review PR | `/octoperator:review <pr#>` | Run a structured review and post the verdict + findings to the PR |
 | Sync Status | `/octoperator:sync` | Standup-style status report; auto-reconciles board drift |
@@ -40,11 +41,13 @@ echoes the issue/PR numbers and URLs it created so the trail stays auditable.
 ### Agents
 
 - **`issue-planner`** — decomposes a request into an epic + well-scoped child issues (used by `plan-epic`). Read-only; proposes structure.
+- **`issue-implementer`** — implements a single issue inside a pre-created worktree, commits, pushes, and opens a PR (dispatched by `implement` for each parallel issue). Never writes to the project board.
 - **`pr-reviewer`** — produces a structured, actionable PR review with a verdict (used by `review-pr`). Read-only; the skill posts the result.
 
 ### Helper scripts (`scripts/`)
 
 - **`octo-setup.sh`** — read-only probe used by `/octoperator:setup`: detect repo + default branch and whether the token can access Projects v2 (lists existing boards).
+- **`octo-worktree.sh`** — manage Git worktrees for parallel issue implementation (`add`, `remove`, `list`); used by `implement` to create and clean up per-issue worktrees.
 - **`octo-doctor.sh`** — verify auth/repo/project access and print the board's Status options.
 - **`octo-subissue.sh`** — link a child issue to its epic as a native sub-issue (falls back to a task list).
 - **`octo-project-status.sh`** — add an issue/PR to the board and set its Status by name.
