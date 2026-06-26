@@ -369,6 +369,188 @@ concurrent tasks (default 3), each in its own worktree created by
 `bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-worktree.sh" add ...`.
 
 Board writes (`In Progress` before dispatch, `In Review` after each PR) are orchestrator-only; the
-`issue-implementer` agent never calls `octo-project-status.sh`.
+`issue-implementer` agent never calls `octo-project-status.sh`. This invariant prevents GraphQL
+secondary-rate-limit races that would occur if multiple subagents called the board API concurrently.
 
-**Full parallel orchestration is defined in Task 4 and will be appended to this section.**
+**Shared steps that also apply here:** The "Resolve and validate issues" (step 3), "Compute branch
+name" (step 4), and "Dry-run gate" (step 6) from the single-issue path apply unchanged to this path.
+The dry-run output includes per-issue branch names and planned worktree paths; dry-run stops with no
+mutation. The `$REPO` and `$DEFAULT` values resolved in step 2 are reused directly. Do not re-derive
+them here.
+
+### P1. Preflight (once, before any fan-out)
+
+Using `$DEFAULT` already resolved in step 2, fetch once so all worktrees start from the same base:
+
+```bash
+git fetch origin "$DEFAULT"
+```
+
+Workers (subagents) must NOT run `git fetch` or `git pull` — the single preflight fetch is the
+source of truth for `origin/$DEFAULT` throughout this run. Branch names are already computed by the
+shared step 4 slug logic. Worktree paths are chosen under `.octoperator/worktrees/<branch>`.
+
+### P2. Create worktrees (FIRST, branch-existence aware)
+
+For each issue in the valid set (after the shared branch-collision policy, step 5), create its
+worktree before any board write or subagent dispatch:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-worktree.sh" \
+  add \
+  --branch <b> \
+  --path ".octoperator/worktrees/<b>" \
+  --base "origin/$DEFAULT"
+```
+
+The `add` command exits non-zero if the branch is already checked out in any worktree OR already
+exists as a local branch (branch-existence aware). If `add` reports such a collision, do NOT proceed
+for that issue — mark it rejected with reason "branch/worktree already exists (late collision)" and
+continue with the remaining issues. This should have been caught by step 3/5 validation; treat a
+late collision as a per-issue failure, not a crash.
+
+Track two sets after this step:
+
+- `CREATED` — issues whose worktree was created successfully (absolute path confirmed).
+- `REJECTED_LATE` — issues that failed worktree creation.
+
+### P3. Set In Progress (serial, AFTER worktree creation, board-guarded)
+
+Only for issues in the `CREATED` set, write board status serially. This step runs AFTER all
+worktrees are created and BEFORE subagent dispatch. Skip this step entirely when `BOARD_ENABLED` is
+false. Wrap every call in the step-7 non-fatal guard:
+
+```bash
+for each issue in CREATED:
+  if [ "$BOARD_ENABLED" = "true" ] && [ "$BOARD_DISABLED_RUNTIME" != "true" ]; then
+    bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh" \
+      --owner "$project_owner" --project "$project_number" \
+      --url "$issue_url" --status "In Progress" \
+    || { echo "board sync skipped (access error)"; BOARD_DISABLED_RUNTIME=true; }
+  fi
+done
+```
+
+A board access failure sets `BOARD_DISABLED_RUNTIME=true` (disabling all remaining board writes for
+this run) and is reported as "board sync skipped" — it never aborts the run.
+
+### P4. Fan out (parallel, capped at `--max`, default 3)
+
+Dispatch `issue-implementer` subagents via the Task tool in batches: launch up to `--max` (default
+3) `issue-implementer` Task calls simultaneously, WAIT for every task in that batch to return, then
+launch the next batch. Repeat until all `CREATED` issues are dispatched and collected. Do NOT fire
+all tasks at once regardless of the cap.
+
+Pass exactly these parameters to each subagent (names and semantics match `agents/issue-implementer.md`):
+
+| Parameter | Value |
+|---|---|
+| `issue_number` | GitHub issue number |
+| `issue_title` | Issue title string |
+| `repo` | Resolved `owner/name` string (e.g. `acme/myapp`) |
+| `default_branch` | Resolved default-branch name (e.g. `main`), used for `gh pr create --base` |
+| `rev_base` | Resolved rev expression string (e.g. `origin/main`), used for `rev-list` counts |
+| `branch` | Feature branch name computed in step 4 |
+| `worktree` | Absolute path to the pre-created worktree (from P2) |
+| `reviewers` | Comma-separated reviewer list from settings |
+| `draft` | `true` or `false` per the `--draft` flag |
+
+Each subagent opens its own `Closes #N` PR from its worktree. Subagents do NOT call
+`octo-project-status.sh` — all board writes are orchestrator-only (P3 and P6 only).
+
+### P5. Collect results
+
+Results are collected after each batch (P4). Parse each subagent's structured output (the
+fixed-field Markdown block defined in `agents/issue-implementer.md`). Record per issue:
+
+- `status` — `success`, `tests-failed`, `no-changes`, or `error`.
+- `pr_url` — the PR URL, or `none`.
+- `test_result` — `pass`, `fail`, or `none`.
+- `failure_reason` — error message, or `none`.
+- `worktree` — absolute path (from P2).
+- `issue_url` — the GitHub issue URL (sourced from step-3 `gh issue view ... --json url` metadata).
+
+Do NOT inline diffs, logs, or raw subagent output into the final report. PR URLs and status only.
+
+### P6. Board writes (serial, orchestrator-only, board-guarded)
+
+After all subagents complete, write board status serially for issues with `status: success` only.
+Leave `tests-failed` and `error` issues at `In Progress` — do NOT auto-set them to `Blocked`.
+Skip this step entirely when `BOARD_ENABLED` is false. Wrap every call in the step-7 non-fatal guard:
+
+```bash
+for each issue where result.status == "success":
+  # Set PR to In Review
+  if [ "$BOARD_ENABLED" = "true" ] && [ "$BOARD_DISABLED_RUNTIME" != "true" ]; then
+    bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh" \
+      --owner "$project_owner" --project "$project_number" \
+      --url "$result.pr_url" --status "In Review" \
+    || { echo "board sync skipped (access error)"; BOARD_DISABLED_RUNTIME=true; }
+  fi
+  # Set issue to In Review  # $issue_url from step-3 metadata
+  if [ "$BOARD_ENABLED" = "true" ] && [ "$BOARD_DISABLED_RUNTIME" != "true" ]; then
+    bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh" \
+      --owner "$project_owner" --project "$project_number" \
+      --url "$issue_url" --status "In Review" \
+    || { echo "board sync skipped (access error)"; BOARD_DISABLED_RUNTIME=true; }
+  fi
+done
+```
+
+A board failure here is non-fatal: report "board sync skipped" and continue to cleanup and the
+result table. Never abort the run because of a board error at this stage.
+
+### P7. Cleanup
+
+Remove a worktree when its tree is CLEAN AND its status is `success` OR `no-changes` (both produce
+a clean tree with nothing to recover). Use `remove` WITHOUT `--force`:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-worktree.sh" \
+  remove --path "<absolute-worktree-path>"
+```
+
+Preserve a worktree when it is dirty OR its status is `tests-failed` OR `error`. For every
+preserved worktree, print exact recovery commands using the absolute path so they are
+copy-pasteable from any CWD:
+
+```
+Worktree preserved (dirty/failed): /abs/path/to/.octoperator/worktrees/<branch>
+Recovery commands:
+  cd /abs/path/to/.octoperator/worktrees/<branch>
+  git status
+  # Fix or discard changes, then:
+  bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-worktree.sh" remove --path "/abs/path/to/.octoperator/worktrees/<branch>" --force
+```
+
+Never run `remove --force` automatically. The user decides when to discard a failed worktree.
+
+### P8. Result table
+
+Print a flat per-issue table (every issue, grouped by status). Never silently drop a rejected or
+failed issue — every issue from the original input must appear in the table.
+
+| `issue#` | `branch` | `PR` | `tests` | `status` | `worktree` | `next action` |
+|---|---|---|---|---|---|---|
+| `#42` | `42-add-oauth` | `https://...` | `pass` | `success` | removed | — |
+| `#43` | `43-fix-login` | `https://...` | `fail` | `tests-failed` | kept: `.octoperator/worktrees/43-fix-login` | fix tests, push |
+| `#44` | `44-update-docs` | `—` | `none` | `no-changes` | removed | close or re-scope issue |
+| `#45` | `45-refactor-api` | `—` | `—` | `rejected (open PR exists)` | — | review existing PR |
+
+Kept worktree paths are flagged explicitly in the `worktree` column. The `next action` column must
+be non-empty for every non-success row.
+
+### Post-run overlap check
+
+After the result table, compare the sets of files changed across PR branches where
+`status == success` AND `pr_url != none` (guards the partial-push edge case):
+
+```bash
+git diff --name-only "origin/$DEFAULT"..."origin/<branch>"
+```
+
+Run this for each qualifying branch and collect the union of changed files. If any two branches
+touch the same file, flag:
+
+> **Review/merge order matters:** branches `<b1>` and `<b2>` both modify `<file>`. Merge conflicts
+> are likely — merge one before the other and rebase the second.
