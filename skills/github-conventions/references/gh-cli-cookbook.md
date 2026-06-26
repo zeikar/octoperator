@@ -148,6 +148,31 @@ Inline line comments (advanced) require the REST review API with a `comments[]` 
 (`gh api repos/OWNER/NAME/pulls/<pr#>/reviews ...`). Default to a single summary review whose body
 uses `path:line` references — reliable and sufficient.
 
+## Merge a pull request (regular merge — preserve history)
+
+Check the merge gate, then merge with a **regular merge commit** (never `--squash`/`--rebase`):
+
+```bash
+# Gate signal: merge only when mergeStateStatus is CLEAN (OPEN + not draft + mergeable +
+# required checks green + not blocked/behind). GitHub computes it async — re-query on UNKNOWN.
+gh pr view <pr#> --repo OWNER/NAME \
+  --json state,isDraft,mergeStateStatus,closingIssuesReferences
+
+# When the gate passes (CLEAN) — regular merge commit (preserves full history) + delete branch:
+gh pr merge <pr#> --repo OWNER/NAME --merge --delete-branch
+
+# After merge: move the linked issue's board item to Done (board-optional).
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh --owner <owner> --project <number> \
+  --url <issue-url> --status "Done"
+```
+
+Merge ONLY when `state` is `OPEN`, `isDraft` is `false`, and `mergeStateStatus` is **`CLEAN`**. Any
+other state — `DIRTY` (conflicts), `BLOCKED` (protection/required checks unmet), `BEHIND` (needs
+update), `UNSTABLE` (a check failing/pending), `UNKNOWN` (still computing) — means do NOT merge; report
+the reason. `gh pr checks <pr#>` is informational only (it conflates required and optional checks), not
+the gate. `--merge` keeps every commit; do not substitute `--squash` or `--rebase`. The PR's
+`Closes #N` auto-closes the issue.
+
 ## Sync queries (read-only)
 
 ```bash
