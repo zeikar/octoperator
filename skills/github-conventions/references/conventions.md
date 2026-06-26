@@ -32,6 +32,16 @@ that are missing (see the cookbook's "ensure labels" recipe).
 The Projects v2 board is the primary status surface. Status labels (`status:blocked`) are only added
 when an issue must signal state without a project (e.g. repos without a project configured).
 
+### Workflow labels (autopilot / research)
+
+| Label | Meaning |
+|-------|---------|
+| `ready` | Blessed for automated build. `autopilot --mode semi` builds **only** `ready` issues. A human (or `autopilot --mode full`) decides what becomes `ready`. |
+| `proposed` | Created by `research` as a candidate. In `semi` mode it awaits human triage — relabel it `ready` to build; `full` mode builds `proposed` issues directly. |
+
+These are optional and only relevant when using `research` / `autopilot`; the skills create either
+label if it is missing.
+
 ## Branch naming
 
 `<issue-number>-<kebab-slug>` derived from the issue title, branched from the repository's default
