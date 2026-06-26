@@ -127,8 +127,9 @@ Report rejected issues with their reason and continue with the remaining valid s
 
 ### 4. Compute branch name (one source of truth)
 
-Slugify the issue title per `start` step 3 / `github-conventions/references/conventions.md`
-"Branch naming": lowercase, hyphen-separated, ASCII only, strip punctuation, truncate the slug to
+Slugify the issue title per the **Branch naming** rule in
+`${CLAUDE_PLUGIN_ROOT}/skills/github-conventions/references/conventions.md` (the single source of
+truth): lowercase, hyphen-separated, ASCII only, strip punctuation, truncate the slug to
 ≤50 characters **at a hyphen boundary** (drop whole `-` segments, never cut mid-word). Apply
 `branch_pattern` → e.g. `42-add-oauth-login`.
 
