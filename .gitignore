@@ -4,5 +4,8 @@
 # hyperclaude research / plan / review artifacts (local working notes)
 .hyperclaude/
 
+# Octoperator parallel worktrees (one transient worktree per issue during parallel implement)
+.octoperator/worktrees/
+
 # OS / editor noise
 .DS_Store
