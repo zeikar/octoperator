@@ -1,5 +1,8 @@
 # Octoperator per-project settings (machine/project-specific, may contain repo + project IDs)
 .claude/*.local.md
 
+# hyperclaude research / plan / review artifacts (local working notes)
+.hyperclaude/
+
 # OS / editor noise
 .DS_Store
