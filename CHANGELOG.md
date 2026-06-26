@@ -23,6 +23,12 @@ All notable changes to Octoperator are documented in this file. The format is ba
   `semi` mode (default) builds only `ready`-labeled issues then proposes more for human triage; `full`
   mode runs unattended to the `--cycles` cap. Adds the `ready` / `proposed` issue labels.
 
+### Removed
+- `start` and `pr` skills (`/octoperator:start`, `/octoperator:pr`): redundant manual single-step
+  primitives. `implement` / `auto` cover branch → code → PR end-to-end and set both `In Progress` and
+  `In Review` board transitions; branch-naming and PR-linking conventions live in `github-conventions`,
+  so nothing was orphaned. Consolidates Octoperator on its autonomous-first lifecycle.
+
 ## [0.1.0] - 2026-06-23
 
 ### Added

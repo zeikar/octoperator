@@ -31,9 +31,7 @@ echoes the issue/PR numbers and URLs it created so the trail stays auditable.
 | Setup | `/octoperator:setup` | One-time onboarding: detect repo, auto-detect Projects v2 access, optionally create/link a board, write `.claude/octoperator.local.md` |
 | Plan Epic | `/octoperator:plan-epic <request>` | Decompose a request into an epic + linked child issues, milestone, labels, board items |
 | Create Issue | `/octoperator:issue <request>` | Create one well-formed issue (labels, acceptance criteria, milestone, board) |
-| Start Work | `/octoperator:start <issue#>` | Create a conventionally named branch and move the issue to *In Progress* |
 | Implement | `/octoperator:implement <issue#...> [--max N] [--draft] [--dry-run]` | Implement one or more issues end-to-end: branch, code, test, and PR. Single issue runs in-tree; multiple issues run in parallel worktrees (up to `--max`, default 3) |
-| Open PR | `/octoperator:pr [issue#]` | Push the branch, open a PR with `Closes #N`, request reviewers, move to *In Review* |
 | Review PR | `/octoperator:review <pr#>` | Run a structured review and post the verdict + findings to the PR |
 | Auto | `/octoperator:auto <issue#...> [--max N] [--dry-run]` | End-to-end lifecycle: implement → review → merge for one or more issues (regular merge, gated on CI + mergeable) |
 | Research | `/octoperator:research [--create] [--count N] [--focus <feature\|refactor\|debt\|tests\|docs\|dx\|all>] [--dry-run]` | Analyze the repo and produce a ranked list of proposals balanced across features, refactoring, tech debt, tests, docs, and DX; with `--create`, file the top ones as `proposed` issues |
@@ -109,11 +107,12 @@ resolves them by name at call time. Full schema:
 /octoperator:plan-epic Add passwordless email login with magic links
   → Epic #10 "Add passwordless email login" + child issues #11–#14, all on the board (Todo)
 
-/octoperator:start 11
-  → branch 11-send-magic-link-email, issue #11 → In Progress
+/octoperator:implement 11
+  → branch 11-send-magic-link-email, code + tests, PR #20 "feat: send magic-link email"
+    (Closes #11), #11 → In Review
 
-/octoperator:pr
-  → PR #20 "feat: send magic-link email" (Closes #11), reviewers requested, #11 → In Review
+/octoperator:auto 12 13
+  → issues #12–#13 implemented in parallel worktrees, reviewed, and regular-merged when CLEAN
 
 /octoperator:review 20
   → structured review posted to PR #20 with a verdict

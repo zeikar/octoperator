@@ -1,6 +1,6 @@
 ---
 name: github-conventions
-description: This skill provides the source-of-truth GitHub conventions, the gh CLI cookbook, and the settings schema that every Octoperator action consults. It should be loaded whenever Octoperator turns a request into GitHub artifacts — when the user asks to "plan an epic", "create an issue", "start work on an issue", "open a PR", "review a PR", or "sync project status", or otherwise works with GitHub epics, issues, sub-issues, milestones, branches, pull requests, reviews, or Projects v2 board updates. It is the shared knowledge layer, not a substitute for the action skills that perform the writes.
+description: This skill provides the source-of-truth GitHub conventions, the gh CLI cookbook, and the settings schema that every Octoperator action consults. It should be loaded whenever Octoperator turns a request into GitHub artifacts — when the user asks to "plan an epic", "create an issue", "implement an issue", "review a PR", or "sync project status", or otherwise works with GitHub epics, issues, sub-issues, milestones, branches, pull requests, reviews, or Projects v2 board updates. It is the shared knowledge layer, not a substitute for the action skills that perform the writes.
 version: 0.1.0
 ---
 

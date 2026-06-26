@@ -5,7 +5,7 @@ rules so that every artifact is consistent and traceable.
 
 ## Label taxonomy
 
-Octoperator expects these labels to exist in the repo. The `start-work`/`plan-epic` flows create any
+Octoperator expects these labels to exist in the repo. The `issue`/`plan-epic` flows create any
 that are missing (see the cookbook's "ensure labels" recipe).
 
 ### Type labels (exactly one per issue)
@@ -99,8 +99,8 @@ Todo → In Progress → In Review → Done
 | Status        | Set when                                            |
 |---------------|-----------------------------------------------------|
 | `Todo`        | Issue created and added to the board                |
-| `In Progress` | A branch is created for the issue (`start-work`)    |
-| `In Review`   | A PR is opened for the issue (`open-pr`)            |
+| `In Progress` | A branch is created for the issue (`implement` / `auto`) |
+| `In Review`   | A PR is opened for the issue (`implement` / `auto`)     |
 | `Blocked`     | Work cannot proceed (dependency, question, failure) |
 | `Done`        | The PR merged / issue closed                         |
 
