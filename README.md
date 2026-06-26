@@ -35,6 +35,7 @@ echoes the issue/PR numbers and URLs it created so the trail stays auditable.
 | Implement | `/octoperator:implement <issue#...> [--max N] [--draft] [--dry-run]` | Implement one or more issues end-to-end: branch, code, test, and PR. Single issue runs in-tree; multiple issues run in parallel worktrees (up to `--max`, default 3) |
 | Open PR | `/octoperator:pr [issue#]` | Push the branch, open a PR with `Closes #N`, request reviewers, move to *In Review* |
 | Review PR | `/octoperator:review <pr#>` | Run a structured review and post the verdict + findings to the PR |
+| Auto | `/octoperator:auto <issue#...> [--max N] [--dry-run]` | End-to-end lifecycle: implement → review → merge for one or more issues (regular merge, gated on CI + mergeable) |
 | Sync Status | `/octoperator:sync` | Standup-style status report; auto-reconciles board drift |
 | GitHub Conventions | *(auto-loaded)* | Source-of-truth conventions, `gh` cookbook, settings schema shared by all actions |
 
