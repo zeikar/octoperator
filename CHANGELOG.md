@@ -26,6 +26,10 @@ All notable changes to Octoperator are documented in this file. The format is ba
   exits 0, unknown-arg exits 2 — no network/auth), plus a `CI` GitHub Actions workflow that runs it
   on every push and pull request.
 
+### Changed
+- README: the skills table is now grouped by purpose (onboarding, plan & intake, autonomous lifecycle,
+  review & status, what's next, knowledge layer) so the entry points are easier to scan.
+
 ### Removed
 - `start` and `pr` skills (`/octoperator:start`, `/octoperator:pr`): redundant manual single-step
   primitives. `implement` / `auto` cover branch → code → PR end-to-end and set both `In Progress` and

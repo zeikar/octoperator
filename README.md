@@ -26,18 +26,21 @@ echoes the issue/PR numbers and URLs it created so the trail stays auditable.
 
 ### Skills (slash commands)
 
-| Skill | Command | What it does |
+Grouped by purpose — onboarding, then the lifecycle from intake to autonomous shipping, plus the
+always-on knowledge layer.
+
+| Group | Command | What it does |
 |-------|---------|--------------|
-| Setup | `/octoperator:setup` | One-time onboarding: detect repo, auto-detect Projects v2 access, optionally create/link a board, write `.claude/octoperator.local.md` |
-| Plan Epic | `/octoperator:plan-epic <request>` | Decompose a request into an epic + linked child issues, milestone, labels, board items |
-| Create Issue | `/octoperator:issue <request>` | Create one well-formed issue (labels, acceptance criteria, milestone, board) |
-| Implement | `/octoperator:implement <issue#...> [--max N] [--draft] [--dry-run]` | Implement one or more issues end-to-end: branch, code, test, and PR. Single issue runs in-tree; multiple issues run in parallel worktrees (up to `--max`, default 3) |
-| Review PR | `/octoperator:review <pr#>` | Run a structured review and post the verdict + findings to the PR |
-| Auto | `/octoperator:auto <issue#...> [--max N] [--dry-run]` | End-to-end lifecycle: implement → review → merge for one or more issues (regular merge, gated on CI + mergeable) |
-| Research | `/octoperator:research [--create] [--count N] [--focus <feature\|refactor\|debt\|tests\|docs\|dx\|all>] [--dry-run]` | Analyze the repo and produce a ranked list of proposals balanced across features, refactoring, tech debt, tests, docs, and DX; with `--create`, file the top ones as `proposed` issues |
-| Autopilot | `/octoperator:autopilot [--mode semi\|full] [--cycles N] [--max M] [--dry-run]` | Bounded loop: discover work → `auto` (implement→review→merge) → when empty, `research` refills. `semi` builds only `ready` issues then proposes; `full` runs unattended to the cycle cap |
-| Sync Status | `/octoperator:sync` | Standup-style status report; auto-reconciles board drift |
-| GitHub Conventions | *(auto-loaded)* | Source-of-truth conventions, `gh` cookbook, settings schema shared by all actions |
+| **Onboarding** | `/octoperator:setup` | One-time onboarding: detect repo, auto-detect Projects v2 access, optionally create/link a board, write `.claude/octoperator.local.md` |
+| **Plan & intake** | `/octoperator:plan-epic <request>` | Decompose a request into an epic + linked child issues, milestone, labels, board items |
+| | `/octoperator:issue <request>` | Create one well-formed issue (labels, acceptance criteria, milestone, board) |
+| **Autonomous lifecycle** | `/octoperator:implement <issue#...> [--max N] [--draft] [--dry-run]` | Implement one or more issues end-to-end: branch, code, test, and PR. Single issue runs in-tree; multiple issues run in parallel worktrees (up to `--max`, default 3) |
+| | `/octoperator:auto <issue#...> [--max N] [--dry-run]` | End-to-end lifecycle: implement → review → merge for one or more issues (regular merge, gated on CI + mergeable) |
+| | `/octoperator:autopilot [--mode semi\|full] [--cycles N] [--max M] [--dry-run]` | Bounded loop: discover work → `auto` (implement→review→merge) → when empty, `research` refills. `semi` builds only `ready` issues then proposes; `full` runs unattended to the cycle cap |
+| **Review & status** | `/octoperator:review <pr#>` | Run a structured review and post the verdict + findings to the PR |
+| | `/octoperator:sync` | Standup-style status report; auto-reconciles board drift |
+| **What's next** | `/octoperator:research [--create] [--count N] [--focus <feature\|refactor\|debt\|tests\|docs\|dx\|all>] [--dry-run]` | Analyze the repo and produce a ranked list of proposals balanced across features, refactoring, tech debt, tests, docs, and DX; with `--create`, file the top ones as `proposed` issues |
+| **Knowledge layer** | `github-conventions` *(auto-loaded)* | Source-of-truth conventions, `gh` cookbook, settings schema shared by all actions |
 
 ### Agents
 
