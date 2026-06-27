@@ -22,6 +22,9 @@ All notable changes to Octoperator are documented in this file. The format is ba
 - `autopilot` skill (`/octoperator:autopilot`): bounded orchestration loop over `auto` + `research`.
   `semi` mode (default) builds only `ready`-labeled issues then proposes more for human triage; `full`
   mode runs unattended to the `--cycles` cap. Adds the `ready` / `proposed` issue labels.
+- `scripts/test/smoke.sh`: CI-safe smoke test for the `octo-*.sh` helpers (syntax check, `--help`
+  exits 0, unknown-arg exits 2 — no network/auth), plus a `CI` GitHub Actions workflow that runs it
+  on every push and pull request.
 
 ### Removed
 - `start` and `pr` skills (`/octoperator:start`, `/octoperator:pr`): redundant manual single-step

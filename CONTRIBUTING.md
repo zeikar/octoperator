@@ -47,8 +47,9 @@ epic/sub-issue model, and the status flow). Read and follow them when adding or 
 Octoperator has no build step. Before opening a PR:
 
 ```bash
-# 1. Syntax-check the helper scripts
-for f in scripts/*.sh; do bash -n "$f" && echo "OK: $f"; done
+# 1. Smoke-test the helper scripts (syntax + --help + unknown-arg handling).
+#    CI-safe: no network / gh / auth required. CI runs this on every push and PR.
+bash scripts/test/smoke.sh
 
 # 2. Verify prerequisites and (optionally) board access
 bash scripts/octo-doctor.sh --repo <owner>/<name> [--project <number>]
