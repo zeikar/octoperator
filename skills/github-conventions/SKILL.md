@@ -39,12 +39,14 @@ Surface errors plainly — never silently swallow a failed `gh` call.
 Octoperator owns the **GitHub lifecycle**, not the craft of the change. These steps never change
 hands and always follow Octoperator's own procedure: issue resolution and validation, branch naming,
 worktree creation and parallel fan-out, commit and staging policy, pull-request creation and linking,
-the merge gate, and board status.
+the merge gate, the structured PR review and its verdict (per `skills/review/` and
+`agents/pr-reviewer.md`), and board status.
 
-The **craft of the change** — how code is written, tested, and debugged, and how deeply a diff is
-reviewed — is not Octoperator's to dictate. Follow the repository's and the user's established
-conventions, and prefer any specialized workflow they already have installed; Octoperator imposes no
-methodology of its own. When none is present, do the work directly.
+The **craft of the change** — how code is written, tested, and debugged — is not Octoperator's to
+dictate. Follow the repository's and the user's established conventions, and prefer any specialized
+workflow they already have installed; Octoperator imposes no methodology of its own. When none is
+present, do the work directly. This deferral does not cover the PR review above: review execution and
+depth stay with `skills/review/` unless the user directly asks otherwise.
 
 This is a preference, not a dependency: Octoperator must run fully self-contained with nothing else
 installed. Never make a GitHub-lifecycle step (branch, commit, PR, merge, board) contingent on
