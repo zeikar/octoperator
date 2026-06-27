@@ -9,5 +9,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: ShellCheck helper scripts
+        # ubuntu-latest ships shellcheck preinstalled. Gate on warning+ only:
+        # info-level notes (e.g. SC2015 guard-clause style) vary by shellcheck
+        # version and are not bugs here, so they must not make CI nondeterministic.
+        run: shellcheck --severity=warning scripts/*.sh scripts/test/smoke.sh
       - name: Helper script smoke tests
         run: bash scripts/test/smoke.sh
