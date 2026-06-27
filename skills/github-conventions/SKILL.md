@@ -34,6 +34,22 @@ that mode, print the exact `gh` commands and artifact contents that *would* run,
 After any write, always echo what changed (issue/PR numbers and URLs) so the trail stays traceable.
 Surface errors plainly — never silently swallow a failed `gh` call.
 
+## Scope & delegation posture
+
+Octoperator owns the **GitHub lifecycle**, not the craft of the change. These steps never change
+hands and always follow Octoperator's own procedure: issue resolution and validation, branch naming,
+worktree creation and parallel fan-out, commit and staging policy, pull-request creation and linking,
+the merge gate, and board status.
+
+The **craft of the change** — how code is written, tested, and debugged, and how deeply a diff is
+reviewed — is not Octoperator's to dictate. Follow the repository's and the user's established
+conventions, and prefer any specialized workflow they already have installed; Octoperator imposes no
+methodology of its own. When none is present, do the work directly.
+
+This is a preference, not a dependency: Octoperator must run fully self-contained with nothing else
+installed. Never make a GitHub-lifecycle step (branch, commit, PR, merge, board) contingent on
+another skill or plugin being available.
+
 ## Prerequisites (check once, fail fast)
 
 Octoperator drives the `gh` CLI. Before the first write in a session, verify:
