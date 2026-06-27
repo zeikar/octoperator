@@ -9,5 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: ShellCheck helper scripts
+        # ubuntu-latest ships shellcheck preinstalled.
+        run: shellcheck scripts/*.sh scripts/test/smoke.sh
       - name: Helper script smoke tests
         run: bash scripts/test/smoke.sh

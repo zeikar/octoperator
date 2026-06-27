@@ -25,6 +25,7 @@ done
 OWNER="${REPO%%/*}"; NAME="${REPO##*/}"
 
 node_id() {
+  # shellcheck disable=SC2016  # $o/$n/$num are GraphQL variables — must stay literal, not shell-expanded
   gh api graphql \
     -f query='query($o:String!,$n:String!,$num:Int!){repository(owner:$o,name:$n){issue(number:$num){id}}}' \
     -F o="$OWNER" -F n="$NAME" -F num="$1" --jq '.data.repository.issue.id'
@@ -34,6 +35,7 @@ PID=$(node_id "$PARENT") || { echo "Could not resolve epic #$PARENT" >&2; exit 1
 CID=$(node_id "$CHILD")  || { echo "Could not resolve child #$CHILD" >&2; exit 1; }
 
 # The sub_issues GraphQL feature header is harmless once the feature is GA.
+# shellcheck disable=SC2016  # $p/$c are GraphQL variables — must stay literal, not shell-expanded
 if gh api graphql -H "GraphQL-Features: sub_issues" \
      -f query='mutation($p:ID!,$c:ID!){addSubIssue(input:{issueId:$p,subIssueId:$c}){issue{number}}}' \
      -F p="$PID" -F c="$CID" >/dev/null 2>&1; then
