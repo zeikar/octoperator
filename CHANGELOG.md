@@ -62,9 +62,11 @@ All notable changes to Octoperator are documented in this file. The format is ba
   settings-repo vs local-clone mismatch guard applies under `auto` too. After a `gh pr merge` error it
   re-reads the PR and treats `MERGED` as success (reporting the cleanup error separately) instead of
   reporting a failure and skipping the `Done` board write.
-- `autopilot` discovery now skips issues an open PR already closes (`closingIssuesReferences`) and
-  lists them in the cycle report, instead of re-picking held `ready` issues every run only for
-  `implement` to reject them while they used up `--max` slots.
+- `autopilot` discovery now skips issues an open PR already holds — it closes them, or its head
+  branch is theirs, matching `implement`'s rejection rules — and lists them in the cycle report,
+  instead of re-picking held `ready` issues every run only for `implement` to reject them while they
+  used up `--max` slots. The repo match is case-insensitive, and only issues that pass the
+  label/mode filters are listed.
 
 ## [0.1.0] - 2026-06-23
 
