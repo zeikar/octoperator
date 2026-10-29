@@ -164,6 +164,9 @@ gh pr view <pr#> --repo OWNER/NAME \
 
 # When the gate passes (CLEAN) — regular merge commit (preserves full history) + delete branch:
 gh pr merge <pr#> --repo OWNER/NAME --merge --delete-branch
+# On a non-zero exit, re-read the state: the merge may have landed and only the branch delete
+# failed. MERGED → success (report the error as cleanup); anything else → the merge failed.
+gh pr view <pr#> --repo OWNER/NAME --json state --jq '.state'
 
 # After merge: move the linked issue's board item to Done (board-optional).
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh --owner <owner> --project <number> \
