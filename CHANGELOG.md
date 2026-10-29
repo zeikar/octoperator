@@ -52,6 +52,10 @@ All notable changes to Octoperator are documented in this file. The format is ba
 - `review` (and `auto`'s review phase) now has `pr-reviewer` read and test the PR's head commit in a
   throwaway detached worktree, removed afterward, instead of whatever the current checkout held —
   often the default branch, since parallel `implement` removes its worktrees before review.
+- `auto` now runs `implement`'s steps 1–2 in full, so `branch_pattern` is honored and the
+  settings-repo vs local-clone mismatch guard applies under `auto` too. After a `gh pr merge` error it
+  re-reads the PR and treats `MERGED` as success (reporting the cleanup error separately) instead of
+  reporting a failure and skipping the `Done` board write.
 
 ## [0.1.0] - 2026-06-23
 
