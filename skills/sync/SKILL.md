@@ -3,7 +3,6 @@ name: sync
 description: This skill should be used when the user asks to "sync status", "show project status", "give me a standup", "what's the status of the project", "reconcile the board", or invokes /octoperator:sync. Produces a standup-style status report from issues, PRs, milestones, and the Projects v2 board, and auto-reconciles detected drift.
 argument-hint: "[--dry-run]"
 allowed-tools: Bash(gh:*), Bash(bash:*), Read
-version: 0.1.0
 ---
 
 # Sync Status

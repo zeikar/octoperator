@@ -3,7 +3,6 @@ name: review
 description: This skill should be used when the user asks to "review PR #N", "review this pull request", "do a code review on the PR", "leave a review on N", or invokes /octoperator:review. Runs a structured review of a GitHub pull request and posts the verdict and findings back to the PR.
 argument-hint: "<pr-number> [--approve|--request-changes|--comment] [--dry-run]"
 allowed-tools: Bash(gh:*), Bash(git:*), Bash(bash:*), Read, Task
-version: 0.1.0
 ---
 
 # Review PR

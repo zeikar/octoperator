@@ -6,6 +6,8 @@ All notable changes to Octoperator are documented in this file. The format is ba
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-30
+
 ### Added
 - `implement` skill (`/octoperator:implement`): take one or more issues from issue to PR — a single
   issue inline in the current tree, or many in parallel git worktrees (capped by `--max`, default 3).
@@ -40,6 +42,8 @@ All notable changes to Octoperator are documented in this file. The format is ba
   from a `directory` marketplace) when Claude Code opens in the repo, for dogfooding.
 
 ### Changed
+- Plugin version bumped to 0.2.0 in `plugin.json` and `marketplace.json`. The non-standard per-skill
+  `version:` frontmatter is dropped, leaving `plugin.json` as the single source of the version.
 - README: the skills table is now grouped by purpose (onboarding, plan & intake, autonomous lifecycle,
   review & status, what's next, knowledge layer) so the entry points are easier to scan.
 
@@ -112,5 +116,6 @@ All notable changes to Octoperator are documented in this file. The format is ba
   reviews, and optional, auto-detected Projects v2 board status.
 - `CONTRIBUTING.md` with setup, conventions, and testing guidance.
 
-[Unreleased]: https://github.com/zeikar/octoperator/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/zeikar/octoperator/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/zeikar/octoperator/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/zeikar/octoperator/releases/tag/v0.1.0

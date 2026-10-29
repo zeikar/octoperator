@@ -3,7 +3,6 @@ name: setup
 description: This skill should be used when the user asks to "set up octoperator", "configure octoperator", "octoperator setup", "bootstrap octoperator settings", "initialize the project board", "create the octoperator config", or invokes /octoperator:setup. Detects the repo, probes whether the token can access Projects v2, optionally selects or creates a board, and writes .claude/octoperator.local.md. Projects is treated as optional and auto-detected.
 argument-hint: "[--repo OWNER/NAME]"
 allowed-tools: Bash(gh:*), Bash(bash:*), Read, Write
-version: 0.1.0
 ---
 
 # Setup

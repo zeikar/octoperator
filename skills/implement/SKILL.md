@@ -3,7 +3,6 @@ name: implement
 description: This skill should be used when the user asks to "implement issue #N", "build issue 42", "work on issue N", "implement these issues in parallel", or invokes /octoperator:implement. Implements one or more GitHub issues — creates a branch, writes the code, and opens a pull request. Single issue works in the current tree; multiple issues use parallel worktrees (see the parallel section below).
 argument-hint: "<issue-number...> [--max N] [--draft] [--dry-run]"
 allowed-tools: Bash(gh:*), Bash(git:*), Bash(bash:*), Read, Grep, Glob, Edit, Write, Task
-version: 0.1.0
 ---
 
 # Implement

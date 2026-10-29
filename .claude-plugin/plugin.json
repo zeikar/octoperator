@@ -1,6 +1,6 @@
 {
   "name": "octoperator",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Autonomous GitHub-native execution for Claude Code: turn natural-language requests into traceable epics, issues, branches, PRs, and reviews — with optional Projects v2 status updates.",
   "author": {
     "name": "zeikar",

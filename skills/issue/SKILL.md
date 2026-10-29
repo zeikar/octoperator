@@ -3,7 +3,6 @@ name: issue
 description: This skill should be used when the user asks to "create an issue", "open an issue for X", "file a bug", "log a task", "make a ticket", or invokes /octoperator:issue. Turns one natural-language request into a single well-formed GitHub issue with type/priority labels, acceptance criteria, milestone, and a project board item.
 argument-hint: <request describing one issue> [--dry-run]
 allowed-tools: Bash(gh:*), Bash(bash:*), Read
-version: 0.1.0
 ---
 
 # Create Issue
