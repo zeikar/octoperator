@@ -14,6 +14,11 @@ claude --plugin-dir /path/to/octoperator
 The skills then appear as `/octoperator:*` commands (e.g. `/octoperator:plan-epic`) and activate on
 matching natural-language requests.
 
+Working on Octoperator itself? Just open Claude Code in the clone: the committed
+`.claude/settings.json` registers the checkout as the `zeikar-plugins` directory marketplace and
+enables `octoperator@zeikar-plugins`, so you dogfood whatever branch is checked out (accept the
+trust prompt on first launch).
+
 ## Prerequisites
 
 - [GitHub CLI](https://cli.github.com) (`gh`) installed and authenticated: `gh auth login`.

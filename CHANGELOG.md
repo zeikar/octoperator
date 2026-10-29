@@ -27,6 +27,8 @@ All notable changes to Octoperator are documented in this file. The format is ba
   on every push and pull request.
 - `shellcheck` static analysis in CI over the helper scripts (`scripts/*.sh`, `scripts/test/smoke.sh`),
   catching quoting/word-splitting/unset-variable bugs that `bash -n` cannot.
+- Project `.claude/settings.json` that loads the checked-out plugin (`octoperator@zeikar-plugins`
+  from a `directory` marketplace) when Claude Code opens in the repo, for dogfooding.
 
 ### Changed
 - README: the skills table is now grouped by purpose (onboarding, plan & intake, autonomous lifecycle,

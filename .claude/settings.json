@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "zeikar-plugins": {
+      "source": {
+        "source": "directory",
+        "path": "."
+      }
+    }
+  },
+  "enabledPlugins": {
+    "octoperator@zeikar-plugins": true
+  }
+}
