@@ -74,7 +74,7 @@ constraint. Octoperator is autonomous: post immediately unless `--dry-run` is pa
 8. **Report.** Print the **intended** verdict (step 5's resolution *before* the self-approval
    downgrade) alongside the posted action, the reviewed `headRefOid`, the count of findings by
    severity, and the PR URL. `auto` gates its merge on the intended verdict and the reviewed commit,
-   and hands the blocker/major findings to its fixer.
+   and hands the blocker/major/minor findings to its fixer.
 
 ## Notes
 

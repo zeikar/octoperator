@@ -13,10 +13,11 @@ All notable changes to Octoperator are documented in this file. The format is ba
   worktree and opens its own `Closes #N` PR (never writes the board).
 - `octo-worktree.sh` helper: explicit per-issue worktree lifecycle (`add` / `remove` / `list`).
 - `auto` skill (`/octoperator:auto`): full lifecycle end-to-end — implement → review → merge — for one
-  or more issues. A blocking review (`request_changes`, the intended verdict before the self-approval
-  COMMENT downgrade) blocks the merge and starts a fix → re-review loop — up to 6 rounds, fixes
-  applied by `issue-implementer` in fix mode on the PR branch; a PR still blocking after that is held
-  with its outstanding findings. Merges use a regular merge commit (history preserved), are pinned to
+  or more issues. Any blocker/major/minor review finding starts a fix → re-review loop — up to 6
+  rounds, fixes applied by `issue-implementer` in fix mode on the PR branch. A blocking review
+  (`request_changes`, the intended verdict before the self-approval COMMENT downgrade) blocks the
+  merge, and a PR still blocking after the last round is held with its outstanding findings; minors
+  are fixed before merging but never hold a PR, and any left over are reported. Nits are not fixed. Merges use a regular merge commit (history preserved), are pinned to
   the reviewed commit (`--match-head-commit`), and are gated on the PR being mergeable with passing
   required checks.
 - `research` skill (`/octoperator:research`): analyze the repo and produce a ranked list of proposed

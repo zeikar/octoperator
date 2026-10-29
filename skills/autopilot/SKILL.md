@@ -105,7 +105,7 @@ Select up to `--max` issues for this cycle (prefer issues whose predicted file s
 procedure (`${CLAUDE_PLUGIN_ROOT}/skills/auto/SKILL.md`) on exactly those issue numbers, forwarding the
 parallelism cap — conceptually `auto <n1> <n2> … --max $M`. **Never forward `--dry-run` to `auto`**
 (autopilot's own dry-run gate in step 2 already stopped before this point). `auto` implements, reviews
-(running its fix → re-review loop on blocking findings), and merges each (regular merge, gated on a
+(running its fix → re-review loop on blocker/major/minor findings), and merges each (regular merge, gated on a
 non-blocking review and `CLEAN`).
 
 **Mark every issue in the batch as attempted** (the attempt-once set from (a)), then record its outcome
