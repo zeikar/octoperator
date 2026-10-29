@@ -39,7 +39,7 @@ Follow the `github-conventions` skill for the settings schema
      projects); org-owned projects work with a fine-grained token's Organization → Projects permission.
 
 4. **Write settings.** Write `.claude/octoperator.local.md` (Write tool) using the schema from
-   `references/settings.md`: always include `repo`, `branch_pattern`, `statuses`, and `labels`; include
+   `references/settings.md`: always include `repo`, `branch_pattern`, and `statuses`; include
    `project_owner`/`project_number`/`project_url` only when a board was resolved. Keep it minimal and
    commented. Then run `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-exclude.sh` so the file (and future
    `.octoperator/worktrees/`) stays out of `git status` via the repo-local `.git/info/exclude`.

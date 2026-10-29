@@ -45,6 +45,9 @@ All notable changes to Octoperator are documented in this file. The format is ba
   primitives. `implement` / `auto` cover branch → code → PR end-to-end and set both `In Progress` and
   `In Review` board transitions; branch-naming and PR-linking conventions live in `github-conventions`,
   so nothing was orphaned. Consolidates Octoperator on its autonomous-first lifecycle.
+- `labels` setting (`types`, `priorities`, `default_priority`): `setup` wrote it but nothing read it.
+  The label taxonomy is fixed by `github-conventions`; the key is gone from the schema, `setup`, and
+  the example file.
 
 ### Fixed
 - Single-issue `implement` / `auto` no longer refuse every run after `setup`: the settings file and
@@ -67,6 +70,9 @@ All notable changes to Octoperator are documented in this file. The format is ba
   instead of re-picking held `ready` issues every run only for `implement` to reject them while they
   used up `--max` slots. The repo match is case-insensitive, and only issues that pass the
   label/mode filters are listed.
+- The `statuses` setting is now honored: every board write maps the logical status (`todo`,
+  `in_progress`, `in_review`, `blocked`, `done`) through it, so boards with differently named Status
+  options work as the README troubleshooting entry says. Previously every call passed literal names.
 
 ## [0.1.0] - 2026-06-23
 

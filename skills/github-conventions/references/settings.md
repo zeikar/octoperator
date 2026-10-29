@@ -32,20 +32,15 @@ reviewers:
   - alice
   - bob
 
-# Status field option names on the board, in flow order. Override only if the
-# board uses different names. Resolved case-insensitively against real options.
+# Status field option names on the board, in flow order. Every board write maps
+# the logical status through these keys (an unset key uses the default shown).
+# Override only if the board uses different names. Resolved case-insensitively.
 statuses:
   todo: Todo
   in_progress: In Progress
   in_review: In Review
   blocked: Blocked
   done: Done
-
-# Label taxonomy overrides (optional). Defaults match references/conventions.md.
-labels:
-  types: [epic, feature, bug, chore, docs]
-  priorities: [p0, p1, p2, p3]
-  default_priority: p2
 ---
 
 # Notes

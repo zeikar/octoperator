@@ -16,7 +16,7 @@ immediately unless `--dry-run` is passed, then echo the issue URL.
 ## Steps
 
 1. **Load settings.** Read `.claude/octoperator.local.md` for `repo`, `project_owner`,
-   `project_number`, `milestone`, and label defaults. Fall back to the current repo if the file is
+   `project_number`, `milestone`, and `statuses.todo` (default `Todo`). Fall back to the current repo if the file is
    absent (and skip the board step).
 
 2. **Draft the issue.** From the request, write:
@@ -35,7 +35,7 @@ immediately unless `--dry-run` is passed, then echo the issue URL.
    Capture the number/URL.
 
 6. **Add to the board.** If a project is configured, run
-   `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh --owner <project_owner> --project <number> --url <url> --status "Todo"`.
+   `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh --owner <project_owner> --project <number> --url <url> --status "<statuses.todo>"`.
 
 7. **Report.** Print the created issue number and URL.
 
