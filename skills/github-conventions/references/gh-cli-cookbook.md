@@ -153,6 +153,10 @@ uses `path:line` references — reliable and sufficient.
 Check the merge gate, then merge with a **regular merge commit** (never `--squash`/`--rebase`):
 
 ```bash
+# First wait (bounded) for running checks to settle — pending checks read as UNSTABLE/BLOCKED.
+# Exit code is informational only; the gate below decides.
+gh pr checks <pr#> --repo OWNER/NAME --watch --fail-fast --interval 30
+
 # Gate signal: merge only when mergeStateStatus is CLEAN (OPEN + not draft + mergeable +
 # required checks green + not blocked/behind). GitHub computes it async — re-query on UNKNOWN.
 gh pr view <pr#> --repo OWNER/NAME \
@@ -170,7 +174,8 @@ Merge ONLY when `state` is `OPEN`, `isDraft` is `false`, and `mergeStateStatus` 
 other state — `DIRTY` (conflicts), `BLOCKED` (protection/required checks unmet), `BEHIND` (needs
 update), `UNSTABLE` (a check failing/pending), `UNKNOWN` (still computing) — means do NOT merge; report
 the reason. `gh pr checks <pr#>` is informational only (it conflates required and optional checks), not
-the gate. `--merge` keeps every commit; do not substitute `--squash` or `--rebase`. The PR's
+the gate — `--watch` uses it only to wait, so give that call a bounded timeout and, if checks are still
+pending when it expires, let the gate hold the PR. `--merge` keeps every commit; do not substitute `--squash` or `--rebase`. The PR's
 `Closes #N` auto-closes the issue.
 
 ## Sync queries (read-only)

@@ -52,6 +52,7 @@ always-on knowledge layer.
 
 - **`octo-setup.sh`** — read-only probe used by `/octoperator:setup`: detect repo + default branch and whether the token can access Projects v2 (lists existing boards).
 - **`octo-worktree.sh`** — manage Git worktrees for parallel issue implementation (`add`, `remove`, `list`); used by `implement` to create and clean up per-issue worktrees.
+- **`octo-exclude.sh`** — idempotently add the settings file and `.octoperator/` (worktrees) to the repo-local `.git/info/exclude` so they never dirty `git status`; used by `setup` and `implement`.
 - **`octo-doctor.sh`** — verify auth/repo/project access and print the board's Status options.
 - **`octo-subissue.sh`** — link a child issue to its epic as a native sub-issue (falls back to a task list).
 - **`octo-project-status.sh`** — add an issue/PR to the board and set its Status by name.
@@ -88,7 +89,8 @@ use Projects v2, optionally creates or links a board, and writes the config:
 Projects v2 is **optional and auto-detected** — when no board is available or configured, Octoperator
 simply skips board status updates and everything else works unchanged.
 
-Prefer to configure by hand? Settings live in `.claude/octoperator.local.md` (git-ignored):
+Prefer to configure by hand? Settings live in `.claude/octoperator.local.md` (kept local-only —
+Octoperator adds it to `.git/info/exclude`, never your `.gitignore`):
 
 ```bash
 bash scripts/octo-doctor.sh --repo <owner>/<repo> [--project <number>]   # verify access

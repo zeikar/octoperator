@@ -58,7 +58,8 @@ If `--dry-run` is present, print the plan and STOP with no mutation:
   runs single-issue in-tree or in a parallel worktree (capped at `--max`). (Run the implement skill's
   own resolution/validation, steps that are reads-only, to produce this — but stop before mutating.)
 - **Review** — that each non-draft PR that would open is then reviewed (held PRs listed: drafts, no-PR).
-- **Merge** — the gate each PR must pass (`state OPEN`, not draft, `mergeStateStatus == CLEAN`) and that
+- **Merge** — the bounded wait for running checks, the gate each PR must pass (`state OPEN`, not draft,
+  `mergeStateStatus == CLEAN`), and that
   passing PRs merge with a **regular merge commit** (`--merge`, never squash/rebase).
 
 Do NOT implement, review, or merge under `--dry-run`. (`auto --dry-run` stops here rather than
@@ -93,8 +94,22 @@ so the human sees it.
 
 ### 5. Merge (gated, regular merge — preserve history)
 
-Merges run **serially**, one PR at a time (`--max` caps only the implement fan-out, not merging). For
-each reviewed PR, query its readiness:
+Merges run **serially**, one PR at a time (`--max` caps only the implement fan-out, not merging).
+
+**Wait for running checks first.** Review usually finishes while CI is still running, and pending
+checks read as `UNSTABLE`/`BLOCKED` — a hold — so reading the gate immediately would hold nearly every
+PR in a repo with CI. For each reviewed PR, block until its checks settle:
+
+```bash
+gh pr checks <pr#> --repo "$REPO" --watch --fail-fast --interval 30
+```
+
+Run it with an extended Bash timeout (e.g. 10 minutes). It returns once every check finishes, as
+soon as one fails, or immediately when the PR has no checks. Its exit code is informational only — the
+gate below still decides. If the timeout expires with checks still pending, stop waiting and let the
+gate hold the PR (reason: checks still pending).
+
+Then query its readiness:
 
 ```bash
 gh pr view <pr#> --repo "$REPO" \

@@ -196,7 +196,13 @@ or worktree. Follow this exact order:
 
 #### (a) Clean-tree guard
 
+First keep Octoperator's own local files (the settings file, `.octoperator/worktrees/`) out of
+`git status` — the target repo's `.gitignore` doesn't know about them, so without this the guard
+below would refuse every run after setup. It only edits the repo-local `.git/info/exclude`
+(idempotent, never committed):
+
 ```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-exclude.sh"
 git status --porcelain
 ```
 
@@ -383,10 +389,12 @@ them here.
 
 ### P1. Preflight (once, before any fan-out)
 
-Using `$DEFAULT` already resolved in step 2, fetch once so all worktrees start from the same base:
+Using `$DEFAULT` already resolved in step 2, fetch once so all worktrees start from the same base,
+and keep the in-repo worktree folder (and settings file) out of the main tree's `git status` (see 8a):
 
 ```bash
 git fetch origin "$DEFAULT"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-exclude.sh"
 ```
 
 Workers (subagents) must NOT run `git fetch` or `git pull` — the single preflight fetch is the
