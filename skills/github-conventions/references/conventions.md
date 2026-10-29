@@ -123,7 +123,8 @@ with `--match-head-commit`), and the PR is `OPEN`, not draft, with `mergeStateSt
 (GitHub's "ready to merge" — no conflicts, all required checks green, not blocked by protection,
 not behind). Any other state (`DIRTY` / `BLOCKED` / `BEHIND` / `UNSTABLE` / `UNKNOWN`) → do not
 merge; report the reason. Never force-merge. The PR's `Closes #N` auto-closes the issue; move its
-board item to `Done` afterward with `octo-project-status.sh ... --status "Done"`.
+board item to the mapped `done` status afterward with
+`octo-project-status.sh ... --status "<statuses.done>"`.
 
 ## Traceability matrix
 
