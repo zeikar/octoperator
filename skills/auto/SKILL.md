@@ -183,8 +183,9 @@ gh pr view <pr#> --repo "$REPO" --json mergeStateStatus --jq '.mergeStateStatus'
 ```
 
 Run each re-query as its own plain `gh` call, not a shell loop or `sleep`: those don't match the
-pre-allowed `Bash(gh:*)` prefix. Other compound commands in this skill have the same problem; #60
-tracks removing them.
+pre-allowed `Bash(gh:*)` prefix. There is no pause between attempts for now, so an `UNKNOWN` that
+persists is held; #60 restores the pause (via a helper script) and removes the other compound
+commands in this skill.
 
 When every condition holds, merge with a **regular merge commit** and delete the branch, pinned to
 the reviewed commit so a push that lands after the check cannot slip in unreviewed:
