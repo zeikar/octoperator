@@ -64,7 +64,9 @@ constraint. Octoperator is autonomous: post immediately unless `--dry-run` is pa
    then stop without posting.
 
 7. **Post the review.** Format the body as Markdown: a one-line verdict, then findings grouped by
-   severity with `path:line` references and suggested fixes. Post with the resolved action:
+   severity under the reviewer's own `### Blockers` / `### Major` / `### Minor` / `### Nits`
+   headings (minors and nits stay separate, so `auto` and the human see the same grouping), with
+   `path:line` references and suggested fixes. Post with the resolved action:
    ```bash
    gh pr review <pr#> --repo <repo> --comment         --body "<body>"   # or
    gh pr review <pr#> --repo <repo> --approve         --body "<body>"   # or
@@ -74,7 +76,7 @@ constraint. Octoperator is autonomous: post immediately unless `--dry-run` is pa
 8. **Report.** Print the **intended** verdict (step 5's resolution *before* the self-approval
    downgrade) alongside the posted action, the reviewed `headRefOid`, the count of findings by
    severity, and the PR URL. `auto` gates its merge on the intended verdict and the reviewed commit,
-   and hands the blocker/major findings to its fixer.
+   and hands the blocker/major/minor findings to its fixer.
 
 ## Notes
 
