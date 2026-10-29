@@ -54,12 +54,16 @@ Return Markdown in exactly this shape so the calling skill can post it:
 ### Major
 - `path:line` — <issue> — <suggested fix>
 
-### Minor / Nits
+### Minor
+- `path:line` — <issue> — <suggested fix>
+
+### Nits
 - `path:line` — <issue> — <suggested fix>
 ```
 
-Omit a severity section when it has no findings. If there are no findings at all, say so explicitly and
-set the verdict to `approve`.
+Keep minors and nits in their own sections — `auto` fixes minors but never nits, and tells them
+apart only by heading. Omit a severity section when it has no findings. If there are no findings at
+all, say so explicitly and set the verdict to `approve`.
 
 ## Quality standards
 

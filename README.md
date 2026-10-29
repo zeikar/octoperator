@@ -117,8 +117,9 @@ resolves them by name at call time. Full schema:
     (Closes #11), #11 → In Review
 
 /octoperator:auto 12 13
-  → issues #12–#13 implemented in parallel worktrees, reviewed (blocking findings fixed and
-    re-reviewed), and regular-merged when the review is non-blocking and the PR is CLEAN
+  → issues #12–#13 implemented in parallel worktrees, reviewed (blocker/major/minor findings
+    fixed and re-reviewed; nits left), and regular-merged when the review is non-blocking and
+    the PR is CLEAN
 
 /octoperator:review 20
   → structured review posted to PR #20 with a verdict

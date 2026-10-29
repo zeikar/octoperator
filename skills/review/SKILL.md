@@ -64,7 +64,9 @@ constraint. Octoperator is autonomous: post immediately unless `--dry-run` is pa
    then stop without posting.
 
 7. **Post the review.** Format the body as Markdown: a one-line verdict, then findings grouped by
-   severity with `path:line` references and suggested fixes. Post with the resolved action:
+   severity under the reviewer's own `### Blockers` / `### Major` / `### Minor` / `### Nits`
+   headings (minors and nits stay separate, so `auto` and the human see the same grouping), with
+   `path:line` references and suggested fixes. Post with the resolved action:
    ```bash
    gh pr review <pr#> --repo <repo> --comment         --body "<body>"   # or
    gh pr review <pr#> --repo <repo> --approve         --body "<body>"   # or
