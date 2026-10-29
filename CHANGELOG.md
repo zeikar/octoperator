@@ -91,9 +91,10 @@ All notable changes to Octoperator are documented in this file. The format is ba
   first.
 - `gh project list` / `field-list` calls pass an explicit `--limit 100`, so owners with more than 30
   boards, or boards with more than 30 fields, are no longer cut off.
-- Unattended runs no longer stall on permission prompts the skills could avoid: `implement`, `auto`,
-  and `autopilot` pre-allow Grep/Glob, and `auto`'s `UNKNOWN` mergeability re-query is plain `gh`
-  calls instead of a `for … sleep` loop. The README documents allowing the repo's test command.
+- Fewer permission prompts on unattended runs: `implement`, `auto`, and `autopilot` pre-allow
+  Grep/Glob, and `auto`'s `UNKNOWN` mergeability re-query is plain `gh` calls instead of a
+  `for … sleep` loop. The README documents allowing the repo's test command (plus `gh`/`git` for
+  subagents). Steps written as compound shell commands can still prompt; that's #60.
 
 ## [0.1.0] - 2026-06-23
 

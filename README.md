@@ -108,18 +108,29 @@ resolves them by name at call time. Full schema:
 
 ### Unattended runs
 
-`implement`, `auto`, and `autopilot` pre-allow the tools they use themselves — `gh`, `git`, the helper
-scripts, and Read/Grep/Glob/Edit/Write/Task — but not your repo's test command, which they run to
-verify each change. For a run that never stops on a permission prompt (e.g. `autopilot --mode full`),
-allow it in the target repo's `.claude/settings.json` (or `settings.local.json` to keep it personal):
+`implement`, `auto`, and `autopilot` pre-allow the tools they use themselves — `gh`, `git`, and
+`bash …` (which covers the helper scripts, and any `bash -c` command), plus
+Read/Grep/Glob/Edit/Write/Task. That does not yet make a run prompt-free: the `Bash(...)` rules
+match by command prefix and every part of a compound command must match, so steps that assign a
+variable or wrap a call in `if …; then` can still stop on a permission prompt. Removing those is tracked in
+[#60](https://github.com/zeikar/octoperator/issues/60).
+
+The skills also don't pre-allow your repo's test command, which they run to verify each change. To
+cut prompts on an unattended run (e.g. `autopilot --mode full`), allow it in the target repo's
+`.claude/settings.json` (or `settings.local.json` to keep it personal), together with `gh` and
+`git`:
 
 ```json
 {
   "permissions": {
-    "allow": ["Bash(npm test:*)"]
+    "allow": ["Bash(npm test:*)", "Bash(gh:*)", "Bash(git:*)"]
   }
 }
 ```
+
+The `gh`/`git` entries are there because the parallel path and `auto`'s fix loop run tests and
+`gh`/`git` calls inside `issue-implementer` subagents, and it isn't confirmed that a skill's
+pre-allowed tools reach a subagent; settings-file rules do (verification is part of #60).
 
 Use your repo's actual command — `Bash(pytest:*)`, `Bash(make test:*)`, `Bash(go test:*)`, …
 
