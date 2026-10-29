@@ -35,7 +35,7 @@ always-on knowledge layer.
 | **Plan & intake** | `/octoperator:plan-epic <request>` | Decompose a request into an epic + linked child issues, milestone, labels, board items |
 | | `/octoperator:issue <request>` | Create one well-formed issue (labels, acceptance criteria, milestone, board) |
 | **Autonomous lifecycle** | `/octoperator:implement <issue#...> [--max N] [--draft] [--dry-run]` | Implement one or more issues end-to-end: branch, code, test, and PR. Single issue runs in-tree; multiple issues run in parallel worktrees (up to `--max`, default 3) |
-| | `/octoperator:auto <issue#...> [--max N] [--dry-run]` | End-to-end lifecycle: implement → review → merge for one or more issues (regular merge, gated on CI + mergeable) |
+| | `/octoperator:auto <issue#...> [--max N] [--dry-run]` | End-to-end lifecycle: implement → review → merge for one or more issues. A blocking review triggers up to 6 fix → re-review rounds; merges (regular merge) only on a non-blocking review of the current head + CI green + mergeable |
 | | `/octoperator:autopilot [--mode semi\|full] [--cycles N] [--max M] [--dry-run]` | Bounded loop: discover work → `auto` (implement→review→merge) → when empty, `research` refills. `semi` builds only `ready` issues then proposes; `full` runs unattended to the cycle cap |
 | **Review & status** | `/octoperator:review <pr#>` | Run a structured review and post the verdict + findings to the PR |
 | | `/octoperator:sync` | Standup-style status report; auto-reconciles board drift |
@@ -117,7 +117,8 @@ resolves them by name at call time. Full schema:
     (Closes #11), #11 → In Review
 
 /octoperator:auto 12 13
-  → issues #12–#13 implemented in parallel worktrees, reviewed, and regular-merged when CLEAN
+  → issues #12–#13 implemented in parallel worktrees, reviewed (blocking findings fixed and
+    re-reviewed), and regular-merged when the review is non-blocking and the PR is CLEAN
 
 /octoperator:review 20
   → structured review posted to PR #20 with a verdict

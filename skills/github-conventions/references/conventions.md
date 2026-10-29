@@ -112,12 +112,14 @@ has no matching option, report it rather than guessing.
 
 Merge with a **regular merge commit** (`gh pr merge <pr#> --merge --delete-branch`) — never `--squash`
 or `--rebase`. A merge commit preserves the full per-commit history on the default branch (e.g. the
-per-task commits behind a feature). Gate the merge on a single authoritative signal: merge only when
-the PR is `OPEN`, not draft, and its `mergeStateStatus` is **`CLEAN`** (GitHub's "ready to merge" — no
-conflicts, all required checks green, not blocked by protection, not behind). Any other state
-(`DIRTY` / `BLOCKED` / `BEHIND` / `UNSTABLE` / `UNKNOWN`) → do not merge; report the reason. Never
-force-merge. The PR's `Closes #N` auto-closes the issue; move its board item to `Done` afterward with
-`octo-project-status.sh ... --status "Done"`.
+per-task commits behind a feature). Merge only when the latest Octoperator review's intended verdict is
+not `request_changes` (a blocking verdict first goes through `auto`'s bounded fix → re-review loop),
+that review covered the current head commit (pin it with `--match-head-commit`), and the PR is `OPEN`,
+not draft, with `mergeStateStatus` **`CLEAN`** (GitHub's "ready to merge" — no conflicts, all required
+checks green, not blocked by protection, not behind). Any other state (`DIRTY` / `BLOCKED` / `BEHIND` /
+`UNSTABLE` / `UNKNOWN`) → do not merge; report the reason. Never force-merge. The PR's `Closes #N`
+auto-closes the issue; move its board item to `Done` afterward with `octo-project-status.sh ...
+--status "Done"`.
 
 ## Traceability matrix
 

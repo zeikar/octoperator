@@ -157,13 +157,15 @@ Check the merge gate, then merge with a **regular merge commit** (never `--squas
 # Exit code is informational only; the gate below decides.
 gh pr checks <pr#> --repo OWNER/NAME --watch --fail-fast --interval 30
 
-# Gate signal: merge only when mergeStateStatus is CLEAN (OPEN + not draft + mergeable +
-# required checks green + not blocked/behind). GitHub computes it async — re-query on UNKNOWN.
+# Gate: the latest review's intended verdict is not request_changes, headRefOid is the commit that
+# review covered, and mergeStateStatus is CLEAN (OPEN + not draft + mergeable + required checks
+# green + not blocked/behind). GitHub computes it async — re-query on UNKNOWN.
 gh pr view <pr#> --repo OWNER/NAME \
-  --json state,isDraft,mergeStateStatus,closingIssuesReferences
+  --json headRefOid,state,isDraft,mergeStateStatus,closingIssuesReferences
 
-# When the gate passes (CLEAN) — regular merge commit (preserves full history) + delete branch:
-gh pr merge <pr#> --repo OWNER/NAME --merge --delete-branch
+# When the gate passes — regular merge commit (preserves full history) + delete branch, pinned to the
+# reviewed commit so a later push cannot merge unreviewed:
+gh pr merge <pr#> --repo OWNER/NAME --merge --delete-branch --match-head-commit <reviewed-sha>
 # On a non-zero exit, re-read the state: the merge may have landed and only the branch delete
 # failed. MERGED → success (report the error as cleanup); anything else → the merge failed.
 gh pr view <pr#> --repo OWNER/NAME --json state --jq '.state'
@@ -173,7 +175,8 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh --owner <owner> --proj
   --url <issue-url> --status "Done"
 ```
 
-Merge ONLY when `state` is `OPEN`, `isDraft` is `false`, and `mergeStateStatus` is **`CLEAN`**. Any
+Merge ONLY when the latest review's intended verdict is not `request_changes` and covered the current
+`headRefOid`, `state` is `OPEN`, `isDraft` is `false`, and `mergeStateStatus` is **`CLEAN`**. Any
 other state — `DIRTY` (conflicts), `BLOCKED` (protection/required checks unmet), `BEHIND` (needs
 update), `UNSTABLE` (a check failing/pending), `UNKNOWN` (still computing) — means do NOT merge; report
 the reason. `gh pr checks <pr#>` is informational only (it conflates required and optional checks), not

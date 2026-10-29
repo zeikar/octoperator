@@ -27,7 +27,8 @@ the mode gate, and the stop conditions. Follow `github-conventions` throughout.
   — this deliberately includes `ready`, `proposed`, AND unlabeled issues (full mode applies no label
   gate; that breadth is the point of "unattended"). When none remain, `research --create` refills the
   backlog and the loop builds those too — until the `--cycles` cap or a stop condition. **Merges land on
-  `main` with no human in the loop** (each still gated by `auto`'s `mergeStateStatus == CLEAN` check).
+  `main` with no human in the loop** (each still gated by `auto`'s non-blocking-review +
+  `mergeStateStatus == CLEAN` check).
   Because it will build any open issue, only use `full` on a repo whose open issues you are willing to
   ship unattended; use `semi` (the default) when you want the `ready` label to gate what gets built.
 
@@ -96,8 +97,9 @@ Select up to `--max` issues for this cycle (prefer issues whose predicted file s
 `auto`/`implement` isolate the rest in per-issue worktrees and warn on overlap). Run the **`auto`**
 procedure (`${CLAUDE_PLUGIN_ROOT}/skills/auto/SKILL.md`) on exactly those issue numbers, forwarding the
 parallelism cap — conceptually `auto <n1> <n2> … --max $M`. **Never forward `--dry-run` to `auto`**
-(autopilot's own dry-run gate in step 2 already stopped before this point). `auto` implements, reviews,
-and merges each (regular merge, gated on `CLEAN`).
+(autopilot's own dry-run gate in step 2 already stopped before this point). `auto` implements, reviews
+(running its fix → re-review loop on blocking findings), and merges each (regular merge, gated on a
+non-blocking review and `CLEAN`).
 
 **Mark every issue in the batch as attempted** (the attempt-once set from (a)), then record its outcome
 (`merged` / `held: <reason>`). Continue to the next cycle and re-discover (newly unblocked issues may
@@ -138,8 +140,9 @@ Never silently drop an issue; every issue touched appears in the summary.
 
 - Bounded by design: `--cycles` caps the run; re-invoke to continue. There is no unbounded mode.
 - `semi` is the default and never merges self-proposed work; `full` is opt-in and merges unattended —
-  every merge still passes `auto`'s `CLEAN` gate, and nothing is force-merged.
-- Held PRs (conflicts, failing/pending checks, drafts) are left open for the human — autopilot does not
+  every merge still passes `auto`'s review + `CLEAN` gate, and nothing is force-merged.
+- Held PRs (conflicts, failing/pending checks, drafts, reviews still blocking after `auto`'s fix
+  rounds) are left open for the human — autopilot does not
   resolve conflicts, rebase stale branches, or override branch protection.
 - Autopilot does not modify its own control-loop skills (`autopilot`, `auto`, `research`, `implement`,
   `review`, `github-conventions`), tag releases, or operate across repos. In `full` mode especially,
