@@ -196,7 +196,7 @@ gh project item-list <number> --owner <owner> --format json
 gh api repos/OWNER/NAME/milestones --jq '.[] | {title, open_issues, closed_issues, due_on}'
 ```
 
-## Reconcile drift (sync-status auto-reconcile)
+## Reconcile drift (sync auto-reconcile)
 
 For each merged PR whose `closingIssuesReferences` issue is not yet `Done` on the board, move it:
 

@@ -81,7 +81,7 @@ regardless of the linking mechanism.
 ## Milestones
 
 - Milestones represent releases or time-boxes (e.g. `v0.2`, `Sprint 14`), not epics.
-- `plan-epic` and `create-issue` assign the configured default milestone when one is set in settings,
+- `plan-epic` and `issue` assign the configured default milestone when one is set in settings,
   unless the request names a different milestone.
 - Do not conflate a milestone with an epic; an epic groups *related* work, a milestone groups work
   *shipping together*.
