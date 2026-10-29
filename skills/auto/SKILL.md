@@ -2,7 +2,7 @@
 name: auto
 description: This skill should be used when the user asks to "auto-ship issue #N", "ship issue 42 end to end", "implement review and merge issue N", "fully automate issue 42", "implement and merge these issues", or invokes /octoperator:auto. Runs the full lifecycle for one or more GitHub issues end-to-end — implement, review, then merge — autonomously.
 argument-hint: "<issue-number...> [--max N] [--dry-run]"
-allowed-tools: Bash(gh:*), Bash(git:*), Bash(bash:*), Read, Edit, Write, Task
+allowed-tools: Bash(gh:*), Bash(git:*), Bash(bash:*), Read, Grep, Glob, Edit, Write, Task
 version: 0.1.0
 ---
 
@@ -175,16 +175,15 @@ HOLD (do not merge) and report the reason:
 | `UNSTABLE` | a status check is failing or still pending (CI not green) |
 | `UNKNOWN` | GitHub is still computing mergeability (see retry below) |
 
-Because GitHub computes mergeability asynchronously, an immediate query can return `UNKNOWN`. Re-query
-up to twice with a short pause before treating a non-`CLEAN` result as final:
+Because GitHub computes mergeability asynchronously, an immediate query can return `UNKNOWN`. While
+it does, re-run this query up to twice more before treating a non-`CLEAN` result as final:
 
 ```bash
-for i in 1 2; do
-  MS=$(gh pr view <pr#> --repo "$REPO" --json mergeStateStatus --jq '.mergeStateStatus')
-  [ "$MS" != "UNKNOWN" ] && break
-  sleep 10
-done
+gh pr view <pr#> --repo "$REPO" --json mergeStateStatus --jq '.mergeStateStatus'
 ```
+
+Run each re-query as its own plain `gh` call: a shell loop or `sleep` falls outside the skill's
+pre-allowed `Bash(gh:*)` and would stall an unattended run on a permission prompt.
 
 When every condition holds, merge with a **regular merge commit** and delete the branch, pinned to
 the reviewed commit so a push that lands after the check cannot slip in unreviewed:

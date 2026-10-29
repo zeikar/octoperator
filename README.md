@@ -106,6 +106,23 @@ Only `repo` (or a discoverable current repo) is required; board operations addit
 resolves them by name at call time. Full schema:
 [`skills/github-conventions/references/settings.md`](skills/github-conventions/references/settings.md).
 
+### Unattended runs
+
+`implement`, `auto`, and `autopilot` pre-allow the tools they use themselves — `gh`, `git`, the helper
+scripts, and Read/Grep/Glob/Edit/Write/Task — but not your repo's test command, which they run to
+verify each change. For a run that never stops on a permission prompt (e.g. `autopilot --mode full`),
+allow it in the target repo's `.claude/settings.json` (or `settings.local.json` to keep it personal):
+
+```json
+{
+  "permissions": {
+    "allow": ["Bash(npm test:*)"]
+  }
+}
+```
+
+Use your repo's actual command — `Bash(pytest:*)`, `Bash(make test:*)`, `Bash(go test:*)`, …
+
 ## Usage example
 
 ```text
