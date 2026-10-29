@@ -83,6 +83,7 @@ time via `octo-project-status.sh`.
 
 ## Security
 
-- The file may name internal repos, project numbers, and reviewers; it is git-ignored by the
-  plugin's `.gitignore` (`.claude/*.local.md`). Never commit it.
+- The file may name internal repos, project numbers, and reviewers. The target repo's `.gitignore`
+  doesn't cover it, so `setup` and `implement` add it (and `.octoperator/`) to the repo-local
+  `.git/info/exclude` via `octo-exclude.sh`. Never commit it.
 - No tokens are stored here — authentication is delegated entirely to `gh auth`.

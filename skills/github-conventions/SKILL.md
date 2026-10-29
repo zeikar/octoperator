@@ -67,7 +67,7 @@ verify auth, repo access, project access, and to print the board's Status option
 
 ## Settings
 
-Per-project configuration lives in `.claude/octoperator.local.md` (git-ignored), parsed as YAML
+Per-project configuration lives in `.claude/octoperator.local.md` (local-only, via `.git/info/exclude`), parsed as YAML
 frontmatter. Read it at the start of every action to resolve the target repo, project, labels,
 milestone, branch pattern, and reviewers. If it is missing, fall back to the current repo
 (`gh repo view --json nameWithOwner`) and tell the user how to create it.

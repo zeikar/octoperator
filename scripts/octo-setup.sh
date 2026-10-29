@@ -13,10 +13,12 @@
 set -uo pipefail
 
 REPO="" POWNER=""
+# No `set -e` here, so a failed `shift 2` (flag given without a value) would loop forever.
+need_value() { [ $# -ge 2 ] || { echo "{\"error\":\"missing value for $1\"}"; exit 2; }; }
 while [ $# -gt 0 ]; do
   case "$1" in
-    --repo)  REPO="${2:-}"; shift 2 ;;
-    --owner) POWNER="${2:-}"; shift 2 ;;
+    --repo)  need_value "$@"; REPO="$2"; shift 2 ;;
+    --owner) need_value "$@"; POWNER="$2"; shift 2 ;;
     -h|--help) grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "{\"error\":\"unknown argument: $1\"}"; exit 2 ;;
   esac

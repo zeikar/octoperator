@@ -38,6 +38,16 @@ All notable changes to Octoperator are documented in this file. The format is ba
   `In Review` board transitions; branch-naming and PR-linking conventions live in `github-conventions`,
   so nothing was orphaned. Consolidates Octoperator on its autonomous-first lifecycle.
 
+### Fixed
+- Single-issue `implement` / `auto` no longer refuse every run after `setup`: the settings file and
+  `.octoperator/worktrees/` were untracked in the target repo (only Octoperator's own `.gitignore`
+  covered them) and tripped the clean-tree guard. New `octo-exclude.sh` adds both to the repo-local
+  `.git/info/exclude`; `setup` and `implement` run it.
+- `octo-setup.sh` looped forever when `--repo` / `--owner` was passed without a value; it now exits 2
+  with a JSON error.
+- `auto` now waits (bounded) for running CI checks before reading the merge gate, instead of holding
+  nearly every PR as `UNSTABLE`/`BLOCKED` because review finished before CI did.
+
 ## [0.1.0] - 2026-06-23
 
 ### Added

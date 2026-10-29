@@ -41,7 +41,8 @@ Follow the `github-conventions` skill for the settings schema
 4. **Write settings.** Write `.claude/octoperator.local.md` (Write tool) using the schema from
    `references/settings.md`: always include `repo`, `branch_pattern`, `statuses`, and `labels`; include
    `project_owner`/`project_number`/`project_url` only when a board was resolved. Keep it minimal and
-   commented.
+   commented. Then run `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-exclude.sh` so the file (and future
+   `.octoperator/worktrees/`) stays out of `git status` via the repo-local `.git/info/exclude`.
 
 5. **Offer label bootstrap.** Ask whether to ensure the Octoperator labels now; if yes, run the
    "ensure labels" recipe from the cookbook (idempotent `gh label create --force`).
@@ -51,8 +52,9 @@ Follow the `github-conventions` skill for the settings schema
 
 ## Notes
 
-- This skill writes one local file and (only on request) creates a board / ensures labels — it makes no
-  other changes. The settings file is git-ignored (`.claude/*.local.md`).
+- This skill writes one local file, adds local-only entries to `.git/info/exclude`, and (only on
+  request) creates a board / ensures labels — it makes no other changes. The target repo's tracked
+  `.gitignore` is never edited.
 - Never probe Projects **write** access by attempting to create a throwaway board; rely on the
   read probe in `octo-setup.sh` and create a board only when the user opts in.
 - Re-running setup is safe: it updates the existing settings file in place after confirmation.
