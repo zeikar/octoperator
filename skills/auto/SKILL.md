@@ -103,14 +103,17 @@ per PR, stopping as soon as a review comes back non-blocking:
 3. **Act on its status** — and only on `error` keep the worktree (print the path; it may hold
    unpushed commits); otherwise remove it with `git worktree remove --force "<recorded FIX_WT path>"`:
    - `fixed` → re-run the review flow on the new head (a fresh review checkout, a new posted review)
-     and loop.
-   - `no-changes` → hold (reason: fixer made no changes — the findings may need a human call).
-   - `tests-failed` → hold (reason: tests fail after fix round N); the attempt stays pushed for the
-     human to see.
+     and loop. The re-review's `headRefOid` must equal the fixer's pushed `Commit`; GitHub can lag
+     briefly, so re-query once on a mismatch, and hold (reason: PR head does not match the fix push)
+     if it still differs — otherwise the old commit would be re-reviewed.
+   - `no-changes` → hold (reason: fixer made no changes: <its `Failure reason`>).
+   - `tests-failed` → hold (reason: tests fail after fix round N: <its `Failure reason`, which carries
+     the failure tail>); the attempt stays pushed for the human to see.
    - `error` → hold with the failure reason.
 
 If the 6th fix round's re-review is still `request_changes`, hold the PR (reason: review still blocking
-after 6 fix rounds). Every held PR's outstanding blocker/major findings go into the report. Only PRs
+after 6 fix rounds). Every held PR's outstanding blocker/major findings, and the fixer's last `Failure reason`, go into
+the report. Only PRs
 whose **latest** intended verdict is `approve` or `comment` continue to the merge step, together with
 the `headRefOid` that review covered.
 
@@ -224,7 +227,8 @@ Print a per-issue table — every input issue appears, nothing silently dropped:
 | `#45` | `<url>` | `request_changes` (6 fix rounds) | `held: review still blocking` | `In Review` |
 
 The Review column shows the latest **intended** verdict and how many fix rounds ran. Under the table,
-list each review-held PR's outstanding blocker/major findings (`path:line` — issue).
+list each review-held PR's outstanding blocker/major findings (`path:line` — issue) and the fixer's
+last `Failure reason`.
 
 The Board column reflects the **current** status (only `Done` is written by `auto`; `In Review` /
 `In Progress` were set earlier by the implement phase).

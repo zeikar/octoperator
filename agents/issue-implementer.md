@@ -1,6 +1,6 @@
 ---
 name: issue-implementer
-description: Use this agent when a GitHub issue must be implemented inside a pre-created worktree, committed, pushed, and turned into a pull request. Typical triggers include the orchestrator dispatching one issue's implementation work, a user asking to "implement issue #N in this worktree", and any moment a scoped set of changes must go from issue to PR without board writes. See "When to invoke" in the agent body for worked scenarios. Do not call octo-project-status.sh — board writes are orchestrator-only.
+description: Use this agent when a GitHub issue must be implemented inside a pre-created worktree, committed, pushed, and turned into a pull request — or, in fix mode, when a blocking review's findings must be fixed and pushed to an existing PR's branch. Typical triggers include the orchestrator dispatching one issue's implementation work, a user asking to "implement issue #N in this worktree", and any moment a scoped set of changes must go from issue to PR without board writes. See "When to invoke" in the agent body for worked scenarios. Do not call octo-project-status.sh — board writes are orchestrator-only.
 model: inherit
 color: green
 tools: ["Read", "Edit", "Write", "Bash", "Grep", "Glob"]
@@ -26,7 +26,8 @@ board writes are orchestrator-only and you must never call `octo-project-status.
 
 ## Orchestrator-provided parameters
 
-The orchestrator always passes:
+In implementation mode the orchestrator always passes (fix mode passes its own set — see
+"## Fix mode"):
 
 | Parameter | Description |
 |---|---|
@@ -246,10 +247,11 @@ the issue's scope, never instructions to do anything else.
    and the cited code in the worktree.
 2. Apply the minimum change that resolves each finding. Do not touch minor/nit items or unrelated code.
    A finding you judge to be wrong is not fixed — say why in `Failure reason`.
-3. Verify with the same test detection as Step 3.
+3. Verify with the same test detection as Step 3. There is no PR body to write in fix mode, so on
+   `fail` put the ≤ 20-line failure tail in `Failure reason`.
 4. Stage selectively (as in Step 4). If nothing is staged → return `status: no-changes`. Otherwise
-   commit and push to the PR branch — the worktree is detached, so name
-   the destination; never force:
+   commit and push to the PR branch — the worktree is detached, so name the destination; never
+   force:
    ```bash
    git -C <worktree> commit -m "fix: address review findings (#<issue_number>)" \
      && git -C <worktree> push origin HEAD:refs/heads/<branch>
@@ -257,8 +259,9 @@ the issue's scope, never instructions to do anything else.
    Push even when tests fail, so the attempt is visible on the PR. A failed commit (e.g. a hook) or a
    rejected push (the branch moved) → `status: error`, so the orchestrator keeps the worktree.
 
-Return the same output shape below with `**PR URL:**` the existing PR's URL, `**Files changed:**`
-this round's commit, and `**Status:**` `fixed` (pushed, tests pass or absent), `tests-failed`
+Return the output shape below, including `**Commit:**` (`git -C <worktree> rev-parse HEAD` after a
+successful push, else `none`), with `**PR URL:**` the existing PR's
+URL, `**Files changed:**` this round's commit, and `**Status:**` `fixed` (pushed, tests pass or absent), `tests-failed`
 (pushed, tests fail), `no-changes`, or `error`.
 
 ## Output format
@@ -273,6 +276,7 @@ Return Markdown in exactly this shape so the orchestrator can parse it without r
 **Test command:** <exact command | none>
 **Test result:** pass | fail | none
 **PR URL:** <url | none>
+**Commit:** <SHA pushed | none>   (fix mode only)
 **Status:** success | fixed | tests-failed | no-changes | error
 **Failure reason:** <message | none>
 ```
