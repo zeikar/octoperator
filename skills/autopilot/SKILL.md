@@ -54,9 +54,9 @@ Parse and validate flags:
 ### 2. Dry-run gate (BEFORE any mutation)
 
 If `--dry-run`, print the plan and STOP with no mutation: the mode, the resolved cycle cap, and the
-current actionable-issue set it would discover (per the mode's label filter), noting that each batch
-would run through `auto` (implement → review → merge) with `research` refilling the backlog per the
-mode. Defer the merge-gate specifics to `auto`. Mutate nothing.
+current actionable-issue set it would discover (per step 3a's filters, listing issues skipped for an
+open PR), noting that each batch would run through `auto` (implement → review → merge) with
+`research` refilling the backlog per the mode. Defer the merge-gate specifics to `auto`. Mutate nothing.
 
 ### 3. The loop (repeat up to `--cycles` times)
 
@@ -76,12 +76,19 @@ For each cycle `c` from 1 to `--cycles`:
 
 ```bash
 gh issue list --repo "$REPO" --state open --json number,title,labels --limit 100
+# Issues an open PR already closes, as "<issue#> <pr#>" lines — same-repo references only
+# (gh's --jq has no --arg, so the repo reaches the filter through the environment):
+REPO="$REPO" gh pr list --repo "$REPO" --state open --limit 200 \
+  --json number,closingIssuesReferences \
+  --jq '.[] | .number as $pr | .closingIssuesReferences[]
+        | select(.repository.owner.login + "/" + .repository.name == env.REPO)
+        | "\(.number) \($pr)"'
 ```
 
 From the open issues, always exclude any labeled `status:blocked` (the project's blocked-status
 convention — also exclude a plain `blocked` label if a repo uses one) or `epic` (not directly
-buildable) **and any
-issue already attempted earlier in this run** (autopilot attempts each issue **at most once per run** —
+buildable), **any issue an open PR already closes** (`implement` would reject it, and it would burn
+a `--max` slot — record it with its PR number for the report), **and any issue already attempted earlier in this run** (autopilot attempts each issue **at most once per run** —
 see (b); an issue it already tried and left `held` will not merge on a bare retry, so it is left for the
 human and never re-attempted this run). Then filter by mode:
 - **semi:** keep only issues labeled **`ready`**.
@@ -129,7 +136,8 @@ Run the **`research`** procedure (`${CLAUDE_PLUGIN_ROOT}/skills/research/SKILL.m
 ### 5. Report
 
 Print a per-cycle summary and an overall result:
-- per cycle: issues attempted, `merged` vs `held: <reason>`, and any `research` proposals filed (URLs);
+- per cycle: issues attempted, `merged` vs `held: <reason>`, issues skipped because an open PR already
+  closes them (`#<issue> → PR #<pr>`), and any `research` proposals filed (URLs);
 - overall: total merged, total held (with reasons), proposed issues awaiting triage, cycles consumed
   vs the cap, and the **next action** (semi: "relabel proposed → ready, then re-run autopilot"; full:
   "re-run to continue, or inspect held PRs").
