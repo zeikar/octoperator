@@ -43,7 +43,8 @@ does not count.
 
 ### 1. Load settings & parse flags
 
-Read `.claude/octoperator.local.md` for `repo` (fall back to `gh repo view`). Resolve `REPO` once.
+Read `.claude/octoperator.local.md` for `repo` (fall back to `gh repo view`) and `branch_pattern`
+(default `{number}-{slug}`). Resolve `REPO` once.
 Parse and validate flags:
 - `--mode` ∈ {`semi`, `full`} (default `semi`; reject any other value).
 - `--cycles N` — hard cap on loop iterations (default `3`, **hard maximum `10`**). Always finite. If a
@@ -76,27 +77,34 @@ For each cycle `c` from 1 to `--cycles`:
 
 ```bash
 gh issue list --repo "$REPO" --state open --json number,title,labels --limit 100
-# Issues an open PR already closes, as "<issue#> <pr#>" lines — same-repo references only
-# (gh's --jq has no --arg, so the repo reaches the filter through the environment):
+# Open PRs as "<pr#> <headRefName> <closed issue#,…>" lines — closing references from this repo
+# only, compared case-insensitively since GitHub names are (gh's --jq has no --arg, so the repo
+# reaches the filter through the environment):
 REPO="$REPO" gh pr list --repo "$REPO" --state open --limit 200 \
-  --json number,closingIssuesReferences \
-  --jq '.[] | .number as $pr | .closingIssuesReferences[]
-        | select(.repository.owner.login + "/" + .repository.name == env.REPO)
-        | "\(.number) \($pr)"'
+  --json number,headRefName,closingIssuesReferences \
+  --jq '.[] | "\(.number) \(.headRefName) " + ([.closingIssuesReferences[]
+        | select((.repository.owner.login + "/" + .repository.name | ascii_downcase)
+                 == (env.REPO | ascii_downcase))
+        | .number | tostring] | join(","))'
 ```
 
 From the open issues, always exclude any labeled `status:blocked` (the project's blocked-status
 convention — also exclude a plain `blocked` label if a repo uses one) or `epic` (not directly
-buildable), **any issue an open PR already closes** (`implement` would reject it, and it would burn
-a `--max` slot — record it with its PR number for the report), **and any issue already attempted earlier in this run** (autopilot attempts each issue **at most once per run** —
-see (b); an issue it already tried and left `held` will not merge on a bare retry, so it is left for the
-human and never re-attempted this run). Then filter by mode:
+buildable) **and any issue already attempted earlier in this run** (autopilot attempts each issue
+**at most once per run** — see (b); an issue it already tried and left `held` will not merge on a bare
+retry, so it is left for the human and never re-attempted this run). Then filter by mode:
 - **semi:** keep only issues labeled **`ready`**.
 - **full:** keep everything else — `ready`, `proposed`, and unlabeled issues alike (full mode applies no
   label gate, exactly as the Modes section states).
 
 This attempt-once rule guarantees forward progress: every cycle either merges new work, files new
 proposals, or hits a stop condition — the loop cannot spin on the same issue.
+
+Finally, of the issues still kept, skip any an open PR already holds — the PR closes it, or its
+`headRefName` equals the branch `implement` would compute for it (its step 4, honoring
+`branch_pattern`). These are `implement`'s own rejection rules, so picking one would only burn a
+`--max` slot. Record each as `#<issue> → PR #<pr>` for the report; only issues that passed the filters
+above are recorded, so semi mode never lists a non-`ready` issue it would not have picked anyway.
 
 **(b) If actionable issues exist → ship a batch with `auto`.**
 
@@ -137,7 +145,8 @@ Run the **`research`** procedure (`${CLAUDE_PLUGIN_ROOT}/skills/research/SKILL.m
 
 Print a per-cycle summary and an overall result:
 - per cycle: issues attempted, `merged` vs `held: <reason>`, issues skipped because an open PR already
-  closes them (`#<issue> → PR #<pr>`), and any `research` proposals filed (URLs);
+  holds them (closes them or uses their branch; `#<issue> → PR #<pr>`), and any `research` proposals
+  filed (URLs);
 - overall: total merged, total held (with reasons), proposed issues awaiting triage, cycles consumed
   vs the cap, and the **next action** (semi: "relabel proposed → ready, then re-run autopilot"; full:
   "re-run to continue, or inspect held PRs").
