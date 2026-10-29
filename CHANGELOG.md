@@ -17,9 +17,10 @@ All notable changes to Octoperator are documented in this file. The format is ba
   rounds, fixes applied by `issue-implementer` in fix mode on the PR branch. A blocking review
   (`request_changes`, the intended verdict before the self-approval COMMENT downgrade) blocks the
   merge, and a PR still blocking after the last round is held with its outstanding findings; minors
-  are fixed before merging but never hold a PR, and any left over are reported. Nits are not fixed. Merges use a regular merge commit (history preserved), are pinned to
-  the reviewed commit (`--match-head-commit`), and are gated on the PR being mergeable with passing
-  required checks.
+  are fixed before merging; leftover minors (fixer `no-changes` or the round cap) never hold a PR and
+  are reported, but a failed fix attempt still does. Nits are not fixed. Merges use a regular merge
+  commit (history preserved), are pinned to the reviewed commit (`--match-head-commit`), and are
+  gated on the PR being mergeable with passing required checks.
 - `research` skill (`/octoperator:research`): analyze the repo and produce a ranked list of proposed
   work balanced across categories — new features, refactoring, tech debt, test coverage, docs, and DX
   (not just features) — with a `--focus` flag to bias a run; with `--create`, file the top ones as
