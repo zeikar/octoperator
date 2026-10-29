@@ -34,7 +34,7 @@ In implementation mode the orchestrator always passes (fix mode passes its own s
 | `issue_number` | GitHub issue number (e.g. `42`) |
 | `issue_title` | Issue title string |
 | `repo` | `owner/name` (e.g. `acme/myapp`) |
-| `default_branch` | Name of the repo's default branch (e.g. `main`) — used for `gh pr create --base` and `--head` |
+| `default_branch` | Name of the repo's default branch (e.g. `main`) — used for `gh pr create --base` (`--head` is `branch`) |
 | `rev_base` | `origin/<default_branch>` rev expression for `rev-list` counts |
 | `branch` | Feature branch name (e.g. `42-add-oauth-login`) |
 | `worktree` | Absolute path to the pre-created worktree |
@@ -222,7 +222,8 @@ is not permitted). If all entries are self, omit `--reviewer` entirely.
 - Include a `## Summary` section describing the changes.
 - Include a `## Test status` line reporting command + result **regardless of outcome**.
 - Add one `--reviewer <user>` flag per configured reviewer; skip self (do not add yourself as a reviewer).
-- Do NOT run `pr`'s "In Review" board step. Do NOT call `octo-project-status.sh`.
+- Do NOT write board status (e.g. "In Review"). Do NOT call `octo-project-status.sh` — the
+  orchestrator does.
 
 If push or PR creation fails, return `status: error` with the failure reason and leave the worktree
 intact so the orchestrator can recover.

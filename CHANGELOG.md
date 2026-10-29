@@ -96,6 +96,9 @@ All notable changes to Octoperator are documented in this file. The format is ba
   `for … sleep` loop, with no pause between attempts for now (a persistent `UNKNOWN` is held). The
   README documents allowing the repo's test command (plus `gh`/`git` for subagents). Steps written
   as compound shell commands can still prompt; #60 removes them and restores the re-query pause.
+- Stale names left over from renames/removals: `review-pr` → `review`, `create-issue` → `issue`,
+  `sync-status` → `sync`, and `issue-implementer`'s reference to the removed `pr` skill. README now
+  has a marketplace install line and no longer claims `setup` takes `--dry-run`.
 
 ## [0.1.0] - 2026-06-23
 

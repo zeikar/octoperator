@@ -45,8 +45,8 @@ always-on knowledge layer.
 ### Agents
 
 - **`issue-planner`** — decomposes a request into an epic + well-scoped child issues (used by `plan-epic`). Read-only; proposes structure.
-- **`issue-implementer`** — implements a single issue inside a pre-created worktree, commits, pushes, and opens a PR (dispatched by `implement` for each parallel issue). Never writes to the project board.
-- **`pr-reviewer`** — produces a structured, actionable PR review with a verdict (used by `review-pr`). Read-only; the skill posts the result.
+- **`issue-implementer`** — implements a single issue inside a pre-created worktree, commits, pushes, and opens a PR (dispatched by `implement` for each parallel issue); in fix mode, fixes review findings on an existing PR for `auto`. Never writes to the project board.
+- **`pr-reviewer`** — produces a structured, actionable PR review with a verdict (used by `review` and `auto`). Read-only; the skill posts the result.
 
 ### Helper scripts (`scripts/`)
 
@@ -75,7 +75,12 @@ Local development / trial:
 claude --plugin-dir /path/to/octoperator
 ```
 
-Or install via a marketplace that lists Octoperator, then enable it in Claude Code.
+Or install from this repo's marketplace inside Claude Code:
+
+```text
+/plugin marketplace add zeikar/octoperator
+/plugin install octoperator@zeikar-plugins
+```
 
 ## Configuration
 
@@ -156,7 +161,7 @@ Use your repo's actual command — `Bash(pytest:*)`, `Bash(make test:*)`, `Bash(
   → standup report; merged-PR issues auto-moved to Done
 ```
 
-Append `--dry-run` to any command to preview without writing to GitHub.
+Every skill except `setup` accepts `--dry-run` to preview without writing to GitHub.
 
 ## Conventions
 
