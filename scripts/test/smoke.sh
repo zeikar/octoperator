@@ -6,9 +6,11 @@
 #   - bash -n <script>     : the script parses (no syntax errors)
 #   - <script> --help      : exits 0 and prints usage
 #   - <script> --bogus     : exits 2 (unknown-argument handling)
+#   - --help output        : only the header usage block (no later comments / directives)
 #
-#   - octo-setup.sh --repo : a missing flag value exits 2 instead of hanging
+#   - <script> <flag>      : a value flag given last, with no value, exits 2 (never hangs)
 #   - octo-exclude.sh      : run for real against a throwaway local `git init` repo
+#   - octo-worktree.sh     : add / list / remove run for real in a throwaway local repo
 #
 # It deliberately never invokes a helper in a way that reaches gh / the network.
 # Exits 0 when every check passes, 1 when any check fails.
@@ -30,6 +32,13 @@ expect() {
   if [ "$rc" -eq "$wanted" ]; then ok "$label (exit $rc)"; else no "$label (wanted $wanted, got $rc)"; fi
 }
 
+# help_is_header <script> : --help prints exactly the leading comment block (after the shebang, up
+# to the first non-comment line) and that block has a Usage section — no later comments leak in.
+help_is_header() {
+  header="$(awk 'NR == 1 { next } !/^#/ { exit } { sub(/^# ?/, ""); print }' "$1")"
+  [ "$(bash "$1" --help 2>/dev/null)" = "$header" ] && printf '%s\n' "$header" | grep -Fq 'Usage:'
+}
+
 shopt -s nullglob
 scripts=("$SCRIPTS_DIR"/octo-*.sh)
 if [ "${#scripts[@]}" -eq 0 ]; then
@@ -42,19 +51,29 @@ for s in "${scripts[@]}"; do
   expect 0 "syntax (bash -n)"    bash -n "$s"
   expect 0 "--help exits 0"      bash "$s" --help
   expect 2 "unknown arg exits 2" bash "$s" --octo-smoke-bogus-arg
+  expect 0 "--help shows the usage block only" help_is_header "$s"
 done
 
 # bounded <seconds> <command...> : SIGALRM-kill a hung command (macOS has no `timeout`).
 bounded() { perl -e '$t = shift; alarm $t; exec @ARGV' "$@"; }
 
-echo "• octo-setup.sh (arg parsing)"
-# A trailing flag with no value must fail fast, not spin on a failed `shift 2`.
-expect 2 "missing --repo value exits 2" bounded 10 bash "$SCRIPTS_DIR/octo-setup.sh" --repo
+echo "• missing flag value (arg parsing)"
+# A trailing flag with no value must exit 2 — not spin on a failed `shift 2` (no `set -e`) nor
+# die with a silent exit 1 (`set -e`). Each fails during parsing, before any gh / git call.
+expect 2 "octo-setup.sh --repo exits 2"           bounded 10 bash "$SCRIPTS_DIR/octo-setup.sh" --repo
+expect 2 "octo-doctor.sh --repo exits 2"          bounded 10 bash "$SCRIPTS_DIR/octo-doctor.sh" --repo
+expect 2 "octo-subissue.sh --child exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-subissue.sh" --repo o/n --parent 1 --child
+expect 2 "octo-project-status.sh --status exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-project-status.sh" --owner o --project 1 --status
+expect 2 "octo-worktree.sh add --base exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-worktree.sh" add --branch b --base
 
 echo "• octo-exclude.sh (offline, temp repo)"
 # No `set -e`: bail out explicitly, or an empty $tmp would point git/cd at the real checkout.
 tmp="$(mktemp -d)" && [ -n "$tmp" ] || { echo "smoke: mktemp failed" >&2; exit 1; }
-trap 'rm -rf "$tmp"' EXIT
+wtmp="$(mktemp -d)" && [ -n "$wtmp" ] || { echo "smoke: mktemp failed" >&2; rm -rf "$tmp"; exit 1; }
+trap 'rm -rf "$tmp" "$wtmp"' EXIT
 git -C "$tmp" init -q || { echo "smoke: git init failed in $tmp" >&2; exit 1; }
 mkdir -p "$tmp/.claude" "$tmp/.octoperator/worktrees/1-x"
 touch "$tmp/.claude/octoperator.local.md" "$tmp/.octoperator/worktrees/1-x/f"
@@ -65,6 +84,36 @@ expect 0 "second run exits 0" exclude_in_tmp
 expect 0 "octoperator files hidden from status" test -z "$(git -C "$tmp" status --porcelain)"
 expect 0 "idempotent (one entry each)" test "$(grep -Fxc -e /.claude/octoperator.local.md -e /.octoperator/ "$tmp/.git/info/exclude")" -eq 2
 expect 0 "existing entry preserved" grep -Fqx '*.swp' "$tmp/.git/info/exclude"
+
+echo "• octo-worktree.sh (offline, temp repo)"
+repo="$wtmp/repo"
+wt="$wtmp/wt-1"
+# Pin identity / signing / hooks so a developer's global git config cannot break the fixture.
+if ! { git init -q "$repo" \
+       && git -C "$repo" -c user.name=smoke -c user.email=smoke@example.invalid \
+            -c commit.gpgsign=false commit -q --no-verify --allow-empty -m init; }; then
+  echo "smoke: could not create a commit in $repo" >&2; exit 1
+fi
+worktree() { (cd "$repo" && bash "$SCRIPTS_DIR/octo-worktree.sh" "$@"); }
+out="$(worktree add --branch 1-smoke --path "$wt" --base HEAD 2>/dev/null)"
+add_rc=$?
+expect 0 "add exits 0" test "$add_rc" -eq 0
+expect 0 "add creates the tree" test -d "$wt"
+# The contract is "prints the path": git's "HEAD is now at …" must not leak onto stdout.
+expect 0 "add prints only the path on stdout" test "$out" = "$wt"
+expect 0 "add creates the branch" git -C "$repo" show-ref --verify --quiet refs/heads/1-smoke
+expect 1 "add again (branch taken) exits 1" worktree add --branch 1-smoke --path "$wtmp/wt-2" --base HEAD
+expect 0 "list shows the branch" \
+  test -n "$(worktree list | grep -Fx 'branch refs/heads/1-smoke')"
+touch "$wt/untracked"
+expect 1 "remove refuses a dirty tree" worktree remove --path "$wt"
+expect 0 "dirty tree kept after refusal" test -d "$wt"
+expect 0 "remove --force exits 0" worktree remove --path "$wt" --force
+expect 0 "forced remove deletes the tree" test ! -e "$wt"
+worktree add --branch 2-smoke --path "$wt" --base HEAD >/dev/null 2>&1
+expect 0 "remove (clean) exits 0" worktree remove --path "$wt"
+expect 0 "list no longer shows it" \
+  test -z "$(worktree list | grep -Fx 'branch refs/heads/2-smoke')"
 
 echo
 echo "smoke: $pass passed, $fail failed"

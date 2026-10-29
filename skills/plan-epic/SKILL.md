@@ -43,14 +43,15 @@ exact commands. Octoperator is autonomous: execute the creation immediately unle
 
 7. **Link children to the epic.** For each child run
    `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-subissue.sh --repo <repo> --parent <epic#> --child <child#>`.
-   If it exits non-zero, fall back: append `- [ ] #<child#>` to the epic body's `## Children` checklist
-   via `gh issue edit`.
+   If it exits non-zero, note the error it printed (e.g. the child already has a parent) for the
+   report, then fall back: append `- [ ] #<child#>` to the epic body's `## Children` checklist via
+   `gh issue edit`.
 
 8. **Add to the board.** If a project is configured, add the epic and every child with
    `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh --owner <project_owner> --project <number> --url <url> --status "<statuses.todo>"`.
 
-9. **Report.** Print the epic and the child tree with all URLs, note any sub-issue fallbacks used, and
-   surface any link that could not be established.
+9. **Report.** Print the epic and the child tree with all URLs, note any sub-issue fallbacks used
+   (with their error), and surface any link that could not be established.
 
 ## Notes
 

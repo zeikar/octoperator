@@ -10,12 +10,14 @@
 set -euo pipefail
 
 REPO="" PROJECT="" POWNER=""
+# Under `set -e` a bare `shift 2` past the last argument would exit 1 with no message.
+need_value() { [ $# -ge 2 ] || { echo "Missing value for $1" >&2; exit 2; }; }
 while [ $# -gt 0 ]; do
   case "$1" in
-    --repo)    REPO="${2:-}"; shift 2 ;;
-    --project) PROJECT="${2:-}"; shift 2 ;;
-    --owner)   POWNER="${2:-}"; shift 2 ;;
-    -h|--help) grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --repo)    need_value "$@"; REPO="$2"; shift 2 ;;
+    --project) need_value "$@"; PROJECT="$2"; shift 2 ;;
+    --owner)   need_value "$@"; POWNER="$2"; shift 2 ;;
+    -h|--help) sed -n '2,/^[^#]/s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -45,11 +47,15 @@ if [ -n "$PROJECT" ]; then
   TITLE=$(gh project view "$PROJECT" --owner "$POWNER" --format json --jq '.title')
   ok "Project #$PROJECT \"$TITLE\" reachable (owner: $POWNER)"
   echo "  Status options:"
-  if ! gh project field-list "$PROJECT" --owner "$POWNER" --format json \
-       --jq '.fields[] | select(.name=="Status") | .options[].name' 2>/dev/null \
-       | sed 's/^/    - /'; then
-    echo "    (could not read a single-select field named \"Status\" — the board needs one;" >&2
-    echo "     check the project scope)" >&2
+  # A missing field is not an error to jq — the select just emits nothing — so tell a failed read
+  # apart from an empty result instead of relying on the exit code alone.
+  if ! OPTIONS=$(gh project field-list "$PROJECT" --owner "$POWNER" --limit 100 --format json \
+       --jq '.fields[] | select(.name=="Status") | .options[]?.name' 2>/dev/null); then
+    echo "    (could not read the project's fields — check the project scope)" >&2
+  elif [ -z "$OPTIONS" ]; then
+    echo "    (no single-select field named \"Status\" with options — the board needs one)" >&2
+  else
+    printf '%s\n' "$OPTIONS" | sed 's/^/    - /'
   fi
 else
   echo "• No --project given; skipped project checks."

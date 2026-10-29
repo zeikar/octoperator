@@ -52,8 +52,9 @@ epic/sub-issue model, and the status flow). Read and follow them when adding or 
 Octoperator has no build step. Before opening a PR:
 
 ```bash
-# 1. Smoke-test the helper scripts (syntax + --help + unknown-arg handling).
-#    CI-safe: no network / gh / auth required. CI runs this on every push and PR.
+# 1. Smoke-test the helper scripts (syntax, --help, arg handling, and real octo-exclude /
+#    octo-worktree runs in a temp repo). CI-safe: no network / gh / auth required. CI runs this
+#    on ubuntu and macOS on every push and PR.
 bash scripts/test/smoke.sh
 
 # 2. Verify prerequisites and (optionally) board access

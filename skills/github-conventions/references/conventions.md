@@ -71,8 +71,9 @@ Linking procedure (per child):
 
 1. Create the child issue normally (type/priority labels, milestone, project).
 2. Link it to the epic with `octo-subissue.sh --repo <owner>/<name> --parent <epic#> --child <child#>`.
-3. If that command exits non-zero (sub-issue API unavailable on the plan/account), **fall back**:
-   append `- [ ] #<child#>` to the epic body's `## Children` checklist instead.
+3. If that command exits non-zero (API unavailable, child already has a parent, permissions, …),
+   note the printed error and **fall back**: append `- [ ] #<child#>` to the epic body's
+   `## Children` checklist instead.
 
 Either way, every child issue body opens with `Part of #<epic#>` for a textual back-link that works
 regardless of the linking mechanism.

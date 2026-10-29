@@ -62,12 +62,12 @@ Underlying GraphQL (what the script does):
 
 ```bash
 PID=$(gh api graphql -f query='query($o:String!,$n:String!,$num:Int!){repository(owner:$o,name:$n){issue(number:$num){id}}}' \
-      -F o=OWNER -F n=NAME -F num=10 --jq '.data.repository.issue.id')
+      -f o=OWNER -f n=NAME -F num=10 --jq '.data.repository.issue.id')
 CID=$(gh api graphql -f query='query($o:String!,$n:String!,$num:Int!){repository(owner:$o,name:$n){issue(number:$num){id}}}' \
-      -F o=OWNER -F n=NAME -F num=11 --jq '.data.repository.issue.id')
+      -f o=OWNER -f n=NAME -F num=11 --jq '.data.repository.issue.id')
 gh api graphql -H "GraphQL-Features: sub_issues" \
   -f query='mutation($p:ID!,$c:ID!){addSubIssue(input:{issueId:$p,subIssueId:$c}){issue{number}}}' \
-  -F p="$PID" -F c="$CID"
+  -f p="$PID" -f c="$CID"
 ```
 
 ## Projects v2: add item and set status
@@ -87,9 +87,9 @@ Underlying `gh project` commands:
 ```bash
 PROJECT_ID=$(gh project view <number> --owner <owner> --format json --jq '.id')
 # Status field id + option ids:
-gh project field-list <number> --owner <owner> --format json \
+gh project field-list <number> --owner <owner> --limit 100 --format json \
   --jq '.fields[] | select(.name=="Status") | {id, options}'
-# Add the issue/PR (skip if already an item — check item-list first):
+# Add the issue/PR (idempotent: an item already on the board returns its existing id):
 ITEM_ID=$(gh project item-add <number> --owner <owner> --url <content-url> --format json --jq '.id')
 # Set the Status single-select option:
 gh project item-edit --id "$ITEM_ID" --project-id "$PROJECT_ID" \

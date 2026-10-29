@@ -19,7 +19,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --repo)  need_value "$@"; REPO="$2"; shift 2 ;;
     --owner) need_value "$@"; POWNER="$2"; shift 2 ;;
-    -h|--help) grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,/^[^#]/s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "{\"error\":\"unknown argument: $1\"}"; exit 2 ;;
   esac
 done
@@ -39,7 +39,9 @@ DEFAULT=$(gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBranchRef.n
 # setup skill must handle a later create/edit failure gracefully.
 ERRF=$(mktemp)
 trap 'rm -f "$ERRF"' EXIT
-if BOARDS=$(gh project list --owner "$POWNER" --format json --jq '[.projects[] | {number, title, url}]' 2>"$ERRF"); then
+# gh lists at most 30 projects by default; raise it so busy owners are not cut off at 30.
+if BOARDS=$(gh project list --owner "$POWNER" --limit 100 --format json \
+     --jq '[.projects[] | {number, title, url}]' 2>"$ERRF"); then
   CAPABLE=true
   NOTE=""
 else

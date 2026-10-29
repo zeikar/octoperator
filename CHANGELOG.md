@@ -33,6 +33,9 @@ All notable changes to Octoperator are documented in this file. The format is ba
   on every push and pull request.
 - `shellcheck` static analysis in CI over the helper scripts (`scripts/*.sh`, `scripts/test/smoke.sh`),
   catching quoting/word-splitting/unset-variable bugs that `bash -n` cannot.
+- Smoke coverage for `octo-worktree.sh` `add` / `list` / `remove`, run for real in a throwaway temp
+  repo (offline), plus checks that every helper's `--help` prints only its usage block and that a
+  value flag given without a value exits 2. CI now runs the smoke tests on macOS as well as ubuntu.
 - Project `.claude/settings.json` that loads the checked-out plugin (`octoperator@zeikar-plugins`
   from a `directory` marketplace) when Claude Code opens in the repo, for dogfooding.
 
@@ -73,6 +76,21 @@ All notable changes to Octoperator are documented in this file. The format is ba
 - The `statuses` setting is now honored: every board write maps the logical status (`todo`,
   `in_progress`, `in_review`, `blocked`, `done`) through it, so boards with differently named Status
   options work as the README troubleshooting entry says. Previously every call passed literal names.
+- `octo-subissue.sh` now prints GitHub's actual `addSubIssue` error (already has a parent,
+  permissions, limits) instead of reporting every failure as "API unavailable", and passes
+  owner/name/node ids with `-f` so values like `true` or `2048` are not type-coerced (the gh
+  cookbook recipe too).
+- `octo-project-status.sh` no longer scans the whole board (`item-list --limit 2000`, which missed
+  items past 2000) on every call — `item-add` already returns the existing item — and passes the
+  status name to jq through the environment instead of splicing it into the program.
+- `octo-doctor.sh` now prints the "no Status field" message when the field is missing; before, an
+  empty result looked like success and the message only showed on a failed read.
+- Every flag-taking helper exits 2 with a message when a flag has no value (the `set -e` ones exited
+  1 silently), and `--help` prints only the usage block instead of every comment in the script.
+- `octo-worktree.sh add` prints only the worktree path on stdout; git's `HEAD is now at …` went there
+  first.
+- `gh project list` / `field-list` calls pass an explicit `--limit 100`, so owners with more than 30
+  boards, or boards with more than 30 fields, are no longer cut off.
 
 ## [0.1.0] - 2026-06-23
 
