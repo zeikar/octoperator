@@ -6,7 +6,8 @@
 #
 # Actions:
 #   add    --branch <b> --path <p> --base <ref>
-#            Create a new worktree at <p> with a new branch <b> from <ref>.
+#            Create a new worktree at <p> with a new branch <b> from <ref>, and
+#            print <p> (only) on stdout; git's own progress goes to stderr.
 #            Exits non-zero if <b> is already checked out in any worktree or
 #            already exists as a local branch.
 #   remove --path <p> [--force]
@@ -22,19 +23,21 @@ set -euo pipefail
 ACTION="${1:-}"
 case "$ACTION" in
   add|remove|list) shift ;;
-  -h|--help) grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help) sed -n '2,/^[^#]/s/^# \{0,1\}//p' "$0"; exit 0 ;;
   "") echo "Usage: octo-worktree.sh <add|remove|list> [options]" >&2; exit 2 ;;
   *)  echo "Unknown action: $ACTION" >&2; exit 2 ;;
 esac
 
 BRANCH="" WT_PATH="" BASE="" FORCE=0
+# Under `set -e` a bare `shift 2` past the last argument would exit 1 with no message.
+need_value() { [ $# -ge 2 ] || { echo "octo-worktree: missing value for $1" >&2; exit 2; }; }
 while [ $# -gt 0 ]; do
   case "$1" in
-    --branch) BRANCH="${2:-}"; shift 2 ;;
-    --path)   WT_PATH="${2:-}"; shift 2 ;;
-    --base)   BASE="${2:-}"; shift 2 ;;
+    --branch) need_value "$@"; BRANCH="$2"; shift 2 ;;
+    --path)   need_value "$@"; WT_PATH="$2"; shift 2 ;;
+    --base)   need_value "$@"; BASE="$2"; shift 2 ;;
     --force)  FORCE=1; shift ;;
-    -h|--help) grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,/^[^#]/s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -58,7 +61,8 @@ case "$ACTION" in
       exit 1
     fi
 
-    git worktree add -b "${BRANCH}" "${WT_PATH}" "${BASE}"
+    # git prints "HEAD is now at …" on stdout; send it to stderr so stdout is only the path.
+    git worktree add -b "${BRANCH}" "${WT_PATH}" "${BASE}" >&2
     echo "${WT_PATH}"
     ;;
 
