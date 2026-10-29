@@ -145,8 +145,9 @@ traceability matrix). They live in
   `repo` + `project` scopes (or an org-owned project with a fine-grained token's Projects permission).
   If `gh` authenticates via the `GITHUB_TOKEN` env var, swap in the new token there and restart the
   session. Octoperator works fine without a board — board steps are skipped automatically.
-- **`Status "X" not found`** — your board uses different option names; set them under `statuses:` in
-  `.claude/octoperator.local.md` (run `octo-doctor.sh` to list the real options).
+- **`Status "X" not found`** — your board uses different option names; map them under `statuses:`
+  (`todo`, `in_progress`, `in_review`, `blocked`, `done`) in `.claude/octoperator.local.md` — every
+  board write goes through that mapping. Run `octo-doctor.sh` to list the real options.
 - **Sub-issues not linking** — the account/plan may lack the sub-issue API; Octoperator falls back to a
   `- [ ] #n` task list in the epic body automatically.
 

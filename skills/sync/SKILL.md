@@ -17,7 +17,9 @@ changes.
 ## Steps
 
 1. **Load settings.** Read `.claude/octoperator.local.md` for `repo`, `project_owner`,
-   `project_number`. If no project is configured, report from issues/PRs/milestones only.
+   `project_number`, and `statuses` (the board's names for the logical statuses — see
+   `github-conventions` → Projects v2 status flow). If no project is configured, report from
+   issues/PRs/milestones only.
 
 2. **Gather state (read-only).**
    - Open issues: `gh issue list --repo <repo> --state open --json number,title,labels,milestone,assignees`.
@@ -27,7 +29,7 @@ changes.
    - Milestones: `gh api repos/<repo>/milestones`.
 
 3. **Build the report.** Group work by board status (`Todo`, `In Progress`, `In Review`, `Blocked`,
-   `Done`), list open PRs with their review decision and draft state, show milestone progress
+   `Done` — matched through `statuses`, as are the comparisons in step 4), list open PRs with their review decision and draft state, show milestone progress
    (open/closed counts, due date), and call out anything `Blocked` or stale.
 
 4. **Detect drift.** Compare reality to the board:
@@ -36,7 +38,7 @@ changes.
    - issue with an open branch/PR still in `Todo` → should be `In Progress`.
 
 5. **Reconcile.** Unless `--dry-run`, fix each drift with
-   `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh --owner <project_owner> --project <number> --url <url> --status "<status>"`,
+   `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh --owner <project_owner> --project <number> --url <url> --status "<mapped status>"`,
    and echo each change. With `--dry-run`, list the changes without applying them.
 
 6. **Report.** Print the status report followed by a "Reconciled" (or "Would reconcile") section listing

@@ -104,9 +104,13 @@ Todo → In Progress → In Review → Done
 | `Blocked`     | Work cannot proceed (dependency, question, failure) |
 | `Done`        | The PR merged / issue closed                         |
 
-Status names are resolved against the board's actual single-select options by name (case-insensitive),
-so boards using slightly different labels (e.g. "In progress") still work. If a configured status name
-has no matching option, report it rather than guessing.
+The names above are **logical** statuses. Before a board write or comparison, map each one through
+the `statuses` setting (`todo`, `in_progress`, `in_review`, `blocked`, `done`); an unset key falls
+back to the name shown. Pass the mapped name to `octo-project-status.sh --status`, so a board whose
+options are named differently (e.g. "Backlog", "Shipped") works once `statuses` names them. Names are
+then resolved against the board's actual single-select options case-insensitively, so slight
+differences (e.g. "In progress") need no mapping. If a mapped name has no matching option, report it
+rather than guessing.
 
 ## Merging pull requests
 
@@ -119,7 +123,8 @@ with `--match-head-commit`), and the PR is `OPEN`, not draft, with `mergeStateSt
 (GitHub's "ready to merge" — no conflicts, all required checks green, not blocked by protection,
 not behind). Any other state (`DIRTY` / `BLOCKED` / `BEHIND` / `UNSTABLE` / `UNKNOWN`) → do not
 merge; report the reason. Never force-merge. The PR's `Closes #N` auto-closes the issue; move its
-board item to `Done` afterward with `octo-project-status.sh ... --status "Done"`.
+board item to the mapped `done` status afterward with
+`octo-project-status.sh ... --status "<statuses.done>"`.
 
 ## Traceability matrix
 

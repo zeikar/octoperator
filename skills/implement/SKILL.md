@@ -35,6 +35,13 @@ Read `.claude/octoperator.local.md` for:
   actual access failures are handled non-fatally at call time (see step 7).
 - `reviewers` — default reviewer list for PRs.
 - `branch_pattern` — branch name template (default `{number}-{slug}`).
+- `statuses` — the board's option names for the logical statuses (see `github-conventions` →
+  Projects v2 status flow). Set the ones board writes use, each falling back to its default:
+  ```bash
+  STATUS_IN_PROGRESS="<statuses.in_progress, default In Progress>"
+  STATUS_IN_REVIEW="<statuses.in_review, default In Review>"
+  STATUS_DONE="<statuses.done, default Done>"   # used by auto's merge step
+  ```
 
 The concurrency cap for the parallel path defaults to **3** internally and is overridable only by the
 `--max N` flag. There is no persistent setting for it.
@@ -234,7 +241,7 @@ would abort implement if `octo-project-status.sh` exits non-zero:
 if [ "$BOARD_ENABLED" = "true" ] && [ "$BOARD_DISABLED_RUNTIME" != "true" ]; then
   bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh" \
     --owner "$project_owner" --project "$project_number" \
-    --url "$issue_url" --status "In Progress" \
+    --url "$issue_url" --status "$STATUS_IN_PROGRESS" \
   || { echo "board sync skipped (access error)"; BOARD_DISABLED_RUNTIME=true; }
 fi
 ```
@@ -340,13 +347,13 @@ bare call would abort implement if `octo-project-status.sh` exits non-zero:
 if [ "$BOARD_ENABLED" = "true" ] && [ "$BOARD_DISABLED_RUNTIME" != "true" ]; then
   bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh" \
     --owner "$project_owner" --project "$project_number" \
-    --url "$pr_url" --status "In Review" \
+    --url "$pr_url" --status "$STATUS_IN_REVIEW" \
   || { echo "board sync skipped (access error)"; BOARD_DISABLED_RUNTIME=true; }
 fi
 if [ "$BOARD_ENABLED" = "true" ] && [ "$BOARD_DISABLED_RUNTIME" != "true" ]; then
   bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh" \
     --owner "$project_owner" --project "$project_number" \
-    --url "$issue_url" --status "In Review" \
+    --url "$issue_url" --status "$STATUS_IN_REVIEW" \
   || { echo "board sync skipped (access error)"; BOARD_DISABLED_RUNTIME=true; }
 fi
 ```
@@ -442,7 +449,7 @@ for each issue in CREATED:
   if [ "$BOARD_ENABLED" = "true" ] && [ "$BOARD_DISABLED_RUNTIME" != "true" ]; then
     bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh" \
       --owner "$project_owner" --project "$project_number" \
-      --url "$issue_url" --status "In Progress" \
+      --url "$issue_url" --status "$STATUS_IN_PROGRESS" \
     || { echo "board sync skipped (access error)"; BOARD_DISABLED_RUNTIME=true; }
   fi
 done
@@ -501,14 +508,14 @@ for each issue where result.status == "success":
   if [ "$BOARD_ENABLED" = "true" ] && [ "$BOARD_DISABLED_RUNTIME" != "true" ]; then
     bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh" \
       --owner "$project_owner" --project "$project_number" \
-      --url "$result.pr_url" --status "In Review" \
+      --url "$result.pr_url" --status "$STATUS_IN_REVIEW" \
     || { echo "board sync skipped (access error)"; BOARD_DISABLED_RUNTIME=true; }
   fi
   # Set issue to In Review  # $issue_url from step-3 metadata
   if [ "$BOARD_ENABLED" = "true" ] && [ "$BOARD_DISABLED_RUNTIME" != "true" ]; then
     bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh" \
       --owner "$project_owner" --project "$project_number" \
-      --url "$issue_url" --status "In Review" \
+      --url "$issue_url" --status "$STATUS_IN_REVIEW" \
     || { echo "board sync skipped (access error)"; BOARD_DISABLED_RUNTIME=true; }
   fi
 done

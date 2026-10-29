@@ -18,7 +18,7 @@ exact commands. Octoperator is autonomous: execute the creation immediately unle
 ## Steps
 
 1. **Load settings.** Read `.claude/octoperator.local.md` for `repo`, `project_owner`,
-   `project_number`, `milestone`, `reviewers`, and label/status overrides. If absent, resolve the repo
+   `project_number`, `milestone`, `reviewers`, and `statuses.todo` (default `Todo`). If absent, resolve the repo
    from `gh repo view --json nameWithOwner` and warn that no project board is configured (skip board
    steps in that case). See `github-conventions/references/settings.md`.
 
@@ -47,7 +47,7 @@ exact commands. Octoperator is autonomous: execute the creation immediately unle
    via `gh issue edit`.
 
 8. **Add to the board.** If a project is configured, add the epic and every child with
-   `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh --owner <project_owner> --project <number> --url <url> --status "Todo"`.
+   `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh --owner <project_owner> --project <number> --url <url> --status "<statuses.todo>"`.
 
 9. **Report.** Print the epic and the child tree with all URLs, note any sub-issue fallbacks used, and
    surface any link that could not be established.

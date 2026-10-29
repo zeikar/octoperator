@@ -72,7 +72,9 @@ gh api graphql -H "GraphQL-Features: sub_issues" \
 
 ## Projects v2: add item and set status
 
-Prefer the script (resolves field/option IDs by name):
+Prefer the script (resolves field/option IDs by name). `--status` takes the board's option name —
+map the logical status through the `statuses` setting first (see conventions → Projects v2 status
+flow); the literal names in these recipes are the defaults:
 
 ```bash
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh \

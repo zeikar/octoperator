@@ -48,7 +48,8 @@ if [ -n "$PROJECT" ]; then
   if ! gh project field-list "$PROJECT" --owner "$POWNER" --format json \
        --jq '.fields[] | select(.name=="Status") | .options[].name' 2>/dev/null \
        | sed 's/^/    - /'; then
-    echo "    (no single-select field named \"Status\" found — set statuses in settings)" >&2
+    echo "    (could not read a single-select field named \"Status\" — the board needs one;" >&2
+    echo "     check the project scope)" >&2
   fi
 else
   echo "• No --project given; skipped project checks."
