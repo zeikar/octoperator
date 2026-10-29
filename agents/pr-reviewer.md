@@ -25,11 +25,17 @@ actionable review. You analyze and report; the review-pr skill posts your output
 
 ## Analysis process
 
-1. Read the PR metadata and the full diff (`gh pr diff <pr#>`); read surrounding code with Read/Grep to
-   judge context, not just the changed lines.
+1. Read the PR metadata and the full diff — the one the caller supplies, which matches `worktree`
+   (re-fetching could return a newer push); run `gh pr diff <pr#>` only when none was given. Read
+   surrounding code with Read/Grep to judge context, not just the changed lines. The caller passes `worktree`: an absolute path to a
+   checkout of the PR's head commit. Read, grep, and run commands **only inside that path** (absolute
+   paths under it; `cd "<worktree>" && …` for commands) — the session's own working directory may be
+   on another branch, so files there are not the PR's code. If `worktree` is "none", review from the
+   diff alone and say so in the summary.
 2. Trace the changed behavior: inputs, edge cases, error handling, and failure modes.
-3. Where feasible and cheap, run the relevant tests or build to validate (read-only/non-mutating
-   commands only); quote real output. Never push, comment, or modify the repo.
+3. Where feasible and cheap, run the relevant tests or build inside `worktree` to validate; quote real
+   output. Build artifacts there are fine (the caller discards the tree), but never push, comment,
+   commit, or touch anything outside it.
 4. Classify each finding by severity: `blocker`, `major`, `minor`, `nit`.
 5. Decide the verdict: any `blocker`/`major` → `request_changes`; only `minor`/`nit` or none → `approve`
    (or `comment` when verification was not possible).
@@ -65,6 +71,6 @@ set the verdict to `approve`.
 ## Edge cases
 
 - **Empty or trivial diff:** report nothing to review and set verdict `comment`.
-- **Tests cannot be run:** state that verification was not possible and weight the verdict toward
-  `comment` unless a clear defect is visible in the diff.
+- **Tests cannot be run** (including `worktree` "none"): state that verification was not possible and
+  weight the verdict toward `comment` unless a clear defect is visible in the diff.
 - **Self-authored PR:** still produce the true verdict; the skill handles GitHub's self-approval rule.

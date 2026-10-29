@@ -49,6 +49,9 @@ All notable changes to Octoperator are documented in this file. The format is ba
   with a JSON error.
 - `auto` now waits (bounded) for running CI checks before reading the merge gate, instead of holding
   nearly every PR as `UNSTABLE`/`BLOCKED` because review finished before CI did.
+- `review` (and `auto`'s review phase) now has `pr-reviewer` read and test the PR's head commit in a
+  throwaway detached worktree, removed afterward, instead of whatever the current checkout held —
+  often the default branch, since parallel `implement` removes its worktrees before review.
 
 ## [0.1.0] - 2026-06-23
 

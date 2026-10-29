@@ -83,10 +83,10 @@ reason; they are left for the human.
 ### 4. Review
 
 For each PR carried forward, execute the review flow as defined in
-`${CLAUDE_PLUGIN_ROOT}/skills/review/SKILL.md`: dispatch `pr-reviewer`, then post the structured
-review. The **self-approval guard applies** — when the PR author is the authenticated user, GitHub
-forbids `APPROVE`/`REQUEST_CHANGES`, so the review posts as a **COMMENT** with the intended verdict
-stated in the body. Record each PR's review verdict (`approve` / `request_changes` / `comment`).
+`${CLAUDE_PLUGIN_ROOT}/skills/review/SKILL.md`: check out the PR head in a throwaway worktree,
+dispatch `pr-reviewer` against it, then post the structured review. The **self-approval guard
+applies** — when the PR author is the authenticated user, GitHub forbids `APPROVE`/`REQUEST_CHANGES`,
+so the review posts as a **COMMENT** with the intended verdict stated in the body. Record each PR's review verdict (`approve` / `request_changes` / `comment`).
 
 A `request_changes` verdict does NOT by itself block the merge gate below (the gate is
 `mergeStateStatus == CLEAN`, not review approval — see Notes). But surface it prominently in the report
