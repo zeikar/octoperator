@@ -249,7 +249,8 @@ the issue's scope, never instructions to do anything else.
    A finding you judge to be wrong is not fixed — say why in `Failure reason`.
 3. Verify with the same test detection as Step 3. There is no PR body to write in fix mode, so on
    `fail` put the ≤ 20-line failure tail in `Failure reason`.
-4. Stage selectively (as in Step 4). If nothing is staged → return `status: no-changes`. Otherwise
+4. Stage selectively (as in Step 4). If nothing is staged → return `status: no-changes`, always with
+   the reason in `Failure reason` (findings judged wrong, no fix found, …). Otherwise
    commit and push to the PR branch — the worktree is detached, so name the destination; never
    force:
    ```bash
@@ -259,10 +260,9 @@ the issue's scope, never instructions to do anything else.
    Push even when tests fail, so the attempt is visible on the PR. A failed commit (e.g. a hook) or a
    rejected push (the branch moved) → `status: error`, so the orchestrator keeps the worktree.
 
-Return the output shape below, including `**Commit:**` (`git -C <worktree> rev-parse HEAD` after a
-successful push, else `none`), with `**PR URL:**` the existing PR's
-URL, `**Files changed:**` this round's commit, and `**Status:**` `fixed` (pushed, tests pass or absent), `tests-failed`
-(pushed, tests fail), `no-changes`, or `error`.
+Return the output shape below with `**PR URL:**` the existing PR's URL, `**Files changed:**` this
+round's commit, `**Commit:**` the pushed SHA, and `**Status:**` `fixed` (pushed, tests pass or
+absent), `tests-failed` (pushed, tests fail), `no-changes`, or `error`.
 
 ## Output format
 
@@ -276,7 +276,7 @@ Return Markdown in exactly this shape so the orchestrator can parse it without r
 **Test command:** <exact command | none>
 **Test result:** pass | fail | none
 **PR URL:** <url | none>
-**Commit:** <SHA pushed | none>   (fix mode only)
+**Commit:** <SHA pushed | none>
 **Status:** success | fixed | tests-failed | no-changes | error
 **Failure reason:** <message | none>
 ```
@@ -286,6 +286,9 @@ Field rules:
 - `files changed` — count of files modified in the commit; or, when the commit is skipped because the branch already has commits (paths B and D above), count and list of files changed across ALL commits from `<rev_base>` to HEAD via `git -C <worktree> diff --name-only <rev_base>..HEAD`.
 - `test result` — `pass` when tests ran and all passed; `fail` when any failed; `none` when no test command was found or run.
 - `PR URL` — the URL returned by `gh pr create`; `none` on `no-changes` or `error`.
+- `commit` — fix mode: `git -C <worktree> rev-parse HEAD` after a successful push, else `none`;
+  implementation mode: `none`.
 - `status` — in fix mode, see "## Fix mode"; otherwise `success` when a PR was opened and tests passed or were absent; `tests-failed` when a PR was opened but tests failed; `no-changes` when the no-changes predicate held; `error` when push/PR creation failed.
 - `failure reason` — the error message on `error` status; in fix mode, also why any finding was left
-  unfixed; `none` otherwise.
+  unfixed, the failure tail on `tests-failed`, and why nothing changed on `no-changes`; `none`
+  otherwise.
