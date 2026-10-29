@@ -43,7 +43,8 @@ does not count.
 
 ### 1. Load settings & parse flags
 
-Read `.claude/octoperator.local.md` for `repo` (fall back to `gh repo view`). Resolve `REPO` once.
+Read `.claude/octoperator.local.md` for `repo` (fall back to `gh repo view`) and `branch_pattern`
+(default `{number}-{slug}`). Resolve `REPO` once.
 Parse and validate flags:
 - `--mode` ∈ {`semi`, `full`} (default `semi`; reject any other value).
 - `--cycles N` — hard cap on loop iterations (default `3`, **hard maximum `10`**). Always finite. If a
@@ -144,7 +145,8 @@ Run the **`research`** procedure (`${CLAUDE_PLUGIN_ROOT}/skills/research/SKILL.m
 
 Print a per-cycle summary and an overall result:
 - per cycle: issues attempted, `merged` vs `held: <reason>`, issues skipped because an open PR already
-  closes them (`#<issue> → PR #<pr>`), and any `research` proposals filed (URLs);
+  holds them (closes them or uses their branch; `#<issue> → PR #<pr>`), and any `research` proposals
+  filed (URLs);
 - overall: total merged, total held (with reasons), proposed issues awaiting triage, cycles consumed
   vs the cap, and the **next action** (semi: "relabel proposed → ready, then re-run autopilot"; full:
   "re-run to continue, or inspect held PRs").
