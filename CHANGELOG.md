@@ -31,6 +31,11 @@ All notable changes to Octoperator are documented in this file. The format is ba
   from a `directory` marketplace) when Claude Code opens in the repo, for dogfooding.
 
 ### Changed
+- `auto` no longer merges past its own reviewer: a `request_changes` verdict (the intended one, before
+  the self-approval COMMENT downgrade) blocks the merge and starts a fix → re-review loop — up to 6
+  rounds, fixes applied by `issue-implementer` in a new fix mode on the PR branch. A PR still blocking
+  after that is held with its outstanding findings in the report. Merges are pinned to the reviewed
+  commit (`--match-head-commit`), so a push after the review cannot merge unreviewed.
 - README: the skills table is now grouped by purpose (onboarding, plan & intake, autonomous lifecycle,
   review & status, what's next, knowledge layer) so the entry points are easier to scan.
 
