@@ -112,8 +112,8 @@ resolves them by name at call time. Full schema:
 `bash …` (which covers the helper scripts, and any `bash -c` command), plus
 Read/Grep/Glob/Edit/Write/Task. That does not yet make a run prompt-free: the `Bash(...)` rules
 match by command prefix and every part of a compound command must match, so steps that assign a
-variable or wrap a call in `if …; then` can still stop on a permission prompt. Removing those is tracked in
-[#60](https://github.com/zeikar/octoperator/issues/60).
+variable or wrap a call in `if …; then` can still stop on a permission prompt. Removing those is
+tracked in [#60](https://github.com/zeikar/octoperator/issues/60).
 
 The skills also don't pre-allow your repo's test command, which they run to verify each change. To
 cut prompts on an unattended run (e.g. `autopilot --mode full`), allow it in the target repo's
