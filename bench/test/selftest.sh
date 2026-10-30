@@ -7,7 +7,8 @@
 # Copies the real tasks into a `mktemp -d` directory, breaks one copy per case (a check that
 # always passes or always fails, a patch that does not apply, a malformed task.md, a missing
 # seed/, failing seed tests, a reference fix that breaks the tests, a check that hangs), and
-# asserts validate.sh exits 1 for each, with the expected reason, and 0 for the intact copy.
+# asserts validate.sh exits 1 for each, with the expected reason, and 0 for the intact copy, and
+# that Ctrl-C on validate.sh also stops a running check.
 # Also covers its argument handling (--help, unknown argument, missing value, unknown task), and
 # that the real oracles reject plausible wrong fixes while accepting other correct ones.
 # Offline: no claude, gh, or network. Exits 0 when every check passes, 1 when any check fails.
@@ -110,6 +111,22 @@ elif [ -z "$left" ]; then ok "hangs: the timeout kills what check.sh started"
 else no "hangs: left running: $(printf '%s' "$left" | tr '\n' ' ')"; alive | xargs kill 2>/dev/null
 fi
 
+# Ctrl-C on validate.sh must kill a running check too: interrupt validate.sh's process group (its
+# own, via job control) while the check runs.
+t="$(broken_case interrupted)" && printf 'echo $$ >"%s"\nexec sleep 30\n' "$tmp/int.pid" \
+  >"$t/check.sh"
+vpid="$(set -m; bash "$VALIDATE" --tasks "$tmp/interrupted" >/dev/null 2>&1 & echo $!)"
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$tmp/int.pid" ] && break; sleep 1; done
+cpid="$(cat "$tmp/int.pid" 2>/dev/null)"
+kill -INT -- "-$vpid" 2>/dev/null
+for _ in 1 2 3 4 5; do kill -0 "$cpid" 2>/dev/null || kill -0 "$vpid" 2>/dev/null || break; sleep 1
+done
+if [ -z "$cpid" ]; then no "interrupted: the check never started"
+elif kill -0 "$cpid" 2>/dev/null; then no "interrupted: the check outlived Ctrl-C"; kill "$cpid"
+elif kill -0 "$vpid" 2>/dev/null; then no "interrupted: validate.sh outlived Ctrl-C"; kill "$vpid"
+else ok "interrupted: Ctrl-C stops validate.sh and the check"
+fi
+
 t="$(broken_case syntax)" && printf 'if then\n' >"$t/check.sh"
 rejects syntax "check.sh has a syntax error"
 
@@ -182,23 +199,51 @@ judges 1 "a (length, text) key" vsort-numeric "$(vsort_with len-key '(len(versio
 judges 1 "a digits-only key" vsort-numeric \
   "$(vsort_with digits-key 'int(version.replace(".", ""))')"
 
-# retry_with <name> <markdown> : a retry-docs seed with <markdown> appended to README.md.
-retry_with() {
-  d="$(variant retry-docs "$1")" && printf '\n%s\n' "$2" >>"$d/README.md" && echo "$d"
-}
+# retry_doc <name> <table rows> <exit status prose> : a retry-docs seed whose README.md gains a
+# Configuration section with <table rows> under a Variable | Default | Description header, and an
+# Exit status section holding <exit status prose>.
 nl=$'\n'
-settings="- RETRY_ATTEMPTS: default 5$nl- RETRY_DELAY: default 2$nl$nl"
-recent="retry.sh returns the status code of the most recent attempt."
-judges 0 "\"$recent\"" retry-docs "$(retry_with recent "$settings$recent")"
-exits_1="If the final attempt fails, retry.sh exits 1."
-judges 1 "\"$exits_1\"" retry-docs "$(retry_with exits-1 "$settings$exits_1")"
+retry_doc() {
+  d="$(variant retry-docs "$1")" && printf '\n%s\n' "## Configuration$nl$nl| Variable | Default \
+| Description |$nl|---|---|---|$nl$2$nl$nl## Exit status$nl$nl$3" >>"$d/README.md" && echo "$d"
+}
+rows="| \`RETRY_ATTEMPTS\` | \`5\` | Maximum attempts |$nl| \`RETRY_DELAY\` | \`2\` | Pause |"
 last="retry.sh exits with the exit status of the last attempt."
-swapped="Set RETRY_ATTEMPTS (default 2) and RETRY_DELAY (default 5).$nl$nl$last"
-judges 1 "defaults swapped on one line" retry-docs "$(retry_with swapped "$swapped")"
-example="- RETRY_ATTEMPTS: default 3$nl- RETRY_DELAY: default 1$nl$nl"
-example="$example    RETRY_ATTEMPTS=5 RETRY_DELAY=2 ./retry.sh true$nl$nl$last"
-judges 1 "wrong defaults next to an example assignment" retry-docs \
-  "$(retry_with example "$example")"
+# retry_judges <wanted-exit> <label> <table rows> <exit status prose>
+n=0
+retry_judges() {
+  n=$((n + 1)); judges "$1" "$2" retry-docs "$(retry_doc "case$n" "$3" "$4")"
+}
+retry_judges 0 "bare cells, no outer pipes, rows swapped, \"2 seconds\"" \
+  "RETRY_DELAY | 2 seconds | Pause${nl}RETRY_ATTEMPTS | 5 | Maximum attempts" "$last"
+retry_judges 0 "\"2s\" for the delay" \
+  "| RETRY_ATTEMPTS | 5 | Maximum attempts |$nl| RETRY_DELAY | \`2s\` | Pause |" "$last"
+for prose in \
+  "retry.sh returns the status code of the most recent attempt." \
+  "\`retry.sh\` passes through the status of the last attempt, or 0 once an attempt succeeds." \
+  "If every attempt fails, retry.sh exits with whatever the last attempt exited with." \
+  "$last For example, if curl fails every time with exit code 22, retry.sh exits 22." \
+  "$last Called without a command, it fails with exit status 2." \
+  "It gives up after 5 attempts and exits with the final attempt's status (e.g. 22 from curl)."
+do retry_judges 0 "\"$prose\"" "$rows" "$prose"; done
+for prose in \
+  "If the final attempt fails, retry.sh exits 1." \
+  "The exit status is 1 if the last attempt fails, 0 otherwise." \
+  "The exit code is 1 when the last attempt fails." \
+  "\`retry.sh\` exits with status 0 on success, or 1 if the last attempt fails." \
+  "$last If it was called without a command or every attempt failed, it exits 1." \
+  "retry.sh exits 0 when the command succeeds."
+do retry_judges 1 "\"$prose\"" "$rows" "$prose"; done
+retry_judges 1 "wrong defaults in the table" \
+  "| RETRY_ATTEMPTS | 3 | Maximum attempts |$nl| RETRY_DELAY | 1 | Pause |" "$last"
+retry_judges 1 "defaults swapped between the rows" \
+  "| RETRY_ATTEMPTS | 2 | Maximum attempts |$nl| RETRY_DELAY | 5 | Pause |" "$last"
+retry_judges 1 "a row missing" "| RETRY_ATTEMPTS | 5 | Maximum attempts |" "$last"
+retry_judges 1 "an empty description" \
+  "| RETRY_ATTEMPTS | 5 | Maximum attempts |$nl| RETRY_DELAY | 2 | |" "$last"
+d="$(variant retry-docs no-table)" && printf '\n%s\n' "## Configuration$nl$nl- RETRY_ATTEMPTS: \
+default 5$nl- RETRY_DELAY: default 2$nl$nl## Exit status$nl$nl$last" >>"$d/README.md"
+judges 1 "a list instead of the table" retry-docs "$d"
 
 echo
 echo "selftest: $pass passed, $fail failed"

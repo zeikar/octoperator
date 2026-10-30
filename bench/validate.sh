@@ -115,6 +115,10 @@ bounded() {
     if (!$pid) { setpgrp(0, 0); exec @ARGV or die "exec $ARGV[0]: $!\n"; }
     setpgrp($pid, $pid);  # also here, so the kill below cannot race the child
     $SIG{ALRM} = sub { kill "KILL", -$pid; exit 142 };
+    # Ctrl-C cannot reach the child group, so pass an interrupt on, then die of it so bash
+    # aborts too.
+    $SIG{$_} = sub { kill "KILL", -$pid; $SIG{$_[0]} = "DEFAULT"; kill $_[0], $$ }
+      for qw(INT TERM HUP);
     alarm $t;
     waitpid($pid, 0);
     exit($? & 127 ? 128 + ($? & 127) : $? >> 8);

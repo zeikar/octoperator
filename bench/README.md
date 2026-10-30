@@ -67,8 +67,9 @@ A small, self-contained repo of a few files that does not depend on Octoperator:
 line per problem.
 
 - Check **behavior, not implementation**, so any reasonable correct fix passes. Run the code on
-  hidden inputs instead of matching source text. For docs tasks, check that the required facts
-  appear in the right file, without depending on exact wording.
+  hidden inputs instead of matching source text. For docs tasks, have the issue ask for a
+  specific structure, such as a named section or a table with given columns, and check that
+  structure strictly; free prose cannot be matched fairly.
 - Run the repo's own tests too (`make test`), so a fix that breaks them fails.
 - Use only bash, POSIX tools, and the Python 3 standard library. Work in a `mktemp -d` directory,
   and don't leave files in `<repo-dir>`. For example, set `PYTHONDONTWRITEBYTECODE=1`.
