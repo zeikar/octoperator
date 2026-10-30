@@ -123,7 +123,8 @@ in a `scripts/octo-*.sh` helper. The grant lasts for the turn the skill runs in.
 
 Two things the skills can't pre-allow for you:
 
-- **Your repo's test command**, which they run to verify each change.
+- **Your repo's own commands** — the test command they run to verify each change, plus any lint,
+  install, or build command the work runs.
 - **Subagents.** Implementation (parallel path), `auto`'s fixes, and reviews run inside
   `issue-implementer` / `pr-reviewer` subagents, which call `gh`, `git`, and your tests. Claude Code
   doesn't document a skill's pre-allowed tools reaching a subagent; settings-file rules apply to the
@@ -140,7 +141,8 @@ the target repo's `.claude/settings.json` (or `settings.local.json` to keep it p
 }
 ```
 
-Use your repo's actual command — `Bash(pytest:*)`, `Bash(make test:*)`, `Bash(go test:*)`, …
+Use your repo's actual commands — `Bash(pytest:*)`, `Bash(make test:*)`, `Bash(go test:*)`,
+`Bash(npm ci:*)`, `Bash(npm run lint:*)`, …
 
 ## Usage example
 
