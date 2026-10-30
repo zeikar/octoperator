@@ -1,0 +1,90 @@
+diff --git a/README.md b/README.md
+index 555da93..7859f73 100644
+--- a/README.md
++++ b/README.md
+@@ -7,6 +7,7 @@ words with the same count are listed alphabetically.
+ 
+     python3 wordfreq.py notes.txt
+     cat notes.txt | python3 wordfreq.py -
++    python3 wordfreq.py --top 10 notes.txt   # only the 10 most frequent words
+ 
+ Each output line is `<count> <word>`:
+ 
+diff --git a/tests/test_wordfreq.py b/tests/test_wordfreq.py
+index b327cd5..f54df62 100644
+--- a/tests/test_wordfreq.py
++++ b/tests/test_wordfreq.py
+@@ -25,15 +25,31 @@ class CountWordsTest(unittest.TestCase):
+ 
+ 
+ class MainTest(unittest.TestCase):
+-    def test_prints_count_and_word(self):
++    def run_main(self, *args):
+         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
+             fh.write("to be or not to be")
+         self.addCleanup(os.remove, fh.name)
+ 
+         out = io.StringIO()
+         with contextlib.redirect_stdout(out):
+-            self.assertEqual(wordfreq.main([fh.name]), 0)
+-        self.assertEqual(out.getvalue(), "2 be\n2 to\n1 not\n1 or\n")
++            self.assertEqual(wordfreq.main([*args, fh.name]), 0)
++        return out.getvalue()
++
++    def test_prints_count_and_word(self):
++        self.assertEqual(self.run_main(), "2 be\n2 to\n1 not\n1 or\n")
++
++    def test_top_limits_output(self):
++        self.assertEqual(self.run_main("--top", "2"), "2 be\n2 to\n")
++
++    def test_top_larger_than_word_count(self):
++        self.assertEqual(self.run_main("--top", "9"), "2 be\n2 to\n1 not\n1 or\n")
++
++    def test_top_rejects_non_positive(self):
++        for bad in ("0", "-1", "abc"):
++            with self.subTest(bad=bad), contextlib.redirect_stderr(io.StringIO()):
++                with self.assertRaises(SystemExit) as caught:
++                    wordfreq.main(["--top", bad, "notes.txt"])
++                self.assertNotEqual(caught.exception.code, 0)
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/wordfreq.py b/wordfreq.py
+index dd61924..85dea6c 100644
+--- a/wordfreq.py
++++ b/wordfreq.py
+@@ -14,9 +14,22 @@ def count_words(text):
+     return sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+ 
+ 
++def positive_int(value):
++    """argparse type: an integer of at least 1."""
++    try:
++        number = int(value)
++    except ValueError:
++        number = 0
++    if number < 1:
++        raise argparse.ArgumentTypeError(f"must be a positive integer, got {value!r}")
++    return number
++
++
+ def main(argv=None):
+     parser = argparse.ArgumentParser(description="Count word frequencies in a text file.")
+     parser.add_argument("file", help="text file to read, or - for stdin")
++    parser.add_argument("--top", type=positive_int, metavar="N",
++                        help="print only the N most frequent words")
+     args = parser.parse_args(argv)
+ 
+     if args.file == "-":
+@@ -25,7 +38,10 @@ def main(argv=None):
+         with open(args.file, encoding="utf-8") as fh:
+             text = fh.read()
+ 
+-    for word, count in count_words(text):
++    counts = count_words(text)
++    if args.top is not None:
++        counts = counts[:args.top]
++    for word, count in counts:
+         print(f"{count} {word}")
+     return 0
+ 

@@ -19,7 +19,15 @@ jobs:
         # info-level notes (e.g. SC2015 guard-clause style) vary by shellcheck
         # version and are not bugs here, so they must not make CI nondeterministic.
         # Static analysis is OS-independent, so one run (Linux) is enough.
+        # globstar so bench/**/*.sh reaches the task checks and seed scripts at any depth.
         if: runner.os == 'Linux'
-        run: shellcheck --severity=warning scripts/*.sh scripts/test/smoke.sh
+        run: |
+          shopt -s globstar
+          shellcheck --severity=warning scripts/*.sh scripts/test/smoke.sh bench/**/*.sh
       - name: Helper script smoke tests
         run: bash scripts/test/smoke.sh
+      - name: Benchmark task validation
+        # Offline: each task's hidden check must fail on its seed and pass with its reference patch.
+        run: bash bench/validate.sh
+      - name: Benchmark validator self-test
+        run: bash bench/test/selftest.sh

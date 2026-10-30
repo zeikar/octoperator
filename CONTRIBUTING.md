@@ -57,10 +57,13 @@ Octoperator has no build step. Before opening a PR:
 #    on ubuntu and macOS on every push and PR.
 bash scripts/test/smoke.sh
 
-# 2. Verify prerequisites and (optionally) board access
+# 2. Validate the benchmark tasks (offline; CI runs these too). See bench/README.md.
+bash bench/validate.sh && bash bench/test/selftest.sh
+
+# 3. Verify prerequisites and (optionally) board access
 bash scripts/octo-doctor.sh --repo <owner>/<name> [--project <number>]
 
-# 3. Confirm the plugin manifest is valid JSON
+# 4. Confirm the plugin manifest is valid JSON
 python3 -c "import json; json.load(open('.claude-plugin/plugin.json')); print('plugin.json OK')"
 ```
 
