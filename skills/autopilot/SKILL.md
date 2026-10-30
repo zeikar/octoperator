@@ -3,7 +3,6 @@ name: autopilot
 description: This skill should be used when the user asks to "run autopilot", "keep shipping until there's nothing left", "drain the ready issues automatically", "autopilot this repo", or invokes /octoperator:autopilot. Bounded orchestrator that loops over the lifecycle — discover work, run auto (implement -> review -> merge), and when no work remains, research proposes more.
 argument-hint: "[--mode semi|full] [--cycles N] [--max M] [--dry-run]"
 allowed-tools: Bash(gh:*), Bash(git:*), Bash(bash:*), Read, Grep, Glob, Edit, Write, Task
-version: 0.1.0
 ---
 
 # Autopilot

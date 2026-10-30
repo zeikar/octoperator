@@ -3,7 +3,6 @@ name: auto
 description: This skill should be used when the user asks to "auto-ship issue #N", "ship issue 42 end to end", "implement review and merge issue N", "fully automate issue 42", "implement and merge these issues", or invokes /octoperator:auto. Runs the full lifecycle for one or more GitHub issues end-to-end — implement, review, then merge — autonomously.
 argument-hint: "<issue-number...> [--max N] [--dry-run]"
 allowed-tools: Bash(gh:*), Bash(git:*), Bash(bash:*), Read, Grep, Glob, Edit, Write, Task
-version: 0.1.0
 ---
 
 # Auto

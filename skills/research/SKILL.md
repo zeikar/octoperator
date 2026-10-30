@@ -3,7 +3,6 @@ name: research
 description: This skill should be used when the user asks "what should we build next", "research improvements for this repo", "propose new features", "what should we refactor", "find tech debt", "what's missing in this project", "find things to improve", or invokes /octoperator:research. Analyzes the repository and produces a ranked list of proposed work across new features, refactoring, tech debt, test coverage, docs, and DX — not just new features — optionally filing them as GitHub issues.
 argument-hint: "[--create] [--count N] [--focus <feature|refactor|debt|tests|docs|dx|all>] [--dry-run]"
 allowed-tools: Bash(gh:*), Read, Grep, Glob, Task
-version: 0.1.0
 ---
 
 # Research

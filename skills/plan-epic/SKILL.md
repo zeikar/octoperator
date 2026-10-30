@@ -3,7 +3,6 @@ name: plan-epic
 description: This skill should be used when the user asks to "plan an epic", "break this down into issues", "decompose this into issues", "create an epic for X", "turn this request into a backlog", or invokes /octoperator:plan-epic. Decomposes a large natural-language request into a GitHub epic issue plus linked child issues, milestone, labels, and project board items.
 argument-hint: <request describing the body of work> [--dry-run]
 allowed-tools: Bash(gh:*), Bash(git:*), Bash(bash:*), Read, Task
-version: 0.1.0
 ---
 
 # Plan Epic
