@@ -339,6 +339,12 @@ expect 0 "run warns that the timed-out task's cost is unknown" \
 expect 0 "solve records the timeout's exit and a null claude" \
   test "$(fields "$(cat "$BENCH_RESULTS_DIR/octo-bench-retry-docs-slow.solve.json")" claude)" \
     = null
+# Without a cap, run goes on, but its total must name the tasks whose cost is unknown.
+slow_err="$(STUB_CLAUDE_SLEEP=10 BENCH_SOLVE_TIMEOUT=1 STUB_CASE="$cases/nopr" bench run \
+  --tasks retry-docs,vsort-numeric --run-id slow2 --live 2>&1 >/dev/null)"
+expect 0 "run without a cap: the total names the tasks whose cost is unknown" \
+  test -n "$(printf '%s\n' "$slow_err" \
+    | grep -Fx 'run slow2: total cost $0, plus unknown cost for: retry-docs vsort-numeric')"
 
 # Preflight checks for claude before setup creates any repo. A PATH of links to just the
 # tools the script needs before then, plus the stub gh, leaves claude out.

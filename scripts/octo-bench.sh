@@ -400,7 +400,7 @@ cmd_cleanup() {
 }
 
 cmd_run() {
-  total=0 failed=0
+  total=0 failed=0 unknown_tasks=""
   for t in $TASK_LIST; do
     if [ -n "$MAX_COST" ] && awk -v t="$total" -v c="$MAX_COST" 'BEGIN { exit !(t > c) }'; then
       warn "spent \$$total, past --max-cost-usd $MAX_COST: not starting $t or later tasks"
@@ -436,11 +436,18 @@ print(c if ok else "unknown %s" % s.get("exit", "?"))' "$solve")" || cost="unkno
           echo "run $RUN_ID: total cost \$$total, plus $t's unknown cost" >&2
           return 1
         fi
+        unknown_tasks="$unknown_tasks $t"
         cost=0 ;;
     esac
     total="$(awk -v t="$total" -v c="$cost" 'BEGIN { print t + c }')"
   done
-  [ "$DRY" -eq 1 ] || echo "run $RUN_ID: total cost \$$total" >&2
+  if [ "$DRY" -eq 0 ]; then
+    if [ -n "$unknown_tasks" ]; then
+      echo "run $RUN_ID: total cost \$$total, plus unknown cost for:$unknown_tasks" >&2
+    else
+      echo "run $RUN_ID: total cost \$$total" >&2
+    fi
+  fi
   [ "$failed" -eq 0 ]
 }
 
