@@ -10,6 +10,11 @@
 #            print <p> (only) on stdout; git's own progress goes to stderr.
 #            Exits non-zero if <b> is already checked out in any worktree or
 #            already exists as a local branch.
+#   detach --name <prefix> --ref <commit>
+#            Create a throwaway detached worktree of <commit> (already in the local
+#            object store) at <repo-root>/.octoperator/worktrees/<prefix>-<pid>, and
+#            print that path (only) on stdout. The pid suffix keeps concurrent runs
+#            from sharing a tree. Works even when <commit>'s branch is checked out.
 #   remove --path <p> [--force]
 #            Remove the worktree at <p>.  Refuses if the tree is dirty or has
 #            untracked files unless --force is given.
@@ -22,13 +27,13 @@ set -euo pipefail
 
 ACTION="${1:-}"
 case "$ACTION" in
-  add|remove|list) shift ;;
+  add|detach|remove|list) shift ;;
   -h|--help) sed -n '2,/^[^#]/s/^# \{0,1\}//p' "$0"; exit 0 ;;
-  "") echo "Usage: octo-worktree.sh <add|remove|list> [options]" >&2; exit 2 ;;
+  "") echo "Usage: octo-worktree.sh <add|detach|remove|list> [options]" >&2; exit 2 ;;
   *)  echo "Unknown action: $ACTION" >&2; exit 2 ;;
 esac
 
-BRANCH="" WT_PATH="" BASE="" FORCE=0
+BRANCH="" WT_PATH="" BASE="" NAME="" REF="" FORCE=0
 # Under `set -e` a bare `shift 2` past the last argument would exit 1 with no message.
 need_value() { [ $# -ge 2 ] || { echo "octo-worktree: missing value for $1" >&2; exit 2; }; }
 while [ $# -gt 0 ]; do
@@ -36,6 +41,8 @@ while [ $# -gt 0 ]; do
     --branch) need_value "$@"; BRANCH="$2"; shift 2 ;;
     --path)   need_value "$@"; WT_PATH="$2"; shift 2 ;;
     --base)   need_value "$@"; BASE="$2"; shift 2 ;;
+    --name)   need_value "$@"; NAME="$2"; shift 2 ;;
+    --ref)    need_value "$@"; REF="$2"; shift 2 ;;
     --force)  FORCE=1; shift ;;
     -h|--help) sed -n '2,/^[^#]/s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
@@ -63,6 +70,15 @@ case "$ACTION" in
 
     # git prints "HEAD is now at …" on stdout; send it to stderr so stdout is only the path.
     git worktree add -b "${BRANCH}" "${WT_PATH}" "${BASE}" >&2
+    echo "${WT_PATH}"
+    ;;
+
+  detach)
+    [ -n "$NAME" ] || { echo "octo-worktree: --name is required" >&2; exit 2; }
+    [ -n "$REF" ]  || { echo "octo-worktree: --ref is required" >&2; exit 2; }
+
+    WT_PATH="$(git rev-parse --show-toplevel)/.octoperator/worktrees/${NAME}-$$"
+    git worktree add --detach "${WT_PATH}" "${REF}" >&2
     echo "${WT_PATH}"
     ;;
 
