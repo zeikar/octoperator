@@ -148,6 +148,10 @@ WANTED = {"success": ("an attempt succeeds", "0"), "fail": ("every attempt fails
 # The all-attempts-fail status names the last attempt, or says the command's status passes through.
 LAST = re.compile(r"\b(last|final|latest|most\s+recent)\b|\bpass(es|ed|ing)?\s+(it\s+)?"
                   r"(through|along|on)\b|\bpropagat", re.I)
+# Example clauses ("e.g. `1`", "(1-255)") are dropped before the no-digits test, so a correct
+# cell that illustrates the status still passes while a bare number is still rejected.
+EXAMPLE = re.compile(r"\(?\b(e\.g\.|for example|for instance|such as)[^)]*\)?"
+                     r"|\(\d+\s*[-\u2013]\s*\d+\)", re.I)
 
 
 def case_of(row):
@@ -165,11 +169,12 @@ else:
         for case, (label, want) in WANTED.items():
             found = [r for r in rows if case_of(r) == case]
             status = found[0][1] if found and len(found[0]) > 1 else ""
+            bare = EXAMPLE.sub("", status)
             if not found:
                 print(f"FAIL: the Exit status table has no row for: {label}")
             elif len(found) > 1:
                 print(f"FAIL: the Exit status table has more than one row for: {label}")
-            elif want is None and (re.search(r"\d", status) or not LAST.search(status)):
+            elif want is None and (re.search(r"\d", bare) or not LAST.search(bare)):
                 print(f"FAIL: the Exit status table gives {status!r} when {label}, "
                       "wanted the last attempt's status")
             elif want is not None and re.findall(r"\d+", status) != [want]:

@@ -231,7 +231,10 @@ All attempts fail | last attempt's exit code${nl}An attempt succeeds | exits 0"
 for fail_row in \
   "| Every attempt fails | Status of the most recent attempt |" \
   "| Attempts run out | Passes through the command's status |" \
-  "| No attempt succeeds | The final attempt's exit status |"
+  "| No attempt succeeds | The final attempt's exit status |" \
+  "| Every attempt fails | The exit status of the last attempt (e.g. \`1\`) |" \
+  "| Every attempt fails | The exit status of the last attempt, e.g. \`22\` from \`curl -f\` |" \
+  "| Every attempt fails | The exit status of the last attempt (1-255) |"
 do retry_judges 0 "fail row \"$fail_row\"" "$rows" \
   "$(statuses "$ok_row" "$fail_row" "$usage_row")"; done
 for fail_row in \
