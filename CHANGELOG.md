@@ -7,6 +7,7 @@ All notable changes to Octoperator are documented in this file. The format is ba
 ## [Unreleased]
 
 ### Added
+- README workflow diagram (light/dark PNGs via `<picture>`), rendered from `docs/workflow.html`.
 - `octo-merge-state.sh` helper: prints a PR's `mergeStateStatus`, re-querying while GitHub reports
   `UNKNOWN` (up to 3 tries, 10 s apart). `auto`'s merge gate uses it.
 - `octo-worktree.sh detach --name <prefix> --ref <commit>`: creates a throwaway detached worktree at a
