@@ -7,6 +7,16 @@ All notable changes to Octoperator are documented in this file. The format is ba
 ## [Unreleased]
 
 ### Added
+- `scripts/octo-bench.sh`, an opt-in benchmark harness. `setup` creates a throwaway private repo
+  from a task's seed and files its issue, `solve` runs `claude -p "/octoperator:auto <n>"` in a
+  clone (time-bounded; optional, since the session's own agent can run `auto` instead), `check`
+  runs the hidden `check.sh` on the merged default branch and appends one JSON line of metrics
+  (merged, check passed, fix rounds, minor-only rounds, hold reason, cost, turns, duration,
+  Octoperator SHA, model) to `bench/results/<run-id>.jsonl`, `cleanup` deletes the run's repos, and
+  `run` loops over tasks under a `--max-cost-usd` cap. Every network step needs `--live`;
+  `--dry-run` prints the plan. `smoke.sh` tests the gate, the dry run, preflight, `check`'s
+  metrics, and the cost cap offline against stub `gh` and `claude`. CONTRIBUTING.md → "Running the
+  benchmark" covers remote-session use.
 - Benchmark task format and three starter tasks (feature, bug fix, docs) under `bench/tasks/`, each
   with an issue to file (`task.md`), a seed repo, a hidden `check.sh` oracle, and a reference
   `solution.patch`; the format is documented in `bench/README.md`. `bench/validate.sh` checks every

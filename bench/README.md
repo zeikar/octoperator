@@ -5,7 +5,8 @@ correct results (epic #66). Each task is a GitHub issue to file against a small 
 hidden check that decides, without any model, whether the merged result is correct.
 
 Everything here is offline: nothing calls `claude`, `gh`, or the network. Running the tasks
-through `auto` is the job of a separate, opt-in harness.
+through `auto` is the job of the opt-in harness `scripts/octo-bench.sh` (see CONTRIBUTING.md →
+Running the benchmark).
 
 ## Layout
 

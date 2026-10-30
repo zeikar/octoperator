@@ -7,5 +7,8 @@
 # Octoperator parallel worktrees (one transient worktree per issue during parallel implement)
 .octoperator/worktrees/
 
+# octo-bench.sh results (bench/results/<run-id>.jsonl and solve JSON)
+bench/results/
+
 # OS / editor noise
 .DS_Store
