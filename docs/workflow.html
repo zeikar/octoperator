@@ -1,0 +1,250 @@
+<!doctype html>
+<!--
+  Source for docs/workflow-light.png and docs/workflow-dark.png (the README's workflow diagram).
+  Open with #light or #dark to pick the theme. After editing, re-render both PNGs: screenshot
+  #canvas at 1000x716 with deviceScaleFactor 2 and a transparent background (e.g. Playwright's
+  locator.screenshot({ omitBackground: true })), once per theme.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Octoperator workflow</title>
+<style>
+  :root {
+    --text: #1f2328; --muted: #59636e; --line: #d0d7de;
+    --card: #ffffff; --panel: #f6f8fa;
+    --gray: #59636e;  --gray-bg: #f6f8fa;
+    --blue: #0969da;  --blue-bg: #f1f8ff;
+    --green: #1a7f37; --green-bg: #f0fbf3;
+    --amber: #9a6700; --amber-bg: #fff8c5;
+    --purple: #8250df; --purple-bg: #fbefff;
+    --shadow: 0 1px 2px rgba(31, 35, 40, .06), 0 3px 10px rgba(31, 35, 40, .06);
+  }
+  :root.dark {
+    --text: #e6edf3; --muted: #9198a1; --line: #30363d;
+    --card: #0d1117; --panel: #151b23;
+    --gray: #9198a1;  --gray-bg: #151b23;
+    --blue: #4493f8;  --blue-bg: #0d1d33;
+    --green: #3fb950; --green-bg: #0d2116;
+    --amber: #d29922; --amber-bg: #2b2111;
+    --purple: #ab7df8; --purple-bg: #1d1530;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 3px 10px rgba(0, 0, 0, .25);
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { background: transparent; }
+  body {
+    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial,
+      sans-serif;
+    color: var(--text);
+  }
+  code, .cmd { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+
+  #canvas { position: relative; width: 1000px; height: 716px; }
+  .abs { position: absolute; }
+  svg.wires { position: absolute; inset: 0; overflow: visible; z-index: 1; }
+  .card, .label { z-index: 2; }
+
+  .panel {
+    border: 1.5px solid var(--accent); border-radius: 18px; background: var(--accent-bg);
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-top: 3px solid var(--accent);
+    border-radius: 12px; padding: 12px 14px; box-shadow: var(--shadow);
+  }
+  .stage {
+    display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700;
+    letter-spacing: .08em; text-transform: uppercase; color: var(--accent);
+  }
+  .stage b {
+    display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%;
+    background: var(--accent); color: var(--card); font-size: 11px; letter-spacing: 0;
+  }
+  .cmd { font-size: 16px; font-weight: 700; color: var(--text); }
+  .cmd .ns { color: var(--muted); font-weight: 500; }
+  .desc { margin-top: 6px; font-size: 13.5px; color: var(--muted); }
+  .desc li { list-style: none; padding-left: 14px; position: relative; }
+  .desc li::before {
+    content: ""; position: absolute; left: 2px; top: .62em; width: 5px; height: 5px;
+    border-radius: 50%; background: var(--accent);
+  }
+  .foot {
+    margin-top: 8px; padding-top: 7px; border-top: 1px dashed var(--line); font-size: 12.5px;
+    color: var(--muted);
+  }
+  .label { font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+  .label strong { color: var(--accent); font-weight: 600; }
+  code {
+    font-size: .92em; padding: 0 4px; border-radius: 4px; background: var(--panel);
+    border: 1px solid var(--line);
+  }
+
+  .s-gray   { --accent: var(--gray);   --accent-bg: var(--gray-bg); }
+  .s-blue   { --accent: var(--blue);   --accent-bg: var(--blue-bg); }
+  .s-green  { --accent: var(--green);  --accent-bg: var(--green-bg); }
+  .s-amber  { --accent: var(--amber);  --accent-bg: var(--amber-bg); }
+  .s-purple { --accent: var(--purple); --accent-bg: var(--purple-bg); }
+
+  .chips { display: flex; align-items: flex-start; gap: 6px; margin-top: 12px; }
+  .chip { text-align: center; }
+  .chip span {
+    display: inline-block; padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 600;
+    color: var(--accent); background: var(--card); border: 1.5px solid var(--accent);
+  }
+  .chip small { display: block; margin-top: 5px; font-size: 12px; color: var(--muted); }
+  .chip-arrow { color: var(--muted); padding-top: 3px; font-size: 15px; }
+</style>
+</head>
+<body>
+<div id="canvas">
+
+  <!-- Connectors (drawn under the cards). -->
+  <svg class="wires" width="1000" height="716" viewBox="0 0 1000 716">
+    <defs>
+      <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7"
+              orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+      </marker>
+      <marker id="arr-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7"
+              orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="var(--amber)"/>
+      </marker>
+      <marker id="arr-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7"
+              orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="var(--green)"/>
+      </marker>
+      <marker id="arr-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7"
+              orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="var(--blue)"/>
+      </marker>
+    </defs>
+    <g fill="none" stroke-width="2" stroke-linecap="round">
+      <!-- setup → intake -->
+      <path d="M246,118 H280" stroke="var(--muted)" marker-end="url(#arr)"/>
+      <!-- intake → ship -->
+      <path d="M470,194 V250" stroke="var(--muted)" marker-end="url(#arr)"/>
+      <!-- implement → review → merge -->
+      <path d="M288,366 H352" stroke="var(--muted)" marker-end="url(#arr)"/>
+      <path d="M596,366 H660" stroke="var(--green)" marker-end="url(#arr-green)"/>
+      <!-- fix loop -->
+      <path d="M420,440 V484" stroke="var(--amber)" marker-end="url(#arr-amber)"/>
+      <path d="M530,484 V444" stroke="var(--amber)" marker-end="url(#arr-amber)"/>
+      <!-- autopilot loop: ship → back to intake -->
+      <path d="M926,404 H948 V118 H930" stroke="var(--blue)" stroke-dasharray="6 6"
+            marker-end="url(#arr-blue)"/>
+    </g>
+  </svg>
+
+  <!-- 1 · Set up -->
+  <div class="abs card s-gray" style="left:24px; top:42px; width:222px; height:152px;">
+    <div class="stage"><b>1</b>Set up</div>
+    <div class="cmd" style="margin-top:8px;"><span class="ns">/octoperator:</span>setup</div>
+    <ul class="desc" style="padding:0;">
+      <li>Detects the repo &amp; token</li>
+      <li>Optional Projects v2 board</li>
+      <li>Writes local settings</li>
+    </ul>
+  </div>
+
+  <!-- 2 · Plan & intake -->
+  <div class="abs panel s-blue" style="left:282px; top:24px; width:644px; height:170px;">
+    <div class="stage" style="position:absolute; left:16px; top:12px;"><b>2</b>Plan &amp; intake</div>
+  </div>
+  <div class="abs card s-blue" style="left:298px; top:58px; width:196px; height:122px;">
+    <div class="cmd">plan-epic</div>
+    <div class="desc">Big request → an epic plus linked sub-issues</div>
+  </div>
+  <div class="abs card s-blue" style="left:506px; top:58px; width:196px; height:122px;">
+    <div class="cmd">issue</div>
+    <div class="desc">One well-formed issue: labels &amp; acceptance criteria</div>
+  </div>
+  <div class="abs card s-blue" style="left:714px; top:58px; width:196px; height:122px;">
+    <div class="cmd">research</div>
+    <div class="desc">"What next?" — proposes features, refactors, debt, tests, docs</div>
+  </div>
+
+  <div class="abs label" style="left:480px; top:212px;">issues</div>
+
+  <!-- 3 · Ship -->
+  <div class="abs panel s-green" style="left:24px; top:252px; width:902px; height:304px;">
+    <div style="position:absolute; left:16px; top:12px; display:flex; align-items:baseline; gap:12px;">
+      <span class="stage"><b>3</b>Ship</span>
+      <span class="cmd" style="font-size:15px;"><span class="ns">/octoperator:</span>auto</span>
+      <span class="label">implement → review → fix → merge, in one command</span>
+    </div>
+  </div>
+
+  <div class="abs card s-green" style="left:48px; top:294px; width:238px; height:144px;">
+    <div class="cmd">implement</div>
+    <ul class="desc" style="padding:0;">
+      <li>Branch <code>42-add-login</code></li>
+      <li>Code + tests</li>
+      <li>PR with <code>Closes #42</code></li>
+    </ul>
+    <div class="foot">Several issues → parallel worktrees</div>
+  </div>
+
+  <div class="abs card s-green" style="left:356px; top:294px; width:238px; height:144px;">
+    <div class="cmd">review</div>
+    <ul class="desc" style="padding:0;">
+      <li>Checks out the PR head</li>
+      <li><code>pr-reviewer</code> reads + tests it</li>
+      <li>Findings + verdict on the PR</li>
+    </ul>
+  </div>
+
+  <div class="abs card s-green" style="left:664px; top:294px; width:238px; height:144px;">
+    <div class="cmd">merge gate</div>
+    <ul class="desc" style="padding:0;">
+      <li>Review covers current head</li>
+      <li>CI green · <code>CLEAN</code></li>
+      <li>Regular merge → issue closes</li>
+    </ul>
+    <div class="foot">Not ready → held, never forced</div>
+  </div>
+
+  <div class="abs label s-green" style="left:592px; top:324px; width:72px; text-align:center;
+       line-height:1.25;"><strong>clean</strong><br>nits only</div>
+
+  <div class="abs label s-amber" style="left:240px; top:452px; width:170px; text-align:right;">
+    <strong>blocker / major / minor</strong>
+  </div>
+  <div class="abs label s-amber" style="left:540px; top:452px;">re-review · up to 6 rounds</div>
+
+  <div class="abs card s-amber" style="left:370px; top:486px; width:210px; padding:8px 12px;
+       background:var(--amber-bg); border-top-width:1px; border-color:var(--amber); text-align:center;">
+    <span class="cmd" style="font-size:14px;">fix</span>
+    <span class="label" style="margin-left:6px;">pushed to the PR branch</span>
+  </div>
+
+  <div class="abs label s-blue" style="left:960px; top:166px; width:30px; height:200px;">
+    <div style="position:absolute; left:50%; top:50%; transform:translate(-50%,-50%) rotate(90deg);
+         white-space:nowrap;"><strong>autopilot</strong> · repeats until no work is left</div>
+  </div>
+
+  <!-- 4 · Track -->
+  <div class="abs card s-purple" style="left:24px; top:588px; width:262px; height:112px;">
+    <div class="stage"><b>4</b>Track</div>
+    <div class="cmd" style="margin-top:8px;"><span class="ns">/octoperator:</span>sync</div>
+    <div class="desc">Standup report · fixes board drift</div>
+  </div>
+
+  <div class="abs card s-gray" style="left:310px; top:588px; width:616px; height:112px;">
+    <div class="stage">Board status <span style="text-transform:none; letter-spacing:0;
+         font-weight:500; color:var(--muted);">— optional Projects v2</span></div>
+    <div class="chips">
+      <div class="chip s-blue"><span>Todo</span><small>issue filed</small></div>
+      <div class="chip-arrow">→</div>
+      <div class="chip s-green"><span>In Progress</span><small>branch created</small></div>
+      <div class="chip-arrow">→</div>
+      <div class="chip s-green"><span>In Review</span><small>PR opened</small></div>
+      <div class="chip-arrow">→</div>
+      <div class="chip s-purple"><span>Done</span><small>merged</small></div>
+    </div>
+  </div>
+
+</div>
+<script>
+  if (location.hash === "#dark") document.documentElement.classList.add("dark");
+</script>
+</body>
+</html>

@@ -14,6 +14,11 @@ GitHub-native project operator instead of a one-off coding assistant.
 
 ## How it works
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/workflow-dark.png">
+  <img alt="Octoperator workflow: setup, then plan-epic / issue / research create issues; auto implements, reviews, fixes blocker/major/minor findings (up to 6 rounds), and merges through a gate; autopilot repeats it; sync tracks the optional board (Todo, In Progress, In Review, Done)." src="docs/workflow-light.png" width="100%">
+</picture>
+
 Octoperator drives the [`gh` CLI](https://cli.github.com) — it reuses your existing `gh auth`, stores
 no tokens, and runs no extra server. The trickier GraphQL / Projects-v2 operations are wrapped in small
 helper scripts for reliability.
