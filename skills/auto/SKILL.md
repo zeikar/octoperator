@@ -149,14 +149,14 @@ Then query its readiness:
 
 ```bash
 gh pr view <pr#> --repo "$REPO" \
-  --json headRefOid,state,isDraft,mergeStateStatus,closingIssuesReferences
+  --json headRefOid,state,isDraft,closingIssuesReferences
 ```
 
 **Merge ONLY when ALL of these hold** (step 4 has already held every PR whose latest review blocks):
 - `headRefOid` equals the commit the last non-blocking review covered (a later push is unreviewed),
 - `state` is `OPEN`,
 - `isDraft` is `false`,
-- `mergeStateStatus` is **`CLEAN`**.
+- `mergeStateStatus` is **`CLEAN`** — the value the helper below prints decides, not a query.
 
 `CLEAN` is GitHub's "ready to merge" state: it means the PR is mergeable (no conflicts), **every
 required status check has passed**, the branch is not behind in a way protection forbids, and no branch
@@ -182,7 +182,8 @@ within the pre-allowed `Bash(bash:*)` (see `implement`'s command rule):
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-merge-state.sh" --repo "$REPO" --pr <pr#>
 ```
 
-Treat a non-`CLEAN` result from it as final.
+Treat a non-`CLEAN` result from it as final. If the helper exits non-zero or prints nothing, hold
+the PR (reason: merge state unavailable).
 
 When every condition holds, merge with a **regular merge commit** and delete the branch, pinned to
 the reviewed commit so a push that lands after the check cannot slip in unreviewed:

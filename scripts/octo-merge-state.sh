@@ -7,8 +7,8 @@
 # GitHub computes mergeability asynchronously, so a fresh query can return UNKNOWN. Queries up to
 # --tries times (default 3), --interval seconds apart (default 10), stopping at the first answer
 # that is not UNKNOWN, and prints the last mergeStateStatus (CLEAN, DIRTY, BLOCKED, BEHIND,
-# UNSTABLE, UNKNOWN, …) on stdout. Exits 0 once a status was read, 1 on a gh error, 2 on bad
-# arguments.
+# UNSTABLE, UNKNOWN, …) on stdout. Exits 0 once a status was read, 1 on a gh error (whatever gh's
+# own exit code), 2 on bad arguments.
 set -euo pipefail
 
 REPO="" PR="" TRIES=3 INTERVAL=10
@@ -35,7 +35,10 @@ esac
 
 i=1
 while :; do
-  STATE=$(gh pr view "$PR" --repo "$REPO" --json mergeStateStatus --jq '.mergeStateStatus')
+  # `|| exit 1`: under `set -e` gh's own exit code would leak out, and gh's 2 would look like
+  # this script's bad-arguments 2.
+  STATE=$(gh pr view "$PR" --repo "$REPO" --json mergeStateStatus \
+    --jq '.mergeStateStatus') || exit 1
   if [ "$STATE" != "UNKNOWN" ] || [ "$i" -ge "$TRIES" ]; then break; fi
   i=$((i + 1))
   sleep "$INTERVAL"

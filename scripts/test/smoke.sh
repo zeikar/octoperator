@@ -11,8 +11,9 @@
 #   - <script> <flag>      : a value flag given last, with no value, exits 2 (never hangs)
 #   - octo-exclude.sh      : run for real against a throwaway local `git init` repo
 #   - octo-worktree.sh     : add / detach / list / remove run for real in a throwaway local repo
+#   - octo-merge-state.sh  : the UNKNOWN re-query loop and gh-error exit, against a stub `gh`
 #
-# It deliberately never invokes a helper in a way that reaches gh / the network.
+# It deliberately never invokes a helper in a way that reaches the real gh / the network.
 # Exits 0 when every check passes, 1 when any check fails.
 set -uo pipefail
 
@@ -130,6 +131,43 @@ expect 0 "detach checks out the commit, detached" \
 expect 0 "detach --ref of an unknown commit fails" \
   test "$(worktree detach --name review-2 --ref 0123456789abcdef0123456789abcdef01234567 >/dev/null 2>&1; echo $?)" -ne 0
 expect 0 "remove --force removes a detached tree" worktree remove --path "$dout" --force
+
+echo "• octo-merge-state.sh (offline, stub gh)"
+# A stub `gh` first on PATH: it counts its calls in a file beside itself, prints UNKNOWN for the
+# first $STUB_UNKNOWN calls and CLEAN after, or exits $STUB_GH_RC when that is non-zero.
+stub="$wtmp/stub-bin"
+mkdir -p "$stub"
+cat >"$stub/gh" <<'STUB'
+#!/usr/bin/env bash
+calls="$(dirname "$0")/calls"
+n=$(( $(cat "$calls" 2>/dev/null || echo 0) + 1 ))
+echo "$n" >"$calls"
+[ "${STUB_GH_RC:-0}" -eq 0 ] || exit "$STUB_GH_RC"
+if [ "$n" -le "${STUB_UNKNOWN:-0}" ]; then echo UNKNOWN; else echo CLEAN; fi
+STUB
+chmod +x "$stub/gh"
+# merge_state <unknown-calls> <gh-exit> : run the helper against the stub; sets ms_out / ms_rc /
+# ms_calls.
+merge_state() {
+  rm -f "$stub/calls"
+  ms_out="$(STUB_UNKNOWN="$1" STUB_GH_RC="$2" PATH="$stub:$PATH" \
+    bounded 10 bash "$SCRIPTS_DIR/octo-merge-state.sh" --repo o/n --pr 1 --interval 0 2>/dev/null)"
+  ms_rc=$?
+  ms_calls="$(cat "$stub/calls" 2>/dev/null || echo 0)"
+}
+merge_state 0 0
+expect 0 "CLEAN at once: prints CLEAN after 1 call" \
+  test "$ms_rc/$ms_out/$ms_calls" = "0/CLEAN/1"
+merge_state 2 0
+expect 0 "UNKNOWN x2 then CLEAN: prints CLEAN after 3 calls" \
+  test "$ms_rc/$ms_out/$ms_calls" = "0/CLEAN/3"
+merge_state 99 0
+expect 0 "always UNKNOWN: gives up after --tries (3), prints UNKNOWN" \
+  test "$ms_rc/$ms_out/$ms_calls" = "0/UNKNOWN/3"
+merge_state 0 4
+expect 0 "gh exit 4 (auth): exits 1, prints nothing" test "$ms_rc/$ms_out" = "1/"
+merge_state 0 2
+expect 0 "gh exit 2: exits 1, not the bad-arguments 2" test "$ms_rc/$ms_out" = "1/"
 
 echo
 echo "smoke: $pass passed, $fail failed"

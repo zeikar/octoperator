@@ -59,15 +59,13 @@ rest of the run on the first board failure.
 
 ### 2. Resolve target repo and default branch (ONCE)
 
-Resolve `REPO` exactly once: the `repo` from settings (step 1), or — only when it is unset — the
-output of this command, which reads the local clone:
+Always run this command, which reads the local clone; its output is `LOCAL_REPO`:
 
 ```bash
 gh repo view --json nameWithOwner --jq '.nameWithOwner'
 ```
 
-Verify `REPO` matches the LOCAL clone: that same command's output is `LOCAL_REPO` (always discovered
-from the checkout, independent of settings).
+Resolve `REPO` exactly once: the `repo` from settings (step 1) if set, else `LOCAL_REPO`.
 
 If `REPO` (from settings) differs from `LOCAL_REPO` (the actual local clone), **STOP** and tell the
 user — never fetch from one repo and push to another. Both the single-issue and parallel flows create
