@@ -6,6 +6,22 @@ All notable changes to Octoperator are documented in this file. The format is ba
 
 ## [Unreleased]
 
+### Added
+- `octo-merge-state.sh` helper: prints a PR's `mergeStateStatus`, re-querying while GitHub reports
+  `UNKNOWN` (up to 3 tries, 10 s apart). `auto`'s merge gate uses it.
+- `octo-worktree.sh detach --name <prefix> --ref <commit>`: creates a throwaway detached worktree at a
+  unique `.octoperator/worktrees/<prefix>-<pid>` path and prints only that path. `review` and `auto`'s
+  fix loop use it.
+
+### Fixed
+- Lifecycle steps no longer stop unattended runs on permission prompts: every command `implement`,
+  `auto`, `review`, `autopilot`, and `research` tell the agent to run is one plain `gh` / `git` /
+  `bash` call. Shell `if [ … ]` board guards, `VAR=… gh` prefixes, `|| true`, and `echo`/`sleep`
+  chains became agent decisions or helper scripts, and `auto`'s `UNKNOWN` re-query has its pause back.
+  `implement` states this as a command rule, which also fixes values that were kept in shell
+  variables although Bash calls don't share shell state. The README's "Unattended runs" section now
+  documents what still needs a settings-file allow rule (the test command, and subagents).
+
 ## [0.2.0] - 2026-10-30
 
 ### Added

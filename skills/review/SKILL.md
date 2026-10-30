@@ -29,17 +29,17 @@ constraint. Octoperator is autonomous: post immediately unless `--dry-run` is pa
    leaves the user's checkout, index, and branches untouched:
    ```bash
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-exclude.sh"   # keep .octoperator/ out of git status
-   # Unique per run ($$), so concurrent reviews of the same PR never share or delete each other's tree.
-   REVIEW_WT="$(git rev-parse --show-toplevel)/.octoperator/worktrees/review-<pr#>-$$"
-   git fetch --no-tags origin "refs/pull/<pr#>/head" \
-     || echo "fetch of PR head failed; trying the local object store"
-   # git prints "HEAD is now at …" on stdout; drop it so only the path is printed (errors stay on stderr).
-   git worktree add --detach "$REVIEW_WT" "<headRefOid>" >/dev/null && echo "$REVIEW_WT"
+   git fetch --no-tags origin "refs/pull/<pr#>/head"
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-worktree.sh" detach --name "review-<pr#>" --ref "<headRefOid>"
    ```
-   Record the printed absolute path — later steps run in separate shells and need it verbatim. Adding
+   Run them one at a time (see `implement`'s command rule). If the fetch fails, go on anyway — the
+   commit may already be in the local object store. `detach` creates
+   `.octoperator/worktrees/review-<pr#>-<pid>` (unique per run, so concurrent reviews of the same PR
+   never share or delete each other's tree) and prints only its absolute path. Record that path —
+   later steps run in separate shells and need it verbatim. Adding
    by `headRefOid` (not `FETCH_HEAD`) both pins the reviewed code to the gathered diff and verifies
    it: if `origin` is not `<repo>` or the commit is otherwise unavailable, the add fails (as it does
-   on an existing non-empty path — never remove a tree this run did not create). In that case continue
+   on an existing path — never remove a tree this run did not create). In that case continue
    **without** a worktree and tell the reviewer so (step 4).
 
 4. **Run the reviewer.** Dispatch the `pr-reviewer` agent (Task tool) with the PR metadata, the diff

@@ -98,8 +98,9 @@ the create):
 ```bash
 # Ensure the proposal label exists (type/priority labels are part of the standard taxonomy —
 # create any that are missing the same way before using them):
+# An "already exists" failure is the expected idempotent case — ignore it:
 gh label create proposed --repo "$REPO" --color BFD4F2 \
-  --description "Research-proposed; awaiting human triage" 2>/dev/null || true
+  --description "Research-proposed; awaiting human triage"
 
 gh issue create --repo "$REPO" \
   --title "<proposal title>" \

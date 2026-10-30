@@ -10,7 +10,7 @@
 #
 #   - <script> <flag>      : a value flag given last, with no value, exits 2 (never hangs)
 #   - octo-exclude.sh      : run for real against a throwaway local `git init` repo
-#   - octo-worktree.sh     : add / list / remove run for real in a throwaway local repo
+#   - octo-worktree.sh     : add / detach / list / remove run for real in a throwaway local repo
 #
 # It deliberately never invokes a helper in a way that reaches gh / the network.
 # Exits 0 when every check passes, 1 when any check fails.
@@ -68,6 +68,12 @@ expect 2 "octo-project-status.sh --status exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-project-status.sh" --owner o --project 1 --status
 expect 2 "octo-worktree.sh add --base exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-worktree.sh" add --branch b --base
+expect 2 "octo-worktree.sh detach --ref exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-worktree.sh" detach --name n --ref
+expect 2 "octo-merge-state.sh --pr exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-merge-state.sh" --repo o/n --pr
+expect 2 "octo-merge-state.sh non-numeric --tries exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-merge-state.sh" --repo o/n --pr 1 --tries x
 
 echo "• octo-exclude.sh (offline, temp repo)"
 # No `set -e`: bail out explicitly, or an empty $tmp would point git/cd at the real checkout.
@@ -114,6 +120,16 @@ worktree add --branch 2-smoke --path "$wt" --base HEAD >/dev/null 2>&1
 expect 0 "remove (clean) exits 0" worktree remove --path "$wt"
 expect 0 "list no longer shows it" \
   test -z "$(worktree list | grep -Fx 'branch refs/heads/2-smoke')"
+head_sha="$(git -C "$repo" rev-parse HEAD)"
+dout="$(worktree detach --name review-1 --ref "$head_sha" 2>/dev/null)"
+expect 0 "detach exits 0" test $? -eq 0
+expect 0 "detach prints only the path, under .octoperator/worktrees" \
+  test "${dout%-*}" = "$(cd "$repo" && pwd -P)/.octoperator/worktrees/review-1"
+expect 0 "detach checks out the commit, detached" \
+  test "$(git -C "$dout" rev-parse HEAD)" = "$head_sha" -a -z "$(git -C "$dout" branch --show-current)"
+expect 0 "detach --ref of an unknown commit fails" \
+  test "$(worktree detach --name review-2 --ref 0123456789abcdef0123456789abcdef01234567 >/dev/null 2>&1; echo $?)" -ne 0
+expect 0 "remove --force removes a detached tree" worktree remove --path "$dout" --force
 
 echo
 echo "smoke: $pass passed, $fail failed"

@@ -61,13 +61,15 @@ open PR), noting that each batch would run through `auto` (implement → review 
 ### 3. The loop (repeat up to `--cycles` times)
 
 **Before the first cycle** (and never under `--dry-run`), ensure both workflow labels exist so semi
-mode's `proposed → ready` handoff works even in a fresh repo (idempotent):
+mode's `proposed → ready` handoff works even in a fresh repo. Run each as its own call; an "already
+exists" failure is the expected idempotent case — ignore it (no `|| true`, which falls outside the
+pre-allowed prefixes; see `implement`'s command rule):
 
 ```bash
 gh label create ready    --repo "$REPO" --color 0E8A16 \
-  --description "Blessed for automated build (autopilot)" 2>/dev/null || true
+  --description "Blessed for automated build (autopilot)"
 gh label create proposed --repo "$REPO" --color BFD4F2 \
-  --description "Research-proposed; awaiting human triage" 2>/dev/null || true
+  --description "Research-proposed; awaiting human triage"
 ```
 
 For each cycle `c` from 1 to `--cycles`:
@@ -77,15 +79,18 @@ For each cycle `c` from 1 to `--cycles`:
 ```bash
 gh issue list --repo "$REPO" --state open --json number,title,labels --limit 100
 # Open PRs as "<pr#> <headRefName> <closed issue#,…>" lines — closing references from this repo
-# only, compared case-insensitively since GitHub names are (gh's --jq has no --arg, so the repo
-# reaches the filter through the environment):
-REPO="$REPO" gh pr list --repo "$REPO" --state open --limit 200 \
+# only, compared case-insensitively since GitHub names are case-insensitive:
+gh pr list --repo "$REPO" --state open --limit 200 \
   --json number,headRefName,closingIssuesReferences \
   --jq '.[] | "\(.number) \(.headRefName) " + ([.closingIssuesReferences[]
         | select((.repository.owner.login + "/" + .repository.name | ascii_downcase)
-                 == (env.REPO | ascii_downcase))
+                 == "<owner/name, lowercased>")
         | .number | tostring] | join(","))'
 ```
+
+gh's `--jq` has no `--arg`, so write `REPO` into the filter as a lowercased string literal (owner and
+repo names never contain quotes). A `REPO=… gh …` prefix would fall outside the pre-allowed
+`Bash(gh:*)` (see `implement`'s command rule).
 
 From the open issues, always exclude any labeled `status:blocked` (the project's blocked-status
 convention — also exclude a plain `blocked` label if a repo uses one) or `epic` (not directly

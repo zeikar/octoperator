@@ -94,8 +94,7 @@ blocker/major/minor findings:
 1. **Check out the PR head for the fixer.** Same recipe as the review checkout, under a `fix-` name
    (`<headRefOid>` is the commit the latest review just reviewed):
    ```bash
-   FIX_WT="$(git rev-parse --show-toplevel)/.octoperator/worktrees/fix-<pr#>-$$"
-   git worktree add --detach "$FIX_WT" "<headRefOid>" >/dev/null && echo "$FIX_WT"
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-worktree.sh" detach --name "fix-<pr#>" --ref "<headRefOid>"
    ```
    Detached, so it works even when the PR branch is checked out in the main tree (single-issue path).
    Record the printed path. If the add fails, hold the PR (reason: fix checkout failed).
@@ -174,17 +173,16 @@ HOLD (do not merge) and report the reason:
 | `UNSTABLE` | a status check is failing or still pending (CI not green) |
 | `UNKNOWN` | GitHub is still computing mergeability (see retry below) |
 
-Because GitHub computes mergeability asynchronously, an immediate query can return `UNKNOWN`. While
-it does, re-run this query up to twice more before treating a non-`CLEAN` result as final:
+Because GitHub computes mergeability asynchronously, an immediate query can return `UNKNOWN`. Read
+`mergeStateStatus` through the helper, which re-queries up to 3 times, 10 seconds apart, while it is
+`UNKNOWN`, and prints the final value — the loop and pause live in the script so the call stays
+within the pre-allowed `Bash(bash:*)` (see `implement`'s command rule):
 
 ```bash
-gh pr view <pr#> --repo "$REPO" --json mergeStateStatus --jq '.mergeStateStatus'
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-merge-state.sh" --repo "$REPO" --pr <pr#>
 ```
 
-Run each re-query as its own plain `gh` call, not a shell loop or `sleep`: those don't match the
-pre-allowed `Bash(gh:*)` prefix. There is no pause between attempts for now, so an `UNKNOWN` that
-persists is held; #60 restores the pause (via a helper script) and removes the other compound
-commands in this skill.
+Treat a non-`CLEAN` result from it as final.
 
 When every condition holds, merge with a **regular merge commit** and delete the branch, pinned to
 the reviewed commit so a push that lands after the check cannot slip in unreviewed:
@@ -212,15 +210,13 @@ reason — `new commits since the last review` for a `headRefOid` mismatch, othe
 `mergeStateStatus` reason from the table above (optionally run `gh pr checks <pr#> --repo "$REPO"` to
 show which checks are pending/failing).
 
-After a successful merge, set the linked issue's board status to `Done` — non-fatal and board-guarded:
+After a successful merge, set the linked issue's board status to `Done` — board-guarded and
+non-fatal, exactly as in `implement` step 7:
 
 ```bash
-if [ "$BOARD_ENABLED" = "true" ] && [ "$BOARD_DISABLED_RUNTIME" != "true" ]; then
-  bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh" \
-    --owner "$project_owner" --project "$project_number" \
-    --url "$issue_url" --status "$STATUS_DONE" \
-  || { echo "board sync skipped (access error)"; BOARD_DISABLED_RUNTIME=true; }
-fi
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh" \
+  --owner "$project_owner" --project "$project_number" \
+  --url "$issue_url" --status "$STATUS_DONE"
 ```
 
 A board failure never aborts the run (report "board sync skipped" once and continue).

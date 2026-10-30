@@ -51,11 +51,12 @@ always-on knowledge layer.
 ### Helper scripts (`scripts/`)
 
 - **`octo-setup.sh`** — read-only probe used by `/octoperator:setup`: detect repo + default branch and whether the token can access Projects v2 (lists existing boards).
-- **`octo-worktree.sh`** — manage Git worktrees for parallel issue implementation (`add`, `remove`, `list`); used by `implement` to create and clean up per-issue worktrees.
+- **`octo-worktree.sh`** — manage Git worktrees (`add`, `detach`, `remove`, `list`); used by `implement` for per-issue worktrees and by `review` / `auto` for throwaway detached checkouts of a PR head.
 - **`octo-exclude.sh`** — idempotently add the settings file and `.octoperator/` (worktrees) to the repo-local `.git/info/exclude` so they never dirty `git status`; used by `setup` and `implement`.
 - **`octo-doctor.sh`** — verify auth/repo/project access and print the board's Status options.
 - **`octo-subissue.sh`** — link a child issue to its epic as a native sub-issue (falls back to a task list).
 - **`octo-project-status.sh`** — add an issue/PR to the board and set its Status by name.
+- **`octo-merge-state.sh`** — print a PR's `mergeStateStatus`, waiting out GitHub's `UNKNOWN`; used by `auto`'s merge gate.
 
 ## Prerequisites
 
@@ -113,17 +114,23 @@ resolves them by name at call time. Full schema:
 
 ### Unattended runs
 
-`implement`, `auto`, and `autopilot` pre-allow the tools they use themselves — `gh`, `git`, and
-`bash …` (which covers the helper scripts, and any `bash -c` command), plus
-Read/Grep/Glob/Edit/Write/Task. That does not yet make a run prompt-free: the `Bash(...)` rules
-match by command prefix and every part of a compound command must match, so steps that assign a
-variable or wrap a call in `if …; then` can still stop on a permission prompt. Removing those is
-tracked in [#60](https://github.com/zeikar/octoperator/issues/60).
+`implement`, `auto`, `review`, and `autopilot` pre-allow the tools they use themselves — `gh`, `git`,
+and `bash …` (which covers the helper scripts, and any `bash -c` command), plus
+Read/Grep/Glob/Edit/Write/Task. Every step runs as one plain command with one of those prefixes:
+Claude Code checks each part of a compound command, so the skills keep shell `if`s, `VAR=… cmd`
+prefixes, `|| true`, and `sleep` out of their commands, and anything needing a loop or a pause lives
+in a `scripts/octo-*.sh` helper. The grant lasts for the turn the skill runs in.
 
-The skills also don't pre-allow your repo's test command, which they run to verify each change. To
-cut prompts on an unattended run (e.g. `autopilot --mode full`), allow it in the target repo's
-`.claude/settings.json` (or `settings.local.json` to keep it personal), together with `gh` and
-`git`:
+Two things the skills can't pre-allow for you:
+
+- **Your repo's test command**, which they run to verify each change.
+- **Subagents.** Implementation (parallel path), `auto`'s fixes, and reviews run inside
+  `issue-implementer` / `pr-reviewer` subagents, which call `gh`, `git`, and your tests. Claude Code
+  doesn't document a skill's pre-allowed tools reaching a subagent; settings-file rules apply to the
+  whole session, subagents included.
+
+So for a run that never stops on a permission prompt (e.g. `autopilot --mode full`), allow these in
+the target repo's `.claude/settings.json` (or `settings.local.json` to keep it personal):
 
 ```json
 {
@@ -132,10 +139,6 @@ cut prompts on an unattended run (e.g. `autopilot --mode full`), allow it in the
   }
 }
 ```
-
-The `gh`/`git` entries are there because the parallel path and `auto`'s fix loop run tests and
-`gh`/`git` calls inside `issue-implementer` subagents, and it isn't confirmed that a skill's
-pre-allowed tools reach a subagent; settings-file rules do (verification is part of #60).
 
 Use your repo's actual command — `Bash(pytest:*)`, `Bash(make test:*)`, `Bash(go test:*)`, …
 
