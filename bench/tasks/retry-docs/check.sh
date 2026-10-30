@@ -7,14 +7,12 @@
 # Passes when REPO_DIR's README.md has the two sections the issue asks for, in the shape it asks:
 #   - a `## Configuration` section (any heading level from 2 on, any case) holding a Markdown
 #     table with the columns Variable | Default | Description and one row each for RETRY_ATTEMPTS
-#     (default 5) and RETRY_DELAY (default 2, 2s, or 2 seconds), in any order; backticks and
-#     outer pipes are optional, and the Description cells must not be empty
-#   - a `## Exit status` section whose prose says the status is the last, final, latest, or most
-#     recent attempt's (or that retry.sh passes it through or propagates it), and gives no fixed
-#     non-zero exit status: outside code blocks, a non-zero number there is only allowed as a
-#     count of attempts or seconds, in a sentence that starts with "For example" (or an
-#     "(e.g. ...)" aside), or in a sentence about calling retry.sh without a command that does
-#     not mention attempts
+#     (default 5) and RETRY_DELAY (default 2, 2s, or 2 seconds), in any order; backticks, a
+#     leading $, and outer pipes are optional, and the Description cells must not be empty
+#   - a `## Exit status` section holding a Case | Exit status table with one row per case, told
+#     apart by keywords in the Case cell: success (an attempt succeeds) gives 0, a command-less
+#     call (usage) gives 2, and every attempt failing gives no fixed number but the last, final,
+#     latest, or most recent attempt's status (or says retry.sh passes it through or propagates it)
 # Then retry.sh must still default to 5 attempts and exit with the last attempt's status, and
 # `make test` must pass. Exits 0 on pass, 1 on fail, 2 on bad arguments.
 set -uo pipefail
@@ -87,18 +85,18 @@ def cells(row):
         row = row[1:]
     if row.endswith("|"):
         row = row[:-1]
-    return [re.sub(r"[`*]", "", c).strip() for c in row.split("|")]
+    return [re.sub(r"[`*]", "", c).strip().lstrip("$") for c in row.split("|")]
 
 
 DELIMITER = re.compile(r"\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$")
 
 
-def settings_table(block):
-    """The body rows of the first Variable | Default | Description table in block, or None."""
+def table(block, header):
+    """The body rows of the first table in block whose columns are header, or None."""
     block = prose(block)
     for i in range(len(block) - 1):
         if "|" in block[i] and DELIMITER.match(block[i + 1]) \
-                and [c.lower() for c in cells(block[i])] == ["variable", "default", "description"]:
+                and [c.lower() for c in cells(block[i])] == header:
             rows = []
             for line in block[i + 2:]:
                 if "|" not in line or not line.strip():
@@ -109,7 +107,7 @@ def settings_table(block):
 
 
 DEFAULTS = {
-    "RETRY_ATTEMPTS": ("5", r"5"),
+    "RETRY_ATTEMPTS": ("5", r"5(\s*(attempts?|tries))?"),
     "RETRY_DELAY": ("2", r"2(\s*(s|secs?|seconds?))?"),
 }
 
@@ -117,7 +115,7 @@ config = section("Configuration")
 if config is None:
     print("FAIL: README.md has no ## Configuration section")
 else:
-    rows = settings_table(config)
+    rows = table(config, ["variable", "default", "description"])
     if rows is None:
         print("FAIL: the Configuration section has no Variable | Default | Description table")
     else:
@@ -135,50 +133,47 @@ else:
                 print(f"FAIL: the Configuration table has no description for {var}")
 
 
-def sentences(block):
-    """The sentences of block's prose; each list item, table row, or blank line starts a new one."""
-    text = "\n".join(prose(block)).replace("`", "")
-    for chunk in re.split(r"\n\s*\n|\n(?=[ \t]*(?:[-*+|]|\d+\.)\s)", text):
-        yield from re.split(r"(?<!\be\.g\.)(?<!\bi\.e\.)(?<=[.!?])\s+", " ".join(chunk.split()))
+# Which case an Exit status row is about, from keywords in its Case cell. Usage first ("called
+# without a command"), then failure before success ("no attempt succeeds" is a failure).
+CASES = [
+    ("usage", re.compile(r"\b(usage|no (command|arguments?)|without (a |any )?"
+                         r"(command|arguments?))", re.I)),
+    ("fail", re.compile(r"fail|\bnever\b|\bno attempt|exhaust|give(s)? up|run(s)? out", re.I)),
+    ("success", re.compile(r"succe|\b0\b", re.I)),
+    ("fail", re.compile(r"\battempts\b", re.I)),
+]
+# Each case's label, and the exit status its row must give (None: the last attempt's status).
+WANTED = {"success": ("an attempt succeeds", "0"), "fail": ("every attempt fails", None),
+          "usage": ("called without a command", "2")}
+# The all-attempts-fail status names the last attempt, or says the command's status passes through.
+LAST = re.compile(r"\b(last|final|latest|most\s+recent)\b|\bpass(es|ed|ing)?\s+(it\s+)?"
+                  r"(through|along|on)\b|\bpropagat", re.I)
 
 
-LAST = re.compile(
-    r"\b(last|final|latest|most recent)\s+((attempt|try|run|invocation|execution|call)|"
-    r"(exit\s+)?(status|code))|\bpass(es|ing)?\s+(it\s+)?(through|along|on)\b|\bpropagat",
-    re.I)
-# A fixed non-zero status may appear in an example: a sentence that starts with one, or an
-# "(e.g. ...)" aside. And in a sentence about calling retry.sh without a command, unless it also
-# talks about attempts.
-EXAMPLE_ASIDE = re.compile(r"\((e\.g\.|for (example|instance))[^)]*\)", re.I)
-EXAMPLE = re.compile(r"\W*(for (example|instance)|e\.g\.|example\b)", re.I)
-USAGE = re.compile(r"\b(usage|without (a |any )?(command|arguments?)|no (command|arguments?))",
-                   re.I)
-# A non-zero whole number that is not a count of attempts or seconds.
-FIXED = re.compile(
-    r"(?<![\w.$=+-])[1-9]\d*(?!\w|\.\d)(?!\s*(attempts?|tries|times|retries|seconds?|s)\b)",
-    re.I)
-
-
-def fixed_status(sentence):
-    sentence = EXAMPLE_ASIDE.sub(" ", sentence)
-    if EXAMPLE.match(sentence):
-        return False
-    if USAGE.search(sentence) and not re.search(r"\battempt", sentence, re.I):
-        return False
-    return FIXED.search(sentence) is not None
+def case_of(row):
+    return next((name for name, pattern in CASES if pattern.search(row[0])), None)
 
 
 exit_status = section("Exit status")
 if exit_status is None:
     print("FAIL: README.md has no ## Exit status section")
 else:
-    said = list(sentences(exit_status))
-    if not any(LAST.search(s) for s in said):
-        print("FAIL: the Exit status section does not say retry.sh exits with the last "
-              "attempt's status")
-    for s in said:
-        if fixed_status(s):
-            print(f"FAIL: the Exit status section gives a fixed exit status: {s!r}")
+    rows = table(exit_status, ["case", "exit status"])
+    if rows is None:
+        print("FAIL: the Exit status section has no Case | Exit status table")
+    else:
+        for case, (label, want) in WANTED.items():
+            found = [r for r in rows if case_of(r) == case]
+            status = found[0][1] if found and len(found[0]) > 1 else ""
+            if not found:
+                print(f"FAIL: the Exit status table has no row for: {label}")
+            elif len(found) > 1:
+                print(f"FAIL: the Exit status table has more than one row for: {label}")
+            elif want is None and (re.search(r"\d", status) or not LAST.search(status)):
+                print(f"FAIL: the Exit status table gives {status!r} when {label}, "
+                      "wanted the last attempt's status")
+            elif want is not None and re.findall(r"\d+", status) != [want]:
+                print(f"FAIL: the Exit status table gives {status!r} when {label}, wanted {want}")
 PY
 [ -s "$tmp/facts" ] && { failed=1; cat "$tmp/facts"; }
 

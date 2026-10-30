@@ -1,8 +1,8 @@
 diff --git a/README.md b/README.md
-index 952df19..b633dd5 100644
+index 952df19..43cc155 100644
 --- a/README.md
 +++ b/README.md
-@@ -9,6 +9,22 @@ for steps that fail now and then, such as a health check on a service that is st
+@@ -9,6 +9,25 @@ for steps that fail now and then, such as a health check on a service that is st
  
  Messages about failed attempts go to stderr; the command's own output is passed through unchanged.
  
@@ -19,8 +19,11 @@ index 952df19..b633dd5 100644
 +
 +## Exit status
 +
-+`retry.sh` exits with the exit status of the last attempt: 0 as soon as an attempt succeeds,
-+otherwise the failing status of the final attempt. Called without a command, it exits 2.
++| Case                     | Exit status                         |
++|--------------------------|-------------------------------------|
++| An attempt succeeds      | `0`                                 |
++| Every attempt fails      | The exit status of the last attempt |
++| Called without a command | `2`                                 |
 +
  ## Tests
  

@@ -199,50 +199,65 @@ judges 1 "a (length, text) key" vsort-numeric "$(vsort_with len-key '(len(versio
 judges 1 "a digits-only key" vsort-numeric \
   "$(vsort_with digits-key 'int(version.replace(".", ""))')"
 
-# retry_doc <name> <table rows> <exit status prose> : a retry-docs seed whose README.md gains a
-# Configuration section with <table rows> under a Variable | Default | Description header, and an
-# Exit status section holding <exit status prose>.
+# retry_doc <name> <config rows> <exit status table> : a retry-docs seed whose README.md gains a
+# Configuration section with <config rows> under a Variable | Default | Description header, and
+# an Exit status section holding <exit status table>.
 nl=$'\n'
 retry_doc() {
   d="$(variant retry-docs "$1")" && printf '\n%s\n' "## Configuration$nl$nl| Variable | Default \
 | Description |$nl|---|---|---|$nl$2$nl$nl## Exit status$nl$nl$3" >>"$d/README.md" && echo "$d"
 }
+# statuses <success row> <fail row> <usage row> : a Case | Exit status table with these rows.
+statuses() { printf '| Case | Exit status |\n|---|---|\n%s\n%s\n%s' "$1" "$2" "$3"; }
 rows="| \`RETRY_ATTEMPTS\` | \`5\` | Maximum attempts |$nl| \`RETRY_DELAY\` | \`2\` | Pause |"
-last="retry.sh exits with the exit status of the last attempt."
-# retry_judges <wanted-exit> <label> <table rows> <exit status prose>
+ok_row="| Success | \`0\` |"
+usage_row="| Called without a command | \`2\` |"
+last_row="| Every attempt fails | The exit status of the last attempt |"
+table="$(statuses "$ok_row" "$last_row" "$usage_row")"
+# retry_judges <wanted-exit> <label> <config rows> <exit status table>
 n=0
 retry_judges() {
   n=$((n + 1)); judges "$1" "$2" retry-docs "$(retry_doc "case$n" "$3" "$4")"
 }
 retry_judges 0 "bare cells, no outer pipes, rows swapped, \"2 seconds\"" \
-  "RETRY_DELAY | 2 seconds | Pause${nl}RETRY_ATTEMPTS | 5 | Maximum attempts" "$last"
-retry_judges 0 "\"2s\" for the delay" \
-  "| RETRY_ATTEMPTS | 5 | Maximum attempts |$nl| RETRY_DELAY | \`2s\` | Pause |" "$last"
-for prose in \
-  "retry.sh returns the status code of the most recent attempt." \
-  "\`retry.sh\` passes through the status of the last attempt, or 0 once an attempt succeeds." \
-  "If every attempt fails, retry.sh exits with whatever the last attempt exited with." \
-  "$last For example, if curl fails every time with exit code 22, retry.sh exits 22." \
-  "$last Called without a command, it fails with exit status 2." \
-  "It gives up after 5 attempts and exits with the final attempt's status (e.g. 22 from curl)."
-do retry_judges 0 "\"$prose\"" "$rows" "$prose"; done
-for prose in \
-  "If the final attempt fails, retry.sh exits 1." \
-  "The exit status is 1 if the last attempt fails, 0 otherwise." \
-  "The exit code is 1 when the last attempt fails." \
-  "\`retry.sh\` exits with status 0 on success, or 1 if the last attempt fails." \
-  "$last If it was called without a command or every attempt failed, it exits 1." \
-  "retry.sh exits 0 when the command succeeds."
-do retry_judges 1 "\"$prose\"" "$rows" "$prose"; done
+  "RETRY_DELAY | 2 seconds | Pause${nl}RETRY_ATTEMPTS | 5 | Maximum attempts" "$table"
+retry_judges 0 "\"2s\" for the delay, \"5 attempts\"" \
+  "| RETRY_ATTEMPTS | 5 attempts | Maximum attempts |$nl| RETRY_DELAY | \`2s\` | Pause |" "$table"
+retry_judges 0 "\$-prefixed variables" \
+  "| \`\$RETRY_ATTEMPTS\` | 5 | Maximum attempts |$nl| \`\$RETRY_DELAY\` | 2 | Pause |" "$table"
+retry_judges 0 "exit status rows reordered, no outer pipes" "$rows" \
+  "Case | Exit status$nl---|---${nl}No command given | 2 (usage error)${nl}\
+All attempts fail | last attempt's exit code${nl}An attempt succeeds | exits 0"
+for fail_row in \
+  "| Every attempt fails | Status of the most recent attempt |" \
+  "| Attempts run out | Passes through the command's status |" \
+  "| No attempt succeeds | The final attempt's exit status |"
+do retry_judges 0 "fail row \"$fail_row\"" "$rows" \
+  "$(statuses "$ok_row" "$fail_row" "$usage_row")"; done
+for fail_row in \
+  "| Every attempt fails | \`1\` |" \
+  "| Every attempt fails | non-zero |" \
+  "| Every attempt fails | 1 (the last attempt failed) |" \
+  "| Every attempt fails | The command's exit status |"
+do retry_judges 1 "fail row \"$fail_row\"" "$rows" \
+  "$(statuses "$ok_row" "$fail_row" "$usage_row")"; done
+retry_judges 1 "no fail row" "$rows" "$(statuses "$ok_row" "$usage_row" "")"
+retry_judges 1 "no usage row" "$rows" "$(statuses "$ok_row" "$last_row" "")"
+retry_judges 1 "success gives 1" "$rows" \
+  "$(statuses "| Success | 1 |" "$last_row" "$usage_row")"
+retry_judges 1 "usage gives 1" "$rows" \
+  "$(statuses "$ok_row" "$last_row" "| Called without a command | 1 |")"
+retry_judges 1 "prose instead of the table" "$rows" \
+  "retry.sh exits with the exit status of the last attempt."
 retry_judges 1 "wrong defaults in the table" \
-  "| RETRY_ATTEMPTS | 3 | Maximum attempts |$nl| RETRY_DELAY | 1 | Pause |" "$last"
+  "| RETRY_ATTEMPTS | 3 | Maximum attempts |$nl| RETRY_DELAY | 1 | Pause |" "$table"
 retry_judges 1 "defaults swapped between the rows" \
-  "| RETRY_ATTEMPTS | 2 | Maximum attempts |$nl| RETRY_DELAY | 5 | Pause |" "$last"
-retry_judges 1 "a row missing" "| RETRY_ATTEMPTS | 5 | Maximum attempts |" "$last"
+  "| RETRY_ATTEMPTS | 2 | Maximum attempts |$nl| RETRY_DELAY | 5 | Pause |" "$table"
+retry_judges 1 "a row missing" "| RETRY_ATTEMPTS | 5 | Maximum attempts |" "$table"
 retry_judges 1 "an empty description" \
-  "| RETRY_ATTEMPTS | 5 | Maximum attempts |$nl| RETRY_DELAY | 2 | |" "$last"
+  "| RETRY_ATTEMPTS | 5 | Maximum attempts |$nl| RETRY_DELAY | 2 | |" "$table"
 d="$(variant retry-docs no-table)" && printf '\n%s\n' "## Configuration$nl$nl- RETRY_ATTEMPTS: \
-default 5$nl- RETRY_DELAY: default 2$nl$nl## Exit status$nl$nl$last" >>"$d/README.md"
+default 5$nl- RETRY_DELAY: default 2$nl$nl## Exit status$nl$nl$table" >>"$d/README.md"
 judges 1 "a list instead of the table" retry-docs "$d"
 
 echo
