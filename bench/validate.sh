@@ -10,12 +10,14 @@
 #   - task.md parses: front matter with id (equal to the directory name), kind, and difficulty,
 #     then a `# <title>` line and a non-empty body (format: bench/README.md)
 #   - on a fresh copy of seed/, `make test` passes and check.sh fails
-#   - solution.patch applies cleanly (`git apply`) to another fresh copy, and check.sh passes there
+#   - solution.patch applies cleanly (`git apply`) to another fresh copy, and both `make test` and
+#     check.sh pass there
 #
 # Each copy is a throwaway `git init` repo under one `mktemp -d` directory; the task directory is
-# never modified. Each `make test` and check.sh run is killed after BENCH_CHECK_TIMEOUT seconds
-# (default 120). Nothing here calls claude, gh, or the network. Exits 0 when every task is valid,
-# 1 when any task is broken or no task was found, 2 on bad arguments.
+# never modified. Each `make test` and check.sh run is killed, with every process it started,
+# after BENCH_CHECK_TIMEOUT seconds (default 120). Nothing here calls claude, gh, or the
+# network. Exits 0 when every task is valid, 1 when any task is broken or no task was found, 2 on
+# bad arguments.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -101,11 +103,22 @@ fresh_copy() {
 }
 
 # bounded <cwd> <log> <command...> : run a command in <cwd>, killed after $TIMEOUT seconds (macOS
-# has no `timeout`; a kill exits 142). check.sh runs from the neutral $tmp, so it cannot lean on the
-# working directory.
+# has no `timeout`; a kill exits 142). The command runs in its own process group, and a timeout
+# kills the whole group, so nothing it started outlives it. Its stdin is /dev/null: it is not the
+# terminal's foreground group, so reading the terminal would stop it. check.sh runs from the
+# neutral $tmp, so it cannot lean on the working directory.
 bounded() {
   cwd="$1"; log="$2"; shift 2
-  (cd "$cwd" && perl -e '$t = shift; alarm $t; exec @ARGV' "$TIMEOUT" "$@") >"$log" 2>&1
+  (cd "$cwd" && perl -e '
+    $t = shift;
+    defined($pid = fork) or die "fork: $!\n";
+    if (!$pid) { setpgrp(0, 0); exec @ARGV or die "exec $ARGV[0]: $!\n"; }
+    setpgrp($pid, $pid);  # also here, so the kill below cannot race the child
+    $SIG{ALRM} = sub { kill "KILL", -$pid; exit 142 };
+    alarm $t;
+    waitpid($pid, 0);
+    exit($? & 127 ? 128 + ($? & 127) : $? >> 8);
+  ' "$TIMEOUT" "$@") </dev/null >"$log" 2>&1
 }
 
 # problem <message> [log] : record a problem with the current task, plus the tail of a log.
@@ -152,6 +165,13 @@ validate_task() {
              >"$work.apply" 2>&1; then
         problem "solution.patch does not apply to the seed" "$work.apply"
       else
+        # check.sh should run `make test` itself, but don't rely on it.
+        bounded "$work/solved" "$work.solved-test.log" make test
+        rc=$?
+        if [ "$rc" -eq 142 ]; then problem "make test timed out (${TIMEOUT}s) with solution.patch"
+        elif [ "$rc" -ne 0 ]; then
+          problem "make test fails with solution.patch" "$work.solved-test.log"
+        fi
         bounded "$tmp" "$work.solved.log" bash "$dir/check.sh" "$work/solved"
         rc=$?
         if [ "$rc" -eq 142 ]; then problem "check.sh timed out (${TIMEOUT}s) with solution.patch"

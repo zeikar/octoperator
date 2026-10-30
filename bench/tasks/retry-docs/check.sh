@@ -6,9 +6,12 @@
 #
 # Passes when REPO_DIR's README.md documents retry.sh's settings and exit status, and the script
 # still behaves as documented. Wording is free, so the README facts are matched loosely:
-#   - RETRY_ATTEMPTS with its default 5, and RETRY_DELAY with its default 2: the default on the
-#     line naming the variable or one of the next 5, stopping before a line naming the other one
-#   - a line about the exit status with "last", "final", or "latest" within 2 lines of it
+#   - RETRY_ATTEMPTS with its default 5, and RETRY_DELAY with its default 2: the default in the
+#     text after a mention of the variable (not a `VAR=` assignment), up to the end of the 5th
+#     line after it or the next mention of the other variable, whichever comes first
+#   - a sentence saying it exits with (or returns) the status or code of the last, final, latest,
+#     or most recent attempt, in a paragraph that does not also give a fixed non-zero status for
+#     a failure
 # Then retry.sh must still default to 5 attempts and exit with the last attempt's status, and
 # `make test` must pass. Exits 0 on pass, 1 on fail, 2 on bad arguments.
 set -uo pipefail
@@ -34,38 +37,66 @@ import sys
 
 try:
     with open(sys.argv[1], encoding="utf-8") as fh:
-        lines = fh.read().splitlines()
+        text = fh.read()
 except OSError as err:
     print(f"FAIL: cannot read README.md: {err}")
     sys.exit()
 
 
-def near(pattern, flags, start, end):
-    return any(re.search(pattern, line, flags) for line in lines[max(start, 0):end])
-
-
-def scope(i, other):
-    """Line i and up to 5 more, ending before a line that names the other variable."""
-    end = i + 1
-    while end < min(i + 6, len(lines)) and other not in lines[end]:
-        end += 1
-    return end
+def after_mentions(var, other):
+    """The text after each mention of var that is not a `var=` assignment, up to the end of the
+    5th line after it or the next mention of other, with `var=...` assignments blanked out."""
+    for mention in re.finditer(rf"\b{var}\b(?!=)", text):
+        rest = text[mention.end():]
+        end = -1
+        for _ in range(6):
+            end = rest.find("\n", end + 1)
+            if end < 0:
+                end = len(rest)
+                break
+        cut = rest.find(other, 0, end)
+        yield re.sub(rf"\b{var}=\S*", " ", rest[:end if cut < 0 else cut])
 
 
 settings = {"RETRY_ATTEMPTS": "5", "RETRY_DELAY": "2"}
 for var, default in settings.items():
     other = next(name for name in settings if name != var)
-    named = [i for i, line in enumerate(lines) if var in line]
-    if not named:
+    if var not in text:
         print(f"FAIL: README.md does not mention {var}")
+        continue
     # The default as a whole number: not part of a word or of a decimal like 2.5 (a full stop
     # after it is fine).
     number = rf"(?<!\w)(?<!\d\.){default}(?!\w)(?!\.\d)"
-    if named and not any(near(number, 0, i, scope(i, other)) for i in named):
+    if not any(re.search(number, scope) for scope in after_mentions(var, other)):
         print(f"FAIL: README.md does not give {var}'s default ({default}) next to it")
 
-exit_lines = [i for i, line in enumerate(lines) if re.search(r"\bexit", line, re.I)]
-if not any(near(r"\b(last|final|latest)\b", re.I, i - 2, i + 3) for i in exit_lines):
+
+def sentences(paragraph):
+    """A paragraph's sentences; each list item, table row, or heading starts a new one."""
+    items = re.split(r"\n(?=[ \t]*(?:[-*+#|]|\d+\.)\s)", paragraph)
+    for item in items:
+        yield from re.split(r"(?<=[.!?])\s+", " ".join(item.split()))
+
+
+def says_last_status(sentence):
+    return (re.search(r"\b(exit|return)", sentence, re.I)
+            and re.search(r"\b(status|code)\b", sentence, re.I)
+            and re.search(r"\b(last|final|latest|most recent)\b", sentence, re.I))
+
+
+# "If all attempts fail, it exits 1": a fixed status for the failure case is wrong.
+FIXED_STATUS = re.compile(
+    r"\b(exit|return)(s|ed)?\b(?:[\s`:]+(?:with|an?|the|exit|status|code|of))*[\s`:]+[1-9]\d*\b",
+    re.I)
+
+
+def fixed_failure_status(sentence):
+    return re.search(r"\bfail", sentence, re.I) and FIXED_STATUS.search(sentence)
+
+
+paragraphs = [list(sentences(p)) for p in re.split(r"\n[ \t]*\n", text)]
+if not any(any(map(says_last_status, p)) and not any(map(fixed_failure_status, p))
+           for p in paragraphs):
     print("FAIL: README.md does not say retry.sh exits with the last attempt's status")
 PY
 [ -s "$tmp/facts" ] && { failed=1; cat "$tmp/facts"; }

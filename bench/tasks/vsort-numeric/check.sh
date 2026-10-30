@@ -5,7 +5,8 @@
 #   check.sh REPO_DIR
 #
 # Passes when `python3 vsort.py` in REPO_DIR sorts versions part by part as numbers (1.9.0 before
-# 1.10.0, 2.0.0 before 10.0.0, 1.2 before 1.2.1), still skips blank lines, and `make test` passes.
+# 1.10.0, 2.0.0 before 10.0.0, 1.2 before 1.2.1, 1.2 before 1.10.0), still skips blank lines, and
+# `make test` passes.
 # Exits 0 on pass, 1 on fail, 2 on bad arguments.
 set -uo pipefail
 
@@ -36,6 +37,9 @@ sorts "two-digit major" "$(printf '10.0.0\n2.0.0\n1.0.0')" "$(printf '1.0.0\n2.0
 sorts "two-digit patch" "$(printf '0.1.10\n0.1.9\n0.1.11')" "$(printf '0.1.9\n0.1.10\n0.1.11')"
 sorts "prefix first" "$(printf '1.2.1\n1.2\n0.9')" "$(printf '0.9\n1.2\n1.2.1')"
 sorts "blank lines skipped" "$(printf '1.10\n\n1.9\n')" "$(printf '1.9\n1.10')"
+# Mixed part widths: rejects keys that only look at length or at the digits, which pass the rest.
+sorts "mixed widths" "$(printf '2.0.0\n1.10.0\n1.2\n1.1.5')" \
+  "$(printf '1.1.5\n1.2\n1.10.0\n2.0.0')"
 
 (cd "$repo" && make test) >"$tmp/test.log" 2>&1 || {
   fail "make test failed:"; tail -n 20 "$tmp/test.log"; }

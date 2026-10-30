@@ -97,9 +97,10 @@ bash bench/test/selftest.sh            # proves validate.sh catches broken tasks
 
 `validate.sh` checks each task's layout and `task.md` format. Then, on throwaway copies of `seed/`
 in a `mktemp -d` directory, it checks that the seed's `make test` passes, that `check.sh`
-**fails** on the seed, that `solution.patch` applies, and that `check.sh` **passes** with it. It
-reports every task and exits non-zero if any task is broken. Each `make test` and `check.sh` run
-is killed after `BENCH_CHECK_TIMEOUT` seconds (default 120).
+**fails** on the seed, that `solution.patch` applies, and that both `make test` and `check.sh`
+**pass** with it. It reports every task and exits non-zero if any task is broken. Each
+`make test` and `check.sh` run is killed, along with every process it started, after
+`BENCH_CHECK_TIMEOUT` seconds (default 120).
 CI runs both scripts on ubuntu and macOS.
 
 ## Tasks

@@ -6,9 +6,10 @@
 #
 # Copies the real tasks into a `mktemp -d` directory, breaks one copy per case (a check that
 # always passes or always fails, a patch that does not apply, a malformed task.md, a missing
-# seed/, failing seed tests, a check that hangs), and asserts validate.sh exits 1 for each, with
-# the expected reason, and 0 for the intact copy.
-# Also covers its argument handling (--help, unknown argument, missing value, unknown task).
+# seed/, failing seed tests, a reference fix that breaks the tests, a check that hangs), and
+# asserts validate.sh exits 1 for each, with the expected reason, and 0 for the intact copy.
+# Also covers its argument handling (--help, unknown argument, missing value, unknown task), and
+# that the real oracles reject plausible wrong fixes while accepting other correct ones.
 # Offline: no claude, gh, or network. Exits 0 when every check passes, 1 when any check fails.
 set -uo pipefail
 
@@ -96,15 +97,32 @@ t="$(broken_case bad-patch)" && printf -- '--- a/nope.txt\n+++ b/nope.txt\n@@ -1
   >"$t/solution.patch"
 rejects bad-patch "solution.patch does not apply"
 
-# `exec`, so the timeout's signal kills the sleep itself rather than orphaning it.
-t="$(broken_case hangs)" && printf 'exec sleep 30\n' >"$t/check.sh"
+# The check leaves a child running: the timeout must kill it too, not orphan it.
+t="$(broken_case hangs)" && printf 'sleep 30 &\necho $! >>"%s"\nwait\n' "$tmp/hang.pids" \
+  >"$t/check.sh"
 rejects hangs "check.sh timed out (3s) on the seed"
+# alive : print the recorded pids that are still running.
+alive() { while read -r pid; do kill -0 "$pid" 2>/dev/null && echo "$pid"; done <"$tmp/hang.pids"; }
+left="$(alive)"
+[ -z "$left" ] || { sleep 1; left="$(alive)"; }  # give a killed child a moment to be reaped
+if [ ! -s "$tmp/hang.pids" ]; then no "hangs: the check recorded no child pid"
+elif [ -z "$left" ]; then ok "hangs: the timeout kills what check.sh started"
+else no "hangs: left running: $(printf '%s' "$left" | tr '\n' ' ')"; alive | xargs kill 2>/dev/null
+fi
 
 t="$(broken_case syntax)" && printf 'if then\n' >"$t/check.sh"
 rejects syntax "check.sh has a syntax error"
 
 t="$(broken_case seed-tests-fail)" && printf 'test:\n\tfalse\n' >"$t/seed/Makefile"
 rejects seed-tests-fail "make test fails on the seed"
+
+# The reference fix breaks the repo's tests, and check.sh does not run them.
+# shellcheck disable=SC2016  # $1 belongs to the written check.sh, not to this script
+t="$(broken_case solved-tests-fail)" && printf 'test:\n\t[ ! -f SOLVED ]\n' >"$t/seed/Makefile" \
+  && printf '[ -f "$1/SOLVED" ]\n' >"$t/check.sh" \
+  && printf '%s\n' 'diff --git a/SOLVED b/SOLVED' 'new file mode 100644' '--- /dev/null' \
+    '+++ b/SOLVED' '@@ -0,0 +1 @@' '+x' >"$t/solution.patch"
+rejects solved-tests-fail "make test fails with solution.patch"
 
 t="$(broken_case no-seed)" && rm -rf "$t/seed"
 rejects no-seed "missing seed/"
@@ -142,6 +160,45 @@ rejects no-body "empty body"
 mkdir -p "$tmp/mixed" && cp -R "$BENCH"/tasks/. "$tmp/mixed/" \
   && printf 'exit 0\n' >"$tmp/mixed/$sample/check.sh"
 rejects mixed "check.sh passes on the unpatched seed"
+
+echo "• oracles judge alternative fixes (wrong ones fail, other correct ones pass)"
+# judges <wanted-exit> <label> <task> <repo> : the task's check.sh exits <wanted-exit> on <repo>.
+judges() { expect "$1" "$3: $2" bash "$BENCH/tasks/$3/check.sh" "$4"; }
+# variant <task> <name> : a fresh copy of <task>'s seed at $tmp/oracle/<name>; prints its path.
+variant() {
+  mkdir -p "$tmp/oracle/$2" && cp -R "$BENCH/tasks/$1/seed/." "$tmp/oracle/$2/" \
+    && echo "$tmp/oracle/$2"
+}
+# vsort_with <name> <expr> : a vsort-numeric seed whose version_key returns <expr>.
+vsort_with() {
+  d="$(variant vsort-numeric "$1")" \
+    && sed "s/return version.strip().split(\".\")/return $2/" \
+      "$BENCH/tasks/vsort-numeric/seed/vsort.py" >"$d/vsort.py" \
+    && grep -Fq "return $2" "$d/vsort.py" && echo "$d"
+}
+judges 0 "a list-of-int key" vsort-numeric \
+  "$(vsort_with list-key '[int(p) for p in version.split(".")]')"
+judges 1 "a (length, text) key" vsort-numeric "$(vsort_with len-key '(len(version), version)')"
+judges 1 "a digits-only key" vsort-numeric \
+  "$(vsort_with digits-key 'int(version.replace(".", ""))')"
+
+# retry_with <name> <markdown> : a retry-docs seed with <markdown> appended to README.md.
+retry_with() {
+  d="$(variant retry-docs "$1")" && printf '\n%s\n' "$2" >>"$d/README.md" && echo "$d"
+}
+nl=$'\n'
+settings="- RETRY_ATTEMPTS: default 5$nl- RETRY_DELAY: default 2$nl$nl"
+recent="retry.sh returns the status code of the most recent attempt."
+judges 0 "\"$recent\"" retry-docs "$(retry_with recent "$settings$recent")"
+exits_1="If the final attempt fails, retry.sh exits 1."
+judges 1 "\"$exits_1\"" retry-docs "$(retry_with exits-1 "$settings$exits_1")"
+last="retry.sh exits with the exit status of the last attempt."
+swapped="Set RETRY_ATTEMPTS (default 2) and RETRY_DELAY (default 5).$nl$nl$last"
+judges 1 "defaults swapped on one line" retry-docs "$(retry_with swapped "$swapped")"
+example="- RETRY_ATTEMPTS: default 3$nl- RETRY_DELAY: default 1$nl$nl"
+example="$example    RETRY_ATTEMPTS=5 RETRY_DELAY=2 ./retry.sh true$nl$nl$last"
+judges 1 "wrong defaults next to an example assignment" retry-docs \
+  "$(retry_with example "$example")"
 
 echo
 echo "selftest: $pass passed, $fail failed"
