@@ -13,7 +13,8 @@
 #   - octo-worktree.sh     : add / detach / list / remove run for real in a throwaway local repo
 #   - octo-merge-state.sh  : the UNKNOWN re-query loop and gh-error exit, against a stub `gh`
 #   - octo-bench.sh        : the --live gate and --dry-run make no gh / claude call; preflight,
-#                            check's metrics, and run's cost cap, against a stub `gh` and `claude`
+#                            check's metrics, run's cost cap, and cleanup, against a stub `gh`
+#                            and `claude`
 #
 # It deliberately never invokes a helper in a way that reaches the real gh / the network.
 # Exits 0 when every check passes, 1 when any check fails.
@@ -175,7 +176,9 @@ expect 0 "gh exit 2: exits 1, not the bad-arguments 2" test "$ms_rc/$ms_out" = "
 
 echo "• octo-bench.sh (offline, stub gh and claude)"
 # Stubs first on PATH log every call to $STUB_LOG. gh answers from the fixture dir $STUB_CASE:
-# `repo clone` copies $STUB_CASE/repo, `pr list` / `pr view` print list.json / view.json.
+# `repo clone` copies $STUB_CASE/repo, `pr list` / `pr view` print list.json / view.json, and
+# `repo list --json name --jq .[].name` applies that filter to repos.json. claude sleeps
+# $STUB_CLAUDE_SLEEP seconds first, when set.
 bstub="$wtmp/bench-bin"
 mkdir -p "$bstub"
 cat >"$bstub/gh" <<'STUB'
@@ -187,7 +190,14 @@ case "$1 $2" in
   "repo clone") mkdir "$4" && cp -R "$STUB_CASE/repo/." "$4/" ;;  # gh repo clone <repo> <dir>
   "pr list") cat "$STUB_CASE/list.json" ;;
   "pr view") cat "$STUB_CASE/view.json" ;;
-  "repo create"|"label create") ;;
+  "repo list")
+    case " $* " in
+      *" --json name --jq .[].name "*) ;;
+      *) echo "stub gh: bad: $*" >&2; exit 1 ;;
+    esac
+    python3 -c 'import json, sys
+for r in json.load(open(sys.argv[1])): print(r["name"])' "$STUB_CASE/repos.json" ;;
+  "repo create"|"repo delete"|"label create") ;;
   "issue create") cat >/dev/null; echo "https://github.com/stub/x/issues/1" ;;
   *) echo "stub gh: unexpected: $*" >&2; exit 1 ;;
 esac
@@ -195,6 +205,7 @@ STUB
 cat >"$bstub/claude" <<'STUB'
 #!/usr/bin/env bash
 echo "claude $*" >>"$STUB_LOG"
+[ -z "${STUB_CLAUDE_SLEEP:-}" ] || exec sleep "$STUB_CLAUDE_SLEEP"
 echo '{"total_cost_usd": 3, "num_turns": 5, "modelUsage": {"stub-model": {"costUSD": 3}}}'
 STUB
 chmod +x "$bstub/gh" "$bstub/claude"
@@ -223,6 +234,8 @@ no_calls "check --dry-run" 0 check vsort-numeric "$r" --dry-run
 no_calls "cleanup --dry-run" 0 cleanup --run-id r1 --dry-run
 no_calls "run --dry-run" 0 run --tasks all --run-id r1 --max-cost-usd 5 --dry-run
 no_calls "--live --dry-run is still a dry run" 0 setup vsort-numeric --run-id r1 --live --dry-run
+no_calls "solve refuses a non-bench repo" 2 solve zeikar/octoperator 77 --dry-run
+no_calls "solve refuses an unknown task's repo" 2 solve o/octo-bench-nosuch-r1 1 --dry-run
 dry="$(bench setup vsort-numeric --run-id r1 --owner me --dry-run 2>&1)"
 expect 0 "setup --dry-run names the repo and the issue" \
   test -n "$(printf '%s\n' "$dry" | grep -F 'me/octo-bench-vsort-numeric-r1 (private)')" \
@@ -313,6 +326,55 @@ expect 0 "run --max-cost-usd: stops once the total passes the cap (exit 1, 1 tas
 expect 0 "run records solve's cost and model in the result line" \
   test "$(fields "$(cat "$BENCH_RESULTS_DIR/cap.jsonl")" task cost_usd turns model)" \
     = '"retry-docs" 3 5 "stub-model"'
+
+# A solve that times out leaves no cost: with a cap set, run must not start the next task.
+rm -f "$STUB_LOG"
+slow_err="$(STUB_CLAUDE_SLEEP=10 BENCH_SOLVE_TIMEOUT=1 STUB_CASE="$cases/nopr" bench run \
+  --tasks retry-docs,vsort-numeric --run-id slow --max-cost-usd 0.5 --live 2>&1 >/dev/null)"
+slow_rc=$?
+expect 0 "run --max-cost-usd: a timed-out solve (no cost) stops the run (exit 1, 1 task)" \
+  test "$slow_rc $(grep -c '^claude ' "$STUB_LOG")" = "1 1"
+expect 0 "run warns that the timed-out task's cost is unknown" \
+  test -n "$(printf '%s\n' "$slow_err" | grep -F 'cost of retry-docs unknown (claude exit 1')"
+expect 0 "solve records the timeout's exit and a null claude" \
+  test "$(fields "$(cat "$BENCH_RESULTS_DIR/octo-bench-retry-docs-slow.solve.json")" claude)" \
+    = null
+
+# Preflight checks for claude before setup creates any repo. A PATH of links to just the
+# tools the script needs before then, plus the stub gh, leaves claude out.
+nobin="$wtmp/no-claude-bin"
+mkdir -p "$nobin" && ln -s "$bstub/gh" "$nobin/gh"
+for c in dirname sed tr grep head tail awk cat mkdir rm mktemp python3 perl git; do
+  p="$(command -v "$c")" && ln -s "$p" "$nobin/$c"
+done
+rm -f "$STUB_LOG"
+nc_err="$(PATH="$nobin" bounded 60 "$(command -v bash)" "$BENCH" run --tasks vsort-numeric \
+  --run-id nc --live 2>&1 >/dev/null)"
+nc_rc=$?
+expect 0 "run without claude exits 1 in preflight, creating no repo" \
+  test "$nc_rc" -eq 1 -a -n "$(printf '%s\n' "$nc_err" | grep -F 'claude is not installed')" \
+    -a -z "$(grep -F 'repo create' "$STUB_LOG" 2>/dev/null)"
+
+# cleanup deletes exactly this run's repos: r1, not r1-2 or r10 (whose names start the same).
+mkdir -p "$cases/repos"
+cat >"$cases/repos/repos.json" <<'JSON'
+[{"name": "octo-bench-vsort-numeric-r1"}, {"name": "octo-bench-vsort-numeric-r1-2"},
+ {"name": "octo-bench-vsort-numeric-r10"}, {"name": "octo-bench-retry-docs-r1"},
+ {"name": "octoperator"}]
+JSON
+rm -f "$STUB_LOG"
+STUB_CASE="$cases/repos" bench cleanup --run-id r1 --live >/dev/null 2>&1
+cl_rc=$?
+expect 0 "cleanup --run-id r1 deletes only the -r1 repos" \
+  test "$cl_rc $(grep '^gh repo delete' "$STUB_LOG" | tr '\n' ' ')" = "0 gh repo delete \
+stub/octo-bench-retry-docs-r1 --yes gh repo delete stub/octo-bench-vsort-numeric-r1 --yes "
+rm -f "$STUB_LOG"
+cl_err="$(STUB_SCOPES=repo STUB_CASE="$cases/repos" bench cleanup --run-id r1 --live 2>&1)"
+cl_rc=$?
+expect 0 "cleanup without delete_repo deletes nothing, lists the repos, and exits 1" \
+  test "$cl_rc" -eq 1 -a -z "$(grep '^gh repo delete' "$STUB_LOG")" \
+    -a -n "$(printf '%s\n' "$cl_err" | grep -Fx '  stub/octo-bench-retry-docs-r1')" \
+    -a -n "$(printf '%s\n' "$cl_err" | grep -Fx '  stub/octo-bench-vsort-numeric-r1')"
 
 echo
 echo "smoke: $pass passed, $fail failed"

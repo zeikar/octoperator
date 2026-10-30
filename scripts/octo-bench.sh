@@ -10,19 +10,20 @@
 #                     [--max-cost-usd N]                            --live | --dry-run
 #
 #   setup    Create the private repo <owner>/octo-bench-<task>-<id> (owner: the gh user) from the
-#            task's seed/ plus a .claude/settings.json allowing gh, git, and make test. File the
-#            issue from task.md, and print "<owner/repo> <issue#>".
-#   solve    Optional. Clone the repo and run `claude -p "/octoperator:auto <issue#>"` in it, with
-#            the plugin loaded from --plugin-dir (default: this checkout), for at most
-#            BENCH_SOLVE_TIMEOUT seconds (default 3600). Saves the JSON to
-#            <results>/<repo-name>.solve.json. Instead, the session's own agent may run
-#            /octoperator:auto in a clone.
+#            task's seed/ plus a .claude/settings.json allowing gh, git, make test, and the file
+#            tools. File the issue from task.md, and print "<owner/repo> <issue#>".
+#   solve    Optional. Clone the bench repo (owner/octo-bench-<task>-<id>; no other repo) and
+#            run `claude -p "/octoperator:auto <issue#>"` in it, with the plugin loaded from
+#            --plugin-dir (default: this checkout), for at most BENCH_SOLVE_TIMEOUT seconds
+#            (default 3600). Saves the JSON to <results>/<repo-name>.solve.json. Instead, the
+#            session's own agent may run /octoperator:auto in a clone.
 #   check    Clone the default branch, run the task's hidden check.sh on it from bench/tasks/<task>/
 #            (never copied into the repo; at most BENCH_CHECK_TIMEOUT seconds, default 120). Then
 #            read the PR's metrics through gh and append one JSON line to <results>/<id>.jsonl.
 #   cleanup  Delete this run's repos. Without the delete_repo scope, list them instead.
 #   run      setup, solve, then check for each task. Once the total cost passes --max-cost-usd, it
-#            starts no more tasks.
+#            starts no more tasks; with the cap set, it also stops after a solve whose cost is
+#            unknown (claude ran but reported none, e.g. it timed out).
 #
 # Every subcommand creates or reads real GitHub repos, so it runs only with --live. Without
 # --live (or --dry-run) it exits 2 before any gh or claude call. --dry-run prints the planned
@@ -97,7 +98,14 @@ case "$SUB" in
   setup) allow --run-id --owner; positionals 1; valid_task "$P1"; need_run_id ;;
   solve)
     allow --plugin-dir; positionals 2; valid_repo "$P1"
-    case "$P2" in *[!0-9]*) usage_err "bad issue number: $P2" ;; esac ;;
+    case "$P2" in *[!0-9]*) usage_err "bad issue number: $P2" ;; esac
+    # solve runs unattended `auto` (implement and merge): never aim it at a non-bench repo.
+    bench_repo=0
+    for d in "$TASKS"/*/; do
+      case "${P1#*/}" in "octo-bench-$(basename "$d")-"?*) bench_repo=1 ;; esac
+    done
+    [ "$bench_repo" -eq 1 ] \
+      || usage_err "$P1 is not a bench repo (want owner/octo-bench-<task>-<run-id>)" ;;
   check)
     allow; positionals 2; valid_task "$P1"; valid_repo "$P2"
     # The run id lives in the repo name; check needs it to find the results file.
@@ -166,10 +174,17 @@ bounded() {
   fi
 }
 
-# preflight : gh must be signed in with the repo scope; a missing delete_repo only warns.
+# preflight : the tools this subcommand needs are installed (checked before setup creates any
+# repo), and gh is signed in with the repo scope; a missing delete_repo only warns.
 # Sets LOGIN and CAN_DELETE (yes, no, or unknown when the token has no classic scopes).
 preflight() {
   command -v gh >/dev/null 2>&1 || die "gh is not installed (https://cli.github.com)"
+  case "$SUB" in
+    solve|run) command -v claude >/dev/null 2>&1 || die "claude is not installed" ;;
+  esac
+  case "$SUB" in
+    solve|check|run) command -v python3 >/dev/null 2>&1 || die "python3 is not installed" ;;
+  esac
   out="$(gh api -i user 2>&1)" \
     || die "gh is not authenticated; run \`gh auth login\` ($(printf '%s' "$out" | tail -n 1))"
   out="$(printf '%s\n' "$out" | tr -d '\r')"
@@ -214,9 +229,12 @@ cmd_setup() {
   fi
   repo="${OWNER:-$LOGIN}/$name"; dir="$tmp/seed-$task"
   mkdir -p "$dir/.claude" && cp -R "$TASKS/$task/seed/." "$dir/" || die "could not copy seed/"
-  # Per README -> Unattended runs: the agent's gh, git, and test commands never prompt.
+  # Per README -> Unattended runs: the agent's gh, git, and test commands never prompt. The
+  # file tools too, since a skill's tool permissions may not carry over to its subagents (the
+  # implementer's fix rounds edit files), and this repo is throwaway.
   printf '%s\n' '{' '  "permissions": {' \
-    '    "allow": ["Bash(gh:*)", "Bash(git:*)", "Bash(make test:*)"]' '  }' '}' \
+    '    "allow": ["Bash(gh:*)", "Bash(git:*)", "Bash(make test:*)",' \
+    '      "Read", "Edit", "Write", "Grep", "Glob"]' '  }' '}' \
     >"$dir/.claude/settings.json"
   { git -c init.defaultBranch=main init -q "$dir" && git -C "$dir" add -A \
     && git -C "$dir" -c user.name=octo-bench -c user.email=octo-bench@example.invalid \
@@ -240,7 +258,6 @@ cmd_solve() {
     echo "  save: $out"
     return 0
   fi
-  command -v claude >/dev/null 2>&1 || die "claude is not installed"
   dir="$tmp/solve-${repo#*/}"
   gh repo clone "$repo" "$dir" -- -q || die "could not clone $repo"
   sha="$(git -C "$PLUGIN_DIR" rev-parse HEAD 2>/dev/null)"
@@ -397,12 +414,30 @@ cmd_run() {
     fi
     # Subshells: a failing step's `die` ends that step, not the whole run.
     out="$(cmd_setup "$t")" || { warn "setup failed for $t; skipping it"; failed=1; continue; }
-    repo="${out% *}"
+    repo="${out% *}"; solve="$RESULTS/${repo#*/}.solve.json"
+    rm -f "$solve"
     (cmd_solve "$repo" "${out##* }") || failed=1
     (cmd_check "$t" "$repo" "$RUN_ID") || failed=1
-    cost="$(python3 -c 'import json, sys
-try: print(json.load(open(sys.argv[1]))["claude"]["total_cost_usd"] or 0)
-except Exception: print(0)' "$RESULTS/${repo#*/}.solve.json")"
+    # No solve JSON: solve failed before claude started, so it cost nothing. JSON without a
+    # cost: claude ran (maybe timed out, the costliest case) and its spend is unknown.
+    cost="$(python3 -c 'import json, os, sys
+if not os.path.exists(sys.argv[1]): print(0); sys.exit()
+try: s = json.load(open(sys.argv[1]))
+except ValueError: print("unknown ?"); sys.exit()
+s = s if isinstance(s, dict) else {}
+c = s.get("claude") if isinstance(s.get("claude"), dict) else {}
+c = c.get("total_cost_usd")
+ok = isinstance(c, (int, float)) and not isinstance(c, bool)
+print(c if ok else "unknown %s" % s.get("exit", "?"))' "$solve")" || cost="unknown ?"
+    case "$cost" in
+      unknown*)
+        if [ -n "$MAX_COST" ]; then
+          warn "cost of $t unknown (claude exit ${cost#unknown }); not starting more tasks"
+          echo "run $RUN_ID: total cost \$$total, plus $t's unknown cost" >&2
+          return 1
+        fi
+        cost=0 ;;
+    esac
     total="$(awk -v t="$total" -v c="$cost" 'BEGIN { print t + c }')"
   done
   [ "$DRY" -eq 1 ] || echo "run $RUN_ID: total cost \$$total" >&2
