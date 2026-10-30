@@ -7,6 +7,12 @@ All notable changes to Octoperator are documented in this file. The format is ba
 ## [Unreleased]
 
 ### Added
+- Benchmark task format and three starter tasks (feature, bug fix, docs) under `bench/tasks/`, each
+  with an issue to file (`task.md`), a seed repo, a hidden `check.sh` oracle, and a reference
+  `solution.patch`; the format is documented in `bench/README.md`. `bench/validate.sh` checks every
+  task offline (the check must fail on the seed and pass with the patch), `bench/test/selftest.sh`
+  proves it catches broken tasks, and CI runs both on ubuntu and macOS and shellchecks
+  `bench/**/*.sh`.
 - README workflow diagram (light/dark PNGs via `<picture>`), rendered from `docs/workflow.html`.
 - `octo-merge-state.sh` helper: prints a PR's `mergeStateStatus`, re-querying while GitHub reports
   `UNKNOWN` (up to 3 tries, 10 s apart). `auto`'s merge gate uses it.

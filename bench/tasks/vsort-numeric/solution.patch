@@ -1,0 +1,33 @@
+diff --git a/tests/test_vsort.py b/tests/test_vsort.py
+index 61d44f2..05cc836 100644
+--- a/tests/test_vsort.py
++++ b/tests/test_vsort.py
+@@ -17,6 +17,15 @@ class SortVersionsTest(unittest.TestCase):
+     def test_major_version_wins(self):
+         self.assertEqual(vsort.sort_versions(["2.0.0", "1.9.9"]), ["1.9.9", "2.0.0"])
+ 
++    def test_parts_compare_as_numbers(self):
++        self.assertEqual(
++            vsort.sort_versions(["1.10.0", "1.9.0", "10.0.0", "2.0.0"]),
++            ["1.9.0", "1.10.0", "2.0.0", "10.0.0"],
++        )
++
++    def test_prefix_sorts_first(self):
++        self.assertEqual(vsort.sort_versions(["1.2.1", "1.2"]), ["1.2", "1.2.1"])
++
+     def test_empty_list(self):
+         self.assertEqual(vsort.sort_versions([]), [])
+ 
+diff --git a/vsort.py b/vsort.py
+index 92730a2..bbb7b73 100644
+--- a/vsort.py
++++ b/vsort.py
+@@ -5,7 +5,7 @@ import sys
+ 
+ def version_key(version):
+     """Return the sort key for one dotted version string."""
+-    return version.strip().split(".")
++    return tuple(int(part) for part in version.strip().split("."))
+ 
+ 
+ def sort_versions(versions):
