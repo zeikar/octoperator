@@ -16,7 +16,8 @@ case "${1:-}" in
   -h|--help) sed -n '2,/^[^#]/s/^# \{0,1\}//p' "$0"; exit 0 ;;
   "") echo "Usage: check.sh REPO_DIR" >&2; exit 2 ;;
 esac
-repo="$1"
+# Absolute, since the Python below runs from other directories.
+repo="$(cd "$1" 2>/dev/null && pwd)" || { echo "FAIL: no such directory: $1"; exit 1; }
 for f in envcheck.py envdump.py; do
   [ -f "$repo/$f" ] || { echo "FAIL: $repo/$f not found"; exit 1; }
 done

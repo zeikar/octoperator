@@ -132,4 +132,5 @@ Three tasks target failure modes seen on Octoperator's own PRs (#69):
   the entries sit under the right headings), not the wording.
 - **An obvious fix that breaks an existing test**: `linecount-last-line`. `len(text.splitlines())`
   fixes the bug but also counts a lone `\r` as a line break, which an existing test forbids.
-  (`snap-spaces` has a milder one: a bare glob also copies a directory named `*.conf`.)
+  (`snap-spaces` has a milder one: a bare `"$SRC"/*.conf` glob hands a directory named `sub.conf`
+  to `cp`, which fails, and hands `cp` the literal pattern when nothing matches.)

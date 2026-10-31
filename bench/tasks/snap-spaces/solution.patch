@@ -14,7 +14,7 @@ index 42e50e8..df1e124 100755
 +  cp -- "$path" "$dest/${path##*/}.bak" || exit 1
  done
 diff --git a/tests/test.sh b/tests/test.sh
-index e4671af..4b9079b 100644
+index e4671af..4b9079b 100755
 --- a/tests/test.sh
 +++ b/tests/test.sh
 @@ -31,6 +31,16 @@ bash "$SNAP" "$tmp/empty" "$tmp/out2"

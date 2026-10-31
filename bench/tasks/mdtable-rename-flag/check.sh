@@ -7,8 +7,9 @@
 # Passes when mdtable.py in REPO_DIR takes --delimiter and -d (default still a comma), still takes
 # --sep with the same output, exit 0, and a stderr warning that contains "deprecated" and names
 # --delimiter, and prints nothing on stderr without --sep; --help shows --delimiter; README.md
-# mentions --delimiter, and every paragraph or code block in it that mentions --sep also says it
-# is deprecated; CHANGELOG.md's [Unreleased] section has an `### Added` list item naming
+# mentions --delimiter, and every mention of --sep in it is framed as deprecated (its paragraph
+# or code block says "deprecat", or a heading it sits under does; a heading that names --sep needs
+# "deprecat" somewhere in its section); CHANGELOG.md's [Unreleased] section has an `### Added` list item naming
 # --delimiter and a `### Deprecated` list item naming --sep; and `make test` passes. The wording
 # of the warning and the entries is not judged. Exits 0 on pass, 1 on fail, 2 on bad arguments.
 set -uo pipefail
@@ -73,25 +74,71 @@ def read(name):
         return None
 
 
+HEADING = re.compile(r"(#{1,6})\s+(.*?)\s*#*\s*$")
+FENCE = re.compile(r" {0,3}(```|~~~)")
+SEP = re.compile(r"--sep\b")
+DEPRECATED = re.compile(r"deprecat", re.I)
+
+
+def blocks(lines):
+    """README lines as (headings, start, block) triples. A block is a heading line on its own or
+    a run of non-blank lines (a fenced code block is one run, blank lines and all). start is the
+    heading's line index, or None for other blocks; headings holds the text of every heading the
+    block sits under (for a heading, itself and those above it)."""
+    out, stack, block, fenced = [], [], [], False
+
+    def flush():
+        if block:
+            out.append(([text for _, text in stack], None, list(block)))
+            block.clear()
+
+    for i, line in enumerate(lines):
+        m = None if fenced else HEADING.match(line)
+        if FENCE.match(line):
+            fenced = not fenced
+        if m:
+            flush()
+            level = len(m.group(1))
+            stack[:] = [(lv, text) for lv, text in stack if lv < level] + [(level, m.group(2))]
+            out.append(([text for _, text in stack], i, [line]))
+        elif line.strip() or fenced:
+            block.append(line)
+        else:
+            flush()
+    flush()
+    return out
+
+
+def section_text(lines, start):
+    """The text from the heading at lines[start] up to the next heading (outside a fenced code
+    block) of its level or higher."""
+    level = len(HEADING.match(lines[start]).group(1))
+    out, fenced = [lines[start]], False
+    for line in lines[start + 1:]:
+        m = None if fenced else HEADING.match(line)
+        if m and len(m.group(1)) <= level:
+            break
+        if FENCE.match(line):
+            fenced = not fenced
+        out.append(line)
+    return "\n".join(out)
+
+
 readme = read("README.md")
 if readme is not None:
     if not any("--delimiter" in line for line in readme):
         print("FAIL: README.md does not mention --delimiter")
-    # Paragraphs and code blocks: runs of non-blank lines.
-    blocks, block = [], []
-    for line in readme + [""]:
-        if line.strip():
-            block.append(line)
-        elif block:
-            blocks.append(block)
-            block = []
-    for block in blocks:
+    # Every mention of --sep must be framed as deprecated: by its own paragraph or code block,
+    # by a heading it sits under, or, for a heading that names --sep, by the heading's section.
+    for headings, start, block in blocks(readme):
         text = "\n".join(block)
-        if re.search(r"--sep\b", text) and not re.search(r"deprecat", text, re.I):
-            first = next(line for line in block if re.search(r"--sep\b", line))
-            print(f"FAIL: README.md mentions --sep without calling it deprecated: {first.strip()}")
-
-HEADING = re.compile(r"(#{1,6})\s+(.*?)\s*#*\s*$")
+        if not SEP.search(text) or DEPRECATED.search(text) \
+                or any(DEPRECATED.search(h) for h in headings):
+            continue
+        if start is not None and DEPRECATED.search(section_text(readme, start)):
+            continue
+        first = next(line for line in block if SEP.search(line))
+        print(f"FAIL: README.md mentions --sep without calling it deprecated: {first.strip()}")
 
 
 def subsection(lines, level, title):

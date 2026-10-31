@@ -374,6 +374,16 @@ judges 1 "no -d short form" mdtable-rename-flag \
 judges 1 "a README example still using --sep" mdtable-rename-flag \
   "$(edited solved mdtable-rename-flag readme-sep README.md '## Tests' \
     $'Old scripts:\n\n    python3 mdtable.py --sep \';\' people.txt\n\n## Tests')"
+# md_readme <name> <new text> : the reference fix with its README's --delimiter paragraph replaced.
+md_para=$'`--delimiter` (or `-d`) sets the field separator (default `,`). The old name, `--sep`, still\nworks but is deprecated: it prints a warning and will be removed in a future release.'
+md_readme() { edited solved mdtable-rename-flag "$1" README.md "$md_para" "$2"; }
+md_new=$'`--delimiter` (or `-d`) sets the field separator (default `,`).\n\n'
+judges 0 "--sep listed under a \"Deprecated options\" heading" mdtable-rename-flag \
+  "$(md_readme deprecated-heading "$md_new"$'## Deprecated options\n\n- `--sep`: the old name of `--delimiter`')"
+judges 0 "an \"Upgrading from --sep\" heading over a deprecation note" mdtable-rename-flag \
+  "$(md_readme upgrading-heading "$md_new"$'## Upgrading from `--sep`\n\n`--sep` is deprecated: use `--delimiter`.')"
+judges 1 "--sep listed as a plain option" mdtable-rename-flag \
+  "$(md_readme plain-option "$md_new"$'## Options\n\n- `--sep`: the old name of `--delimiter`')"
 judges 1 "the --sep entry under ### Changed, not ### Deprecated" mdtable-rename-flag \
   "$(edited solved mdtable-rename-flag changed CHANGELOG.md '### Deprecated' '### Changed')"
 judges 1 "the entries under [1.0.0], not [Unreleased]" mdtable-rename-flag \
@@ -427,7 +437,7 @@ snap_judges() {
 }
 snap_judges 0 "a guarded glob" glob-guarded $'for path in "$src"/*.conf; do\n  [ -f "$path" ] || continue\n  cp -- "$path" "$dest/${path##*/}.bak" || exit 1\ndone'
 snap_judges 0 "find | while IFS= read, all quoted" read-quoted $'find "$src" -maxdepth 1 -type f -name \'*.conf\' | while IFS= read -r path; do\n  cp "$path" "$dest/$(basename "$path").bak" || exit 1\ndone'
-snap_judges 1 "a bare glob (copies a sub.conf dir, breaks with no matches)" glob-bare \
+snap_judges 1 "a bare glob (cp gets a sub.conf dir, or the pattern itself)" glob-bare \
   $'for path in "$src"/*.conf; do\n  cp -- "$path" "$dest/${path##*/}.bak" || exit 1\ndone'
 snap_judges 1 "cd SRC and cp \"\$f\" (a leading - is an option)" cd-src \
   $'cd "$src" || exit 1\nfor f in *.conf; do\n  [ -f "$f" ] || continue\n  cp "$f" "$dest/$f.bak" || exit 1\ndone'
