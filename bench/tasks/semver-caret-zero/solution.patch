@@ -1,0 +1,63 @@
+diff --git a/README.md b/README.md
+index 8562663..02e7bae 100644
+--- a/README.md
++++ b/README.md
+@@ -15,6 +15,8 @@ A range is one or more comparators separated by spaces; a version must satisfy a
+ | `>=1.2.3`  | also `>`, `<=`, and `<`                         |
+ | `~1.2.3`   | patch updates: `>=1.2.3 <1.3.0`                 |
+ | `^1.2.3`   | updates that keep the major: `>=1.2.3 <2.0.0`   |
++| `^0.2.3`   | below 1.0.0, keep the minor: `>=0.2.3 <0.3.0`   |
++| `^0.0.3`   | below 0.1.0, keep the patch: `>=0.0.3 <0.0.4`   |
+ 
+ ## Tests
+ 
+diff --git a/semver.py b/semver.py
+index 789938a..0629153 100644
+--- a/semver.py
++++ b/semver.py
+@@ -6,7 +6,8 @@ A range is one or more comparators separated by spaces, and a version must satis
+     1.2.3                  exactly 1.2.3
+     >=1.2.3 >1.2.3 <=1.2.3 <1.2.3
+     ~1.2.3                 patch updates: >=1.2.3 <1.3.0
+-    ^1.2.3                 updates that keep the major version: >=1.2.3 <2.0.0
++    ^1.2.3                 updates that keep the leftmost non-zero part: >=1.2.3 <2.0.0,
++                           ^0.2.3 is >=0.2.3 <0.3.0, ^0.0.3 is >=0.0.3 <0.0.4
+ """
+ import operator
+ import re
+@@ -34,7 +35,15 @@ def bounds(comparator):
+         return [(">=", (major, minor, patch)), ("<", (major, minor + 1, 0))]
+     if comparator.startswith("^"):
+         major, minor, patch = parse(comparator[1:])
+-        return [(">=", (major, minor, patch)), ("<", (major + 1, 0, 0))]
++        # The leftmost non-zero part stays fixed: below 1.0.0 a minor (or, below 0.1.0, a
++        # patch) bump may break things.
++        if major:
++            upper = (major + 1, 0, 0)
++        elif minor:
++            upper = (0, minor + 1, 0)
++        else:
++            upper = (0, 0, patch + 1)
++        return [(">=", (major, minor, patch)), ("<", upper)]
+     return [("=", parse(comparator))]
+ 
+ 
+diff --git a/tests/test_semver.py b/tests/test_semver.py
+index dd4b955..f39e5ed 100644
+--- a/tests/test_semver.py
++++ b/tests/test_semver.py
+@@ -29,6 +29,14 @@ class SatisfiesTest(unittest.TestCase):
+         self.assertEqual(matching("^1.2.3", ["1.2.2", "1.2.3", "1.9.0", "2.0.0"]),
+                          ["1.2.3", "1.9.0"])
+ 
++    def test_caret_below_one_keeps_the_minor(self):
++        self.assertEqual(matching("^0.2.3", ["0.2.2", "0.2.3", "0.2.9", "0.3.0", "1.0.0"]),
++                         ["0.2.3", "0.2.9"])
++
++    def test_caret_below_point_one_keeps_the_patch(self):
++        self.assertEqual(matching("^0.0.3", ["0.0.3", "0.0.4", "0.1.0"]), ["0.0.3"])
++        self.assertEqual(matching("^0.0.0", ["0.0.0", "0.0.1"]), ["0.0.0"])
++
+     def test_parts_compare_as_numbers(self):
+         self.assertEqual(matching(">=1.10.0", ["1.9.0", "1.10.0"]), ["1.10.0"])
+ 

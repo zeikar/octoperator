@@ -1,0 +1,109 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 1dbe429..867f51e 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -5,6 +5,12 @@ All notable changes to mdtable are documented here. The format follows
+ 
+ ## [Unreleased]
+ 
++### Added
++- `--delimiter` (short form `-d`) sets the field separator.
++
++### Deprecated
++- `--sep`: use `--delimiter` instead. `--sep` still works, with a warning on stderr.
++
+ ## [1.0.0] - 2026-09-01
+ 
+ ### Added
+diff --git a/README.md b/README.md
+index 07fed77..723cd18 100644
+--- a/README.md
++++ b/README.md
+@@ -5,10 +5,11 @@ Prints delimited text as a Markdown table. The first row becomes the header.
+ ## Usage
+ 
+     python3 mdtable.py people.csv
+-    python3 mdtable.py --sep ';' people.txt
+-    cut -d: -f1,7 /etc/passwd | python3 mdtable.py --sep :
++    python3 mdtable.py --delimiter ';' people.txt
++    cut -d: -f1,7 /etc/passwd | python3 mdtable.py -d :
+ 
+-`--sep` sets the field separator (default `,`).
++`--delimiter` (or `-d`) sets the field separator (default `,`). The old name, `--sep`, still
++works but is deprecated: it prints a warning and will be removed in a future release.
+ 
+ ## Tests
+ 
+diff --git a/mdtable.py b/mdtable.py
+index 42c532c..3cbc342 100644
+--- a/mdtable.py
++++ b/mdtable.py
+@@ -15,9 +15,14 @@ def to_markdown(rows):
+ 
+ def main(argv=None):
+     parser = argparse.ArgumentParser(description="Print delimited text as a Markdown table.")
+-    parser.add_argument("--sep", default=",", help="the field separator (default: ,)")
++    parser.add_argument("-d", "--delimiter", default=",",
++                        help="the field delimiter (default: ,)")
++    parser.add_argument("--sep", dest="sep", help=argparse.SUPPRESS)  # deprecated alias
+     parser.add_argument("file", nargs="?", default="-", help="file to read, or - for stdin")
+     args = parser.parse_args(argv)
++    if args.sep is not None:
++        print("mdtable: --sep is deprecated; use --delimiter (or -d) instead", file=sys.stderr)
++        args.delimiter = args.sep
+ 
+     if args.file == "-":
+         text = sys.stdin.read()
+@@ -25,7 +30,7 @@ def main(argv=None):
+         with open(args.file, encoding="utf-8") as fh:
+             text = fh.read()
+ 
+-    rows = [line.split(args.sep) for line in text.splitlines() if line.strip()]
++    rows = [line.split(args.delimiter) for line in text.splitlines() if line.strip()]
+     if rows:
+         for line in to_markdown(rows):
+             print(line)
+diff --git a/tests/test_mdtable.py b/tests/test_mdtable.py
+index 67ecce8..ed1b6d3 100644
+--- a/tests/test_mdtable.py
++++ b/tests/test_mdtable.py
+@@ -22,21 +22,32 @@ class ToMarkdownTest(unittest.TestCase):
+ 
+ 
+ class MainTest(unittest.TestCase):
++    TABLE = "| a | b |\n|---|---|\n| 1 | 2 |\n"
++
+     def run_main(self, text, *args):
++        """Run main on a file holding text; return (stdout, stderr)."""
+         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
+             fh.write(text)
+         self.addCleanup(os.remove, fh.name)
+-        out = io.StringIO()
+-        with contextlib.redirect_stdout(out):
++        out, err = io.StringIO(), io.StringIO()
++        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+             self.assertEqual(mdtable.main([*args, fh.name]), 0)
+-        return out.getvalue()
++        return out.getvalue(), err.getvalue()
+ 
+     def test_commas_by_default(self):
+-        self.assertEqual(self.run_main("a,b\n1,2\n"), "| a | b |\n|---|---|\n| 1 | 2 |\n")
++        self.assertEqual(self.run_main("a,b\n1,2\n"), (self.TABLE, ""))
++
++    def test_delimiter(self):
++        self.assertEqual(self.run_main("a;b\n1;2\n", "--delimiter", ";"), (self.TABLE, ""))
++
++    def test_short_delimiter(self):
++        self.assertEqual(self.run_main("a;b\n1;2\n", "-d", ";"), (self.TABLE, ""))
+ 
+-    def test_sep(self):
+-        self.assertEqual(self.run_main("a;b\n1;2\n", "--sep", ";"),
+-                         "| a | b |\n|---|---|\n| 1 | 2 |\n")
++    def test_sep_still_works_with_a_warning(self):
++        out, err = self.run_main("a;b\n1;2\n", "--sep", ";")
++        self.assertEqual(out, self.TABLE)
++        self.assertIn("deprecated", err.lower())
++        self.assertIn("--delimiter", err)
+ 
+ 
+ if __name__ == "__main__":

@@ -1,0 +1,36 @@
+diff --git a/snap.sh b/snap.sh
+index 42e50e8..df1e124 100755
+--- a/snap.sh
++++ b/snap.sh
+@@ -10,7 +10,7 @@ src=$1
+ dest=$2
+ mkdir -p "$dest" || exit 1
+ 
+-find "$src" -maxdepth 1 -type f -name '*.conf' | while read -r path; do
+-  name=$(basename $path)
+-  cp $path $dest/$name.bak || exit 1
++# NUL-separated, and every expansion quoted, so no name is split, trimmed, or globbed.
++find "$src" -maxdepth 1 -type f -name '*.conf' -print0 | while IFS= read -r -d '' path; do
++  cp -- "$path" "$dest/${path##*/}.bak" || exit 1
+ done
+diff --git a/tests/test.sh b/tests/test.sh
+index e4671af..4b9079b 100644
+--- a/tests/test.sh
++++ b/tests/test.sh
+@@ -31,6 +31,16 @@ bash "$SNAP" "$tmp/empty" "$tmp/out2"
+ check "no .conf files exits 0" "$?" 0
+ check "no .conf files copies nothing" "$(listing "$tmp/out2")" ""
+ 
++mkdir -p "$tmp/odd src"
++for name in "my app.conf" "two  spaces.conf" "it's.conf" "-dash.conf"; do
++  echo "$name" >"$tmp/odd src/$name"
++done
++bash "$SNAP" "$tmp/odd src" "$tmp/odd out"
++check "names with spaces, quotes, and a leading -" "$?" 0
++check "copies every odd name" "$(listing "$tmp/odd out")" \
++  "-dash.conf.bak it's.conf.bak my app.conf.bak two  spaces.conf.bak "
++check "keeps the content of an odd name" "$(cat "$tmp/odd out/my app.conf.bak")" "my app.conf"
++
+ bash "$SNAP" "$tmp/src" 2>/dev/null
+ check "one argument is a usage error" "$?" 2
+ 

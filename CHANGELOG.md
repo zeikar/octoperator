@@ -23,6 +23,12 @@ All notable changes to Octoperator are documented in this file. The format is ba
   task offline (the check must fail on the seed and pass with the patch), `bench/test/selftest.sh`
   proves it catches broken tasks, and CI runs both on ubuntu and macOS and shellchecks
   `bench/**/*.sh`.
+- Seven more benchmark tasks, 10 in all: `todo-priority` (feature), `linecount-last-line`,
+  `snap-spaces`, `semver-caret-zero` (bug fixes), `csvcut-docs` (docs), `mdtable-rename-flag`, and
+  `envparse-extract` (chores, the second a refactor). Three target failure modes from
+  Octoperator's own PRs: docs that claim more than the code does, a change that invites only
+  wording nits, and an obvious fix that breaks an existing test. `selftest.sh` now also checks
+  that each new oracle rejects plausible wrong fixes and accepts other correct ones.
 - README workflow diagram (light/dark PNGs via `<picture>`), rendered from `docs/workflow.html`.
 - `octo-merge-state.sh` helper: prints a PR's `mergeStateStatus`, re-querying while GitHub reports
   `UNKNOWN` (up to 3 tries, 10 s apart). `auto`'s merge gate uses it.

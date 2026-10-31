@@ -263,6 +263,176 @@ d="$(variant retry-docs no-table)" && printf '\n%s\n' "## Configuration$nl$nl- R
 default 5$nl- RETRY_DELAY: default 2$nl$nl## Exit status$nl$nl$table" >>"$d/README.md"
 judges 1 "a list instead of the table" retry-docs "$d"
 
+# solved <task> <name> : like variant, with the task's solution.patch applied; prints its path.
+solved() {
+  d="$(variant "$1" "$2")" && git -C "$d" -c init.defaultBranch=main init -q \
+    && git -C "$d" apply --whitespace=nowarn "$BENCH/tasks/$1/solution.patch" && echo "$d"
+}
+# replace <file> <old> <new> : replace the one occurrence of <old> in <file> with <new>. Fails,
+# changing nothing, unless <old> occurs exactly once, so a stale case cannot pass by not editing.
+replace() {
+  python3 -c 'import sys
+path, old, new = sys.argv[1:4]
+text = open(path, encoding="utf-8").read()
+if text.count(old) != 1:
+    sys.exit("replace: %d matches for %r in %s" % (text.count(old), old, path))
+open(path, "w", encoding="utf-8").write(text.replace(old, new))' "$@"
+}
+# edited <variant|solved> <task> <name> <file> <old> <new> [<file> <old> <new>]... : a copy of
+# the seed (variant) or the reference fix (solved) with these edits; prints its path (nothing when an edit fails, so
+# the judge sees a bad argument rather than an unedited copy).
+edited() {
+  d="$("$1" "$2" "$3")" || return 1
+  shift 3
+  while [ $# -ge 3 ]; do replace "$d/$1" "$2" "$3" || return 1; shift 3; done
+  echo "$d"
+}
+
+# linecount-last-line: the obvious fixes break an existing test (or wc -l's rules).
+lc_fix=$'    lines = text.count("\\n")\n    if text and not text.endswith("\\n"):\n        lines += 1\n    return lines'
+judges 1 "len(text.splitlines()) (a lone \\r ends a line)" linecount-last-line \
+  "$(edited solved linecount-last-line splitlines linecount.py "$lc_fix" \
+    '    return len(text.splitlines())')"
+judges 1 "len(text.split(\"\\n\")) (a trailing newline adds a line)" linecount-last-line \
+  "$(edited solved linecount-last-line split linecount.py "$lc_fix" \
+    '    return len(text.split("\n"))')"
+judges 1 "+1 without a newline at the end (an empty file is 1)" linecount-last-line \
+  "$(edited solved linecount-last-line no-empty-guard linecount.py "$lc_fix" \
+    '    return text.count("\n") + (not text.endswith("\n"))')"
+judges 1 "reading files without newline=\"\" (\\r becomes \\n)" linecount-last-line \
+  "$(edited solved linecount-last-line universal linecount.py ', newline="")' ')')"
+judges 0 "count + bool(text) - endswith" linecount-last-line \
+  "$(edited solved linecount-last-line arithmetic linecount.py "$lc_fix" \
+    '    return text.count("\n") + bool(text) - text.endswith("\n")')"
+
+# csvcut-docs: the Supported input table must say what the code does, not what its docstring
+# (or a guess) claims. csv_doc <name> <table> : a seed whose README gains the section.
+csv_doc() {
+  d="$(variant csvcut-docs "$1")" && printf '\n## Supported input\n\n%s\n' "$2" >>"$d/README.md" \
+    && echo "$d"
+}
+csv_header="| Feature | Supported |$nl|---|---|"
+csv_name="| Select columns by header name | yes |"
+csv_pos="| Select columns by position (\`-f 2\`) | no |"
+csv_delim="| A delimiter other than a comma (\`-d\`) | yes |"
+csv_quoted="| Quoted fields that contain the delimiter | no |"
+csv_break="| Quoted fields that contain a line break | no |"
+csv_crlf="| Windows (CRLF) line endings | yes |"
+# csv_judges <wanted-exit> <label> <table>
+n=0
+csv_judges() { n=$((n + 1)); judges "$1" "$2" csvcut-docs "$(csv_doc "csv$n" "$3")"; }
+csv_judges 0 "the six rows as given" "$csv_header$nl$csv_name$nl$csv_pos$nl$csv_delim$nl\
+$csv_quoted$nl$csv_break$nl$csv_crlf"
+csv_judges 0 "reworded rows, reordered, Notes column, bold and capitalized answers" \
+  "Feature | Supported | Notes$nl:--|:-:|--${nl}CRLF line endings | **Yes** | dropped${nl}\
+Columns by name | Yes. | \`-f a,b\`${nl}Line breaks inside quoted fields | No | each line is a row\
+${nl}Fields quoted to hold a comma | \`no\` | split anyway${nl}Columns by number | no | names only\
+${nl}Custom delimiter (-d) | yes | |"
+for wrong in "$csv_quoted:| Quoted fields that contain the delimiter | yes |" \
+  "$csv_break:| Quoted fields that contain a line break | yes |" \
+  "$csv_pos:| Select columns by position (\`-f 2\`) | yes |" \
+  "$csv_crlf:| Windows (CRLF) line endings | no |" \
+  "$csv_quoted:| Quoted fields that contain the delimiter | partly |"
+do
+  csv_judges 1 "\"${wrong#*:}\"" "$(printf '%s\n' "$csv_header" "$csv_name" "$csv_pos" \
+    "$csv_delim" "$csv_quoted" "$csv_break" "$csv_crlf" | sed "s/^${wrong%%:*}\$/${wrong#*:}/")"
+done
+csv_judges 1 "a seventh row" "$csv_header$nl$csv_name$nl$csv_pos$nl$csv_delim$nl$csv_quoted$nl\
+$csv_break$nl$csv_crlf$nl| Reading from stdin | yes |"
+csv_judges 1 "a row missing" "$csv_header$nl$csv_name$nl$csv_pos$nl$csv_delim$nl$csv_quoted$nl\
+$csv_crlf"
+csv_judges 1 "a list instead of the table" "- Select columns by header name: yes$nl\
+- Select columns by position: no$nl- Delimiter: yes$nl- Quoted delimiter: no$nl\
+- Quoted line break: no$nl- CRLF: yes"
+judges 1 "quoted fields now parsed (behavior changed), and documented as yes" csvcut-docs \
+  "$(edited solved csvcut-docs csv-module \
+    csvcut.py '    return line.rstrip("\r\n").split(delimiter)' \
+    '    return next(csv.reader([line.rstrip("\r\n")], delimiter=delimiter))' \
+    csvcut.py 'import argparse' $'import argparse\nimport csv' \
+    README.md '| Quoted fields that contain the delimiter | no ' \
+    '| Quoted fields that contain the delimiter | yes')"
+
+# mdtable-rename-flag: only the facts count, not the wording.
+md_warn='        print("mdtable: --sep is deprecated; use --delimiter (or -d) instead", file=sys.stderr)'
+judges 0 "other wording, ## Unreleased without brackets, * bullets" mdtable-rename-flag \
+  "$(edited solved mdtable-rename-flag reworded mdtable.py "$md_warn" \
+    '        sys.stderr.write("WARNING: --sep is Deprecated, please switch to --delimiter.\n")' \
+    CHANGELOG.md '## [Unreleased]' '## Unreleased' \
+    CHANGELOG.md '- `--delimiter` (short' '* `--delimiter` (short' \
+    CHANGELOG.md '- `--sep`: use' '* `--sep`: use')"
+judges 1 "--sep with no warning" mdtable-rename-flag \
+  "$(edited solved mdtable-rename-flag silent mdtable.py "$md_warn" '        pass')"
+judges 1 "a warning that does not name --delimiter" mdtable-rename-flag \
+  "$(edited solved mdtable-rename-flag vague mdtable.py "$md_warn" \
+    '        print("mdtable: --sep is deprecated", file=sys.stderr)')"
+judges 1 "--sep removed" mdtable-rename-flag \
+  "$(edited solved mdtable-rename-flag no-alias mdtable.py \
+    $'    parser.add_argument("--sep", dest="sep", help=argparse.SUPPRESS)  # deprecated alias\n' '' \
+    mdtable.py '    if args.sep is not None:' '    if False:')"
+judges 1 "no -d short form" mdtable-rename-flag \
+  "$(edited solved mdtable-rename-flag no-short mdtable.py '"-d", "--delimiter"' '"--delimiter"')"
+judges 1 "a README example still using --sep" mdtable-rename-flag \
+  "$(edited solved mdtable-rename-flag readme-sep README.md '## Tests' \
+    $'Old scripts:\n\n    python3 mdtable.py --sep \';\' people.txt\n\n## Tests')"
+judges 1 "the --sep entry under ### Changed, not ### Deprecated" mdtable-rename-flag \
+  "$(edited solved mdtable-rename-flag changed CHANGELOG.md '### Deprecated' '### Changed')"
+judges 1 "the entries under [1.0.0], not [Unreleased]" mdtable-rename-flag \
+  "$(edited solved mdtable-rename-flag old-section CHANGELOG.md $'## [Unreleased]\n\n' '' \
+    CHANGELOG.md '## [1.0.0] - 2026-09-01' $'## [Unreleased]\n\n## [1.0.0] - 2026-09-01')"
+
+# envparse-extract: both tools must really use envparse.parse, and nothing may change.
+judges 0 "from envparse import parse" envparse-extract \
+  "$(edited solved envparse-extract from-import envdump.py 'import envparse' \
+    'from envparse import parse' envdump.py 'envparse.parse(fh.read())' 'parse(fh.read())')"
+d="$(solved envparse-extract own-copy)" && cp "$BENCH/tasks/envparse-extract/seed/envdump.py" "$d/"
+judges 1 "envdump.py keeps its own parser" envparse-extract "$d"
+judges 1 "inline # comments now stripped (behavior changed)" envparse-extract \
+  "$(edited solved envparse-extract inline-comment envparse.py \
+    '        key, value = key.strip(), value.strip()' \
+    '        key, value = key.strip(), value.split(" #")[0].strip()')"
+
+# todo-priority
+judges 1 "done items moved to the end" todo-priority \
+  "$(edited solved todo-priority done-last store.py \
+    '(PRIORITIES.index(item["priority"]), item["id"])' \
+    '(item["done"], PRIORITIES.index(item["priority"]), item["id"])')"
+judges 1 "old lists without priorities crash" todo-priority \
+  "$(edited solved todo-priority no-default store.py \
+    $'    for item in data["items"]:\n        item.setdefault("priority", "normal")\n' '')"
+judges 1 "[high] instead of (high)" todo-priority \
+  "$(edited solved todo-priority brackets todo.py 'line += f" ({item['"'"'priority'"'"']})"' \
+    'line += f" [{item['"'"'priority'"'"']}]"')"
+
+# semver-caret-zero
+sv_fix=$'        if major:\n            upper = (major + 1, 0, 0)\n        elif minor:\n            upper = (0, minor + 1, 0)\n        else:\n            upper = (0, 0, patch + 1)'
+judges 0 "the first non-zero part, found by index" semver-caret-zero \
+  "$(edited solved semver-caret-zero by-index semver.py "$sv_fix" \
+    $'        parts = [major, minor, patch]\n        i = next((i for i, p in enumerate(parts) if p), 2)\n        upper = tuple(parts[:i]) + (parts[i] + 1,) + (0,) * (2 - i)')"
+judges 1 "0.x handled, 0.0.x not" semver-caret-zero \
+  "$(edited solved semver-caret-zero minor-only semver.py "$sv_fix" \
+    '        upper = (major + 1, 0, 0) if major else (0, minor + 1, 0)')"
+judges 1 "an inclusive upper bound" semver-caret-zero \
+  "$(edited solved semver-caret-zero inclusive semver.py '("<", upper)' '("<=", upper)')"
+d="$(solved semver-caret-zero no-readme)" && cp "$BENCH/tasks/semver-caret-zero/seed/README.md" "$d/"
+judges 1 "the README table not updated" semver-caret-zero "$d"
+judges 0 "README rows in other words" semver-caret-zero \
+  "$(edited solved semver-caret-zero readme-words README.md \
+    '| below 1.0.0, keep the minor: `>=0.2.3 <0.3.0`   |' '| `>= 0.2.3` and `< 0.3.0` |' \
+    README.md '| below 0.1.0, keep the patch: `>=0.0.3 <0.0.4`   |' '| >=0.0.3, <0.0.4 (0.0.x) |')"
+
+# snap-spaces: the seed's loop, and some fixes for it.
+snap_loop=$'find "$src" -maxdepth 1 -type f -name \'*.conf\' | while read -r path; do\n  name=$(basename $path)\n  cp $path $dest/$name.bak || exit 1\ndone'
+snap_judges() {
+  judges "$1" "$2" snap-spaces "$(edited variant snap-spaces "$3" snap.sh "$snap_loop" "$4")"
+}
+snap_judges 0 "a guarded glob" glob-guarded $'for path in "$src"/*.conf; do\n  [ -f "$path" ] || continue\n  cp -- "$path" "$dest/${path##*/}.bak" || exit 1\ndone'
+snap_judges 0 "find | while IFS= read, all quoted" read-quoted $'find "$src" -maxdepth 1 -type f -name \'*.conf\' | while IFS= read -r path; do\n  cp "$path" "$dest/$(basename "$path").bak" || exit 1\ndone'
+snap_judges 1 "a bare glob (copies a sub.conf dir, breaks with no matches)" glob-bare \
+  $'for path in "$src"/*.conf; do\n  cp -- "$path" "$dest/${path##*/}.bak" || exit 1\ndone'
+snap_judges 1 "cd SRC and cp \"\$f\" (a leading - is an option)" cd-src \
+  $'cd "$src" || exit 1\nfor f in *.conf; do\n  [ -f "$f" ] || continue\n  cp "$f" "$dest/$f.bak" || exit 1\ndone'
+snap_judges 1 "DEST left unquoted" dest-unquoted $'find "$src" -maxdepth 1 -type f -name \'*.conf\' | while IFS= read -r path; do\n  cp "$path" $dest/"$(basename "$path")".bak || exit 1\ndone'
+
 echo
 echo "selftest: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
