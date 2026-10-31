@@ -1,0 +1,158 @@
+diff --git a/README.md b/README.md
+index cd25310..6e832c3 100644
+--- a/README.md
++++ b/README.md
+@@ -4,11 +4,14 @@ A small to-do list kept in a JSON file: `$TODO_FILE`, or `todo.json` in the curr
+ 
+ ## Usage
+ 
+-    python3 todo.py add buy milk     # prints "added 1"
+-    python3 todo.py list             # "1 [ ] buy milk"
+-    python3 todo.py done 1           # marks item 1 done: "1 [x] buy milk"
++    python3 todo.py add buy milk                    # prints "added 1"
++    python3 todo.py add --priority high fix roof    # "added 2"
++    python3 todo.py list                            # "2 [ ] fix roof (high)", "1 [ ] buy milk"
++    python3 todo.py done 1                          # marks item 1 done: "1 [x] buy milk"
+ 
+-`list` prints one line per item, `<id> [ ] <text>`, with `[x]` for done items, in id order.
++`--priority` is `high`, `normal` (the default), or `low`. `list` prints one line per item,
++`<id> [ ] <text>`, with `[x]` for done items and ` (high)` or ` (low)` at the end unless the
++priority is normal. High items come first, then normal, then low, each in id order.
+ 
+ ## Tests
+ 
+diff --git a/store.py b/store.py
+index 721cc3d..174c95d 100644
+--- a/store.py
++++ b/store.py
+@@ -2,6 +2,9 @@
+ import json
+ import os
+ 
++# Priorities, most urgent first. Items saved before priorities existed have none: normal.
++PRIORITIES = ("high", "normal", "low")
++
+ 
+ def path():
+     """The file the list lives in."""
+@@ -9,12 +12,16 @@ def path():
+ 
+ 
+ def load():
+-    """Return the list as {"next_id": int, "items": [{"id", "text", "done"}, ...]}."""
++    """Return the list as {"next_id": int, "items": [{"id", "text", "done", "priority"}, ...]}.
++    An item saved without a priority gets "normal"."""
+     try:
+         with open(path(), encoding="utf-8") as fh:
+-            return json.load(fh)
++            data = json.load(fh)
+     except FileNotFoundError:
+         return {"next_id": 1, "items": []}
++    for item in data["items"]:
++        item.setdefault("priority", "normal")
++    return data
+ 
+ 
+ def save(data):
+@@ -26,14 +33,21 @@ def save(data):
+     os.replace(tmp, path())
+ 
+ 
+-def add(data, text):
++def add(data, text, priority="normal"):
+     """Append a new open item and return it."""
+-    item = {"id": data["next_id"], "text": text, "done": False}
++    if priority not in PRIORITIES:
++        raise ValueError(f"unknown priority: {priority}")
++    item = {"id": data["next_id"], "text": text, "done": False, "priority": priority}
+     data["items"].append(item)
+     data["next_id"] += 1
+     return item
+ 
+ 
++def ordered(items):
++    """The items in list order: by priority, most urgent first, then by id."""
++    return sorted(items, key=lambda item: (PRIORITIES.index(item["priority"]), item["id"]))
++
++
+ def find(data, item_id):
+     """Return the item with this id, or None."""
+     return next((item for item in data["items"] if item["id"] == item_id), None)
+diff --git a/tests/test_todo.py b/tests/test_todo.py
+index 6fd5c8c..6a88896 100644
+--- a/tests/test_todo.py
++++ b/tests/test_todo.py
+@@ -37,6 +37,25 @@ class TodoTest(unittest.TestCase):
+     def test_done_unknown_id(self):
+         self.assertEqual(self.run_todo("done", "9")[0], 1)
+ 
++    def test_priority_order_and_marks(self):
++        self.run_todo("add", "a")
++        self.run_todo("add", "--priority", "low", "b")
++        self.run_todo("add", "--priority", "high", "c")
++        self.run_todo("done", "3")
++        self.assertEqual(self.run_todo("list"), (0, "3 [x] c (high)\n1 [ ] a\n2 [ ] b (low)\n"))
++
++    def test_unknown_priority_adds_nothing(self):
++        with self.assertRaises(SystemExit) as caught:
++            self.run_todo("add", "--priority", "urgent", "x")
++        self.assertNotEqual(caught.exception.code, 0)
++        self.assertEqual(self.run_todo("list"), (0, ""))
++
++    def test_items_without_priority_are_normal(self):
++        with open(os.environ["TODO_FILE"], "w", encoding="utf-8") as fh:
++            fh.write('{"next_id": 2, "items": [{"id": 1, "text": "old", "done": false}]}')
++        self.run_todo("add", "--priority", "high", "new")
++        self.assertEqual(self.run_todo("list"), (0, "2 [ ] new (high)\n1 [ ] old\n"))
++
+     def test_saved_between_runs(self):
+         self.run_todo("add", "buy milk")
+         self.assertEqual(store.load()["items"][0]["text"], "buy milk")
+diff --git a/todo.py b/todo.py
+index fd28944..9f9235d 100644
+--- a/todo.py
++++ b/todo.py
+@@ -1,5 +1,5 @@
+ #!/usr/bin/env python3
+-"""A small to-do list: todo.py add TEXT..., todo.py list, todo.py done ID."""
++"""A small to-do list: todo.py add [--priority P] TEXT..., todo.py list, todo.py done ID."""
+ import argparse
+ import sys
+ 
+@@ -7,14 +7,20 @@ import store
+ 
+ 
+ def format_item(item):
+-    """One line of `list` output: `<id> [ ] <text>`, or `[x]` when done."""
+-    return f"{item['id']} [{'x' if item['done'] else ' '}] {item['text']}"
++    """One line of `list` output: `<id> [ ] <text>`, or `[x]` when done, then ` (high)` or
++    ` (low)` unless the priority is normal."""
++    line = f"{item['id']} [{'x' if item['done'] else ' '}] {item['text']}"
++    if item["priority"] != "normal":
++        line += f" ({item['priority']})"
++    return line
+ 
+ 
+ def main(argv=None):
+     parser = argparse.ArgumentParser(description="A small to-do list.")
+     commands = parser.add_subparsers(dest="command", required=True)
+     add = commands.add_parser("add", help="add an item")
++    add.add_argument("--priority", choices=store.PRIORITIES, default="normal",
++                     help="how urgent it is (default: normal)")
+     add.add_argument("text", nargs="+", help="what to do")
+     commands.add_parser("list", help="print every item")
+     done = commands.add_parser("done", help="mark an item done")
+@@ -23,11 +29,11 @@ def main(argv=None):
+ 
+     data = store.load()
+     if args.command == "add":
+-        item = store.add(data, " ".join(args.text))
++        item = store.add(data, " ".join(args.text), args.priority)
+         store.save(data)
+         print(f"added {item['id']}")
+     elif args.command == "list":
+-        for item in sorted(data["items"], key=lambda item: item["id"]):
++        for item in store.ordered(data["items"]):
+             print(format_item(item))
+     else:
+         item = store.find(data, args.id)

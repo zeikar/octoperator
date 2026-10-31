@@ -1,0 +1,33 @@
+diff --git a/linecount.py b/linecount.py
+index 2158f35..a4bf833 100644
+--- a/linecount.py
++++ b/linecount.py
+@@ -4,8 +4,11 @@ import sys
+ 
+ 
+ def count_lines(text):
+-    """Return the number of lines in text."""
+-    return text.count("\n")
++    """Return the number of lines in text: one per newline, plus a last line without one."""
++    lines = text.count("\n")
++    if text and not text.endswith("\n"):
++        lines += 1
++    return lines
+ 
+ 
+ def main(argv=None):
+diff --git a/tests/test_linecount.py b/tests/test_linecount.py
+index 3ed7a9a..50d6198 100644
+--- a/tests/test_linecount.py
++++ b/tests/test_linecount.py
+@@ -20,6 +20,10 @@ class CountLinesTest(unittest.TestCase):
+     def test_blank_lines_count(self):
+         self.assertEqual(linecount.count_lines("\n\n"), 2)
+ 
++    def test_last_line_without_newline_counts(self):
++        self.assertEqual(linecount.count_lines("one\ntwo"), 2)
++        self.assertEqual(linecount.count_lines("one"), 1)
++
+     def test_carriage_return_does_not_end_a_line(self):
+         # Progress bars redraw with \r; like `wc -l`, that is still one line.
+         self.assertEqual(linecount.count_lines("10%\r50%\r100%\n"), 1)
