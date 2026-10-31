@@ -1,0 +1,38 @@
+diff --git a/README.md b/README.md
+index a8ecbd1..685e1da 100644
+--- a/README.md
++++ b/README.md
+@@ -10,6 +10,20 @@ Prints chosen columns of a CSV file, picked by their header names.
+ 
+ The header row is printed first, then the chosen columns of every row, joined with the delimiter.
+ 
++## Supported input
++
++csvcut splits each line on the delimiter. It is not a full CSV parser: quotes get no special
++treatment.
++
++| Feature                                  | Supported | Notes                                   |
++|------------------------------------------|-----------|-----------------------------------------|
++| Select columns by header name            | yes       | `-f name,email`, in the order given     |
++| Select columns by position (`-f 2`)      | no        | `-f` takes header names only            |
++| A delimiter other than a comma (`-d`)    | yes       | `-d ';'`, also used to join the output  |
++| Quoted fields that contain the delimiter | no        | `"Smith, J"` is split into two fields   |
++| Quoted fields that contain a line break  | no        | Each line is read as its own row        |
++| Windows (CRLF) line endings              | yes       | The `\r` is dropped with the line break |
++
+ ## Tests
+ 
+     make test
+diff --git a/csvcut.py b/csvcut.py
+index 409d898..0e78a12 100644
+--- a/csvcut.py
++++ b/csvcut.py
+@@ -5,7 +5,7 @@ import sys
+ 
+ 
+ def split_row(line, delimiter):
+-    """Split one CSV line into its fields. Quoted fields may contain the delimiter."""
++    """Split one CSV line into its fields. Quotes get no special treatment."""
+     return line.rstrip("\r\n").split(delimiter)
+ 
+ 

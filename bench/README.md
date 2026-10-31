@@ -107,8 +107,30 @@ CI runs both scripts on ubuntu and macOS.
 
 ## Tasks
 
-| ID              | Kind    | Difficulty | Seed and work                                      |
-|-----------------|---------|------------|----------------------------------------------------|
-| `wordfreq-top`  | feature | easy       | Python word counter: add a `--top N` option        |
-| `vsort-numeric` | bug     | easy       | Python version sorter compares parts as text       |
-| `retry-docs`    | docs    | easy       | Bash retry wrapper: document env vars, exit status |
+| ID                    | Kind    | Difficulty | Seed and work                                                    |
+|-----------------------|---------|------------|------------------------------------------------------------------|
+| `wordfreq-top`        | feature | easy       | Python word counter: add a `--top N` option                      |
+| `todo-priority`       | feature | medium     | Python to-do CLI and its store: add priorities, list by priority |
+| `vsort-numeric`       | bug     | easy       | Python version sorter compares parts as text                     |
+| `linecount-last-line` | bug     | easy       | Python `wc -l` clone misses an unterminated last line            |
+| `snap-spaces`         | bug     | easy       | Bash backup script breaks on file names with spaces              |
+| `semver-caret-zero`   | bug     | medium     | Python range matcher treats `^0.x` like `^1.x`                   |
+| `retry-docs`          | docs    | easy       | Bash retry wrapper: document env vars, exit status               |
+| `csvcut-docs`         | docs    | medium     | Python CSV column picker: a yes/no table of supported input      |
+| `mdtable-rename-flag` | chore   | easy       | Python table printer: rename `--sep`, keep it as deprecated      |
+| `envparse-extract`    | chore   | medium     | Refactor: move a parser copied into two tools into one module    |
+
+`todo-priority`, `mdtable-rename-flag`, and `envparse-extract` each change several files.
+Three tasks target failure modes seen on Octoperator's own PRs (#69):
+
+- **Docs that claim more than the code does** (#46 → #60): `csvcut-docs`. A docstring in the seed
+  claims quoted fields are handled, but the code splits every line on the delimiter. The check
+  wants `no` for quoted fields, and that the code still behaves as before.
+- **A change that invites only wording nits** (PR #63's minor-only rounds): `mdtable-rename-flag`.
+  The code change is a few lines, but it comes with a warning message, help text, README, and
+  CHANGELOG entries. The check tests the facts (the flags work, the warning names `--delimiter`,
+  the entries sit under the right headings), not the wording.
+- **An obvious fix that breaks an existing test**: `linecount-last-line`. `len(text.splitlines())`
+  fixes the bug but also counts a lone `\r` as a line break, which an existing test forbids.
+  (`snap-spaces` has a milder one: a bare `"$SRC"/*.conf` glob hands a directory named `sub.conf`
+  to `cp`, which fails, and hands `cp` the literal pattern when nothing matches.)
