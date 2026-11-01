@@ -27,7 +27,11 @@
 #                            the re-check after the commit, --private unless visibility: public,
 #                            approval claimed in GENESIS.md ignored, the description's quoting and
 #                            UTF-8-safe cut, git-state failures (a rewrite only a repo's config
-#                            has included); it writes nothing and never calls gh (stub `gh`)
+#                            has included), the epic lookup, plan-epic, and handoff tail; it
+#                            writes nothing and never calls gh (stub `gh`)
+#   - octo-genesis-epic.sh : the open-epic lookup's match (a wrapped `> ` quote, the lowest of
+#                            two, a near miss, another case), a gh failure, and an invalid
+#                            proposal (no gh call), against a stub `gh` running its jq filter
 #   - octo-bench.sh        : the --live gate and --dry-run make no gh / claude call; preflight,
 #                            check's metrics, run's cost cap, and cleanup, against a stub `gh`
 #                            and `claude`
@@ -775,7 +779,8 @@ gcommit() {
 p="$wtmp/plan"
 labels="gh label create"$'\n'"gh label create"$'\n'"gh label create"$'\n'"gh label create"
 labels="$labels"$'\n'"$labels"$'\n'"gh label create"
-setup_tail="bash octo-setup.sh"$'\n'"write octoperator.local.md"$'\n'"$labels"
+handoff="bash octo-genesis-epic.sh"$'\n'"plan the"$'\n'"print the"
+setup_tail="bash octo-setup.sh"$'\n'"write octoperator.local.md"$'\n'"$labels"$'\n'"$handoff"
 preflight="gh auth status"$'\n'"gh api graphql"
 local_steps="write the"$'\n'"bash octo-genesis-check.sh"$'\n'"npm test"
 recheck="git commit"$'\n'"bash octo-genesis-plan.sh"
@@ -791,6 +796,9 @@ setup" test "$pl_steps" = "$local_steps"$'\n'"git init"$'\n'"git add"$'\n'"$rech
 "$'\n'"gh repo view"$'\n'"gh repo create"$'\n'"$setup_tail"
 expect 0 "scaffold: the re-check runs this helper on the folder" \
   test -n "$(pl_line "bash $PLAN $p/scaffold$")"
+expect 0 "scaffold: the epic lookup runs on the folder, before plan-epic and the handoff" \
+  test -n "$(pl_line "bash $SCRIPTS_DIR/octo-genesis-epic\.sh $p/scaffold$")" \
+    -a "$(printf '%s\n' "$pl_steps" | tail -n 3)" = "$handoff"
 expect 0 "scaffold: gh repo create is --private, from the folder, pushed to origin" \
   test -n "$(pl_line "gh repo create smoke/chat-pal --private --source $p/scaffold --remote \
 origin --push --description='A character-chat app: it remembers you across long conversations\.'$")"
@@ -889,6 +897,9 @@ git -C "$p/commit" config branch.main.merge refs/heads/main
 genesis_plan "$p/commit"
 expect 0 "origin is the repo and HEAD is pushed: stage setup, nothing created again" \
   test "$pl_rc" -eq 0 -a "$pl_steps" = "$preflight"$'\n'"$setup_tail"
+expect 0 "stage setup: plan-epic runs only when the lookup finds no epic" \
+  test -n "$(pl_line 'plan the MVP epic with plan-epic .*: only if the lookup printed '\
+'`epic: none`, then the lookup again$')"
 git -C "$p/commit" remote set-url origin https://github.com/someone/else.git
 genesis_plan "$p/commit"
 expect 0 "origin is another repo: exits 1, one FAIL: git: line" test "$pl_rc" -eq 1 \
@@ -931,6 +942,73 @@ expect 2 "no DIR exits 2"        bounded 10 bash "$PLAN"
 expect 2 "a missing DIR exits 2" bounded 10 bash "$PLAN" "$p/nosuch"
 unset GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
 eval "$pl_saved_env"
+
+echo "• octo-genesis-epic.sh (offline, stub gh)"
+EPIC="$SCRIPTS_DIR/octo-genesis-epic.sh"
+# A stub gh first on PATH logs each call's first two words (the filter spans lines) to $STUB_LOG
+# and exits $STUB_GH_RC when that is non-zero.
+# `issue list` with the helper's flags applies the helper's own --jq filter to $STUB_JSON with jq
+# (gh runs it with its built-in gojq); any other call fails.
+estub="$wtmp/epic-bin"
+mkdir -p "$estub"
+cat >"$estub/gh" <<'STUB'
+#!/usr/bin/env bash
+echo "gh $1 $2" >>"$STUB_LOG"
+[ "${STUB_GH_RC:-0}" -eq 0 ] || { echo "stub gh: failing" >&2; exit "$STUB_GH_RC"; }
+case " $* " in
+  " issue list --repo smoke/chat-pal --label epic --state open --limit 500 --json number,body \
+--jq "*) ;;
+  *) echo "stub gh: unexpected: $*" >&2; exit 1 ;;
+esac
+exec jq -r "${14}" "$STUB_JSON"
+STUB
+chmod +x "$estub/gh"
+STUB_LOG="$wtmp/epic-log"
+STUB_JSON="$wtmp/epic.json"
+# genesis_epic <json> [dir] : run the helper on the fixture (default $g/valid) with gh's issue
+# list answering <json>; sets ep_out (stdout), ep_rc, and ep_calls (gh calls made).
+genesis_epic() {
+  printf '%s' "$1" >"$STUB_JSON"
+  rm -f "$STUB_LOG"
+  ep_out="$(PATH="$estub:$PATH" STUB_LOG="$STUB_LOG" STUB_JSON="$STUB_JSON" \
+    bounded 10 bash "$EPIC" "${2:-$g/valid}" 2>/dev/null)"; ep_rc=$?
+  ep_calls=0
+  [ ! -e "$STUB_LOG" ] || ep_calls="$(grep -c '' "$STUB_LOG")"
+}
+if command -v jq >/dev/null 2>&1; then
+  genesis_epic '[]'
+  expect 0 "no open epic: epic: none, one gh call" \
+    test "$ep_rc/$ep_out/$ep_calls" = "0/epic: none/1"
+  sent='A character-chat app: it remembers you across long conversations.'
+  # The fixture's sentence, in a `> ` block wrapped across CRLF lines, with a tab and extra spaces.
+  genesis_epic '[{"number":4,"body":"## Request\r\n\r\n> A character-chat app: it\r\n>   '\
+'remembers you across\tlong  conversations.\r\n> MVP scope: …"}]'
+  expect 0 "an epic quoting the sentence in a wrapped > block: epic: 4" \
+    test "$ep_rc/$ep_out" = "0/epic: 4"
+  genesis_epic '[{"number":9,"body":"'"$sent"'"},
+    {"number":1,"body":"A character-chat app: it remembers you across long chats."},
+    {"number":5,"body":"See:\n'"$sent"'\n"}, {"number":2,"body":null}]'
+  expect 0 "two epics quote it, one nearly: the lowest that quotes it, epic: 5" \
+    test "$ep_rc/$ep_out" = "0/epic: 5"
+  genesis_epic '[{"number":3,"body":"a'"${sent#A}"'"},
+    {"number":6,"body":"'"${sent%.}"'"}]'
+  expect 0 "another case, or the sentence cut short: epic: none" \
+    test "$ep_rc/$ep_out" = "0/epic: none"
+  genesis_epic '[{"number":7,"body":"> A character-chat app: it remembers you across\n> > '\
+'long conversations."}]'
+  expect 0 "nested > markers at a line start are ignored too: epic: 7" \
+    test "$ep_rc/$ep_out" = "0/epic: 7"
+else
+  echo "  - skipped the jq filter cases: no jq on PATH"
+fi
+STUB_GH_RC=4 genesis_epic '[]'
+expect 0 "gh fails: exits 3, prints nothing" test "$ep_rc" -eq 3 -a -z "$ep_out"
+genesis_epic '[]' "$g/nokey"
+expect 0 "an invalid proposal: exits 1 with the check's FAIL lines, no gh call" \
+  test "$ep_rc" -eq 1 -a -n "$ep_out" -a -z "$(printf '%s\n' "$ep_out" | grep -v '^FAIL: ')" \
+    -a "$ep_calls" = 0
+expect 2 "no DIR exits 2"        bounded 10 bash "$EPIC"
+expect 2 "a missing DIR exits 2" bounded 10 bash "$EPIC" "$wtmp/nosuch"
 
 echo "• octo-bench.sh (offline, stub gh and claude)"
 # Stubs first on PATH log every call to $STUB_LOG. gh answers from the fixture dir $STUB_CASE:

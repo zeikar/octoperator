@@ -40,7 +40,7 @@ All notable changes to Octoperator are documented in this file. The format is ba
   reason, and the name), runs
   `gh repo create --private` (`--public` only for `visibility: public`) with the sentence as the
   description, and runs setup with fixed answers: no board, the labels, and settings with
-  `approval_paths: [".github/workflows/"]`. It ends with `genesis: scaffolded <repo>`. A failing
+  `approval_paths: [".github/workflows/"]`. A failing
   test stops before any git or `gh` write; a missing `workflow` scope stops with the
   `gh auth refresh -s workflow` hint. A re-run resumes from the folder's git state and creates
   nothing twice. `--dry-run` prints the ordered commands and writes nothing. New offline helper
@@ -48,7 +48,22 @@ All notable changes to Octoperator are documented in this file. The format is ba
   made one line, quoted, and cut to GitHub's 350-character limit on a UTF-8 boundary.
   `octo-genesis-check.sh` gains `--skeleton` and `--values`. The skill's `allowed-tools` add
   `Bash(git:*)`, `Edit`, and `Task`; the test command itself can't be pre-allowed and prompts
-  once. The MVP handoff (#89) and the next milestone (#93) are not built yet.
+  once.
+- `genesis --approve`, stage 4 (#89): once the repo and its settings exist, it plans the MVP epic
+  there by `plan-epic`'s procedure, by reference: the request is the sentence verbatim plus the
+  PRD's MVP scope and requirements, and the epic body links `docs/prd.md` and `VISION.md`. Then it
+  prints the handoff: the semi-mode triage step (relabel the children `ready`, with the
+  `gh label create ready` and `gh issue edit` commands, then `/octoperator:autopilot --mode semi`),
+  a pointer to README → Running continuously, the allow rules from README → Unattended runs with the
+  ADR's test command filled in (`Bash(npm test:*)`, …), and the `--plugin-dir` note. It never
+  writes permission settings, adds `ready` or `approved`, or starts autopilot or a schedule. A run
+  now ends with `genesis: handed off <repo> (epic #N)` in place of `genesis: scaffolded <repo>`;
+  new stop reasons are `epic lookup failed`, `plan-epic failed`, and `epic misses the sentence`.
+  New read-only helper `scripts/octo-genesis-epic.sh` finds the open `epic` issue that quotes the
+  sentence, so a re-run only prints the handoff and files no second epic. `octo-genesis-plan.sh`
+  prints the lookup, plan-epic, and handoff steps at the end of every stage, and
+  `--approve --dry-run` includes plan-epic's dry run. Scenario evals, the eval metric, and the next milestone
+  (#90–#93) are not built yet.
 - README → "Running continuously": copy-paste recipes for re-running `autopilot` with Claude
   Code's own scheduling on your machine — an in-session cron task in a background session (the
   default), `/loop`, `/goal`, and `claude -p` under launchd or crontab with `--cycles 1`,
