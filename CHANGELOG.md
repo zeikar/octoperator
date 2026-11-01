@@ -62,8 +62,44 @@ All notable changes to Octoperator are documented in this file. The format is ba
   New read-only helper `scripts/octo-genesis-epic.sh` finds the open `epic` issue that quotes the
   sentence, so a re-run only prints the handoff and files no second epic. `octo-genesis-plan.sh`
   prints the lookup, plan-epic, and handoff steps at the end of every stage, and
-  `--approve --dry-run` includes plan-epic's dry run. Scenario evals, the eval metric, and the next milestone
-  (#90–#93) are not built yet.
+  `--approve --dry-run` includes plan-epic's dry run.
+- `genesis` scenario evals (#90): the PRD gains a required `## Scenarios` section (`### <id>`,
+  `- requirement: R<n>`, `- judge: script|model`, the scenario text; at least one judged by
+  script), and `--approve` writes one `evals/<id>/scenario.md` per scenario, with a `check.sh`
+  for script-judged ones that follows bench's check rules. From templates in
+  `skills/genesis/templates/`, it also writes `evals/run.sh`, which runs every `judge: script`
+  eval sandboxed as `bench/validate.sh` runs checks, prints
+  `evals: <passed>/<total> passed (<skipped> skipped)` (plus
+  `::notice title=evals-metric::passed=P total=T` under GitHub Actions), and exits 1 when any
+  fails; `.github/workflows/evals.yml`, on `push` to `main` and `workflow_dispatch` only, never
+  `pull_request`, so a failing eval can't hold every PR, and a failing run on `main` is `eval`
+  evidence for `research` with no change to it; and `.github/workflows/evals-guard.yml`, on
+  `pull_request`, which runs the base branch's `evals/guard.sh` from git's objects in three jobs.
+  `append-only`, with no setup and so no PR code, fails a PR that modifies, deletes, or renames an
+  eval file, adds a symlink, a submodule, a file directly under `evals/`, or a file to an existing
+  eval, or changes `.gitattributes` there or at the root. `must-fail` runs each new check on a
+  fresh checkout of the base with the new evals laid over it and the installed dependencies linked
+  in, and `verdict` fails one that passed, timed out, or changed its tree; PR code can forge that
+  result, so must-fail-first is advisory and a reviewer still reads each new check. `run.sh` and
+  the guard run checks under `env -i`, kill what a check leaves running, never follow a symlinked
+  eval, and fail a check that changes the repo (`run.sh` stops the run there); `run.sh` prints a
+  failed check's output with workflow commands stopped. The guard workflow is covered by the
+  settings' `.github/workflows/` approval path; `evals/` is not, so must-fail additions merge
+  unattended. `auto`'s merge gate gains an evals-guard step: where the base branch has the guard
+  workflow, new read-only helper `scripts/octo-evals-guard.sh` must find both guard jobs of the
+  PR's own guard run passed on the reviewed commit, against the base branch's tip when the PR
+  changes `evals/` or `.gitattributes`, or the PR is held (`evals guard did not pass`, for a
+  `[skip ci]` head too, or `evals guard stale`). Each guard job judges the base branch's tip as it
+  fetched it, so re-running the jobs refreshes a stale guard, and a base without `evals/guard.sh`
+  fails the job. `octo-genesis-check.sh --skeleton` holds both eval workflows to their templates
+  line for line, with setup steps only where the template marks them. Under Actions, `run.sh`
+  stops before any check when `evals/` differs from the commit.
+  The VISION template's quality bar says evals only grow. `octo-genesis-check.sh` checks the
+  scenarios and, with `--skeleton`, the eval files; the plan's `git add` names them. The handoff
+  asks the human to confirm the first `Evals` run on `main` is red. New
+  reference `skills/genesis/references/evals.md`, and new offline tests `scripts/test/evals.sh`,
+  which CI runs; shellcheck now covers `skills/genesis/templates/**/*.sh`. Model-judged evals are
+  skipped until #91; the eval metric and the next milestone (#92, #93) are not built yet.
 - README → "Running continuously": copy-paste recipes for re-running `autopilot` with Claude
   Code's own scheduling on your machine — an in-session cron task in a background session (the
   default), `/loop`, `/goal`, and `claude -p` under launchd or crontab with `--cycles 1`,

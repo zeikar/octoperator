@@ -12,18 +12,28 @@
 #   - octo-exclude.sh      : run for real against a throwaway local `git init` repo
 #   - octo-worktree.sh     : add / detach / list / remove run for real in a throwaway local repo
 #   - octo-merge-state.sh  : the UNKNOWN re-query loop and gh-error exit, against a stub `gh`
+#   - octo-evals-guard.sh  : no guard workflow, both guard jobs passed, one missing (a
+#                            `[skip ci]` head), pending, skipped, or failed, a stale or unrecorded
+#                            base (held only when the PR changes evals/ or .gitattributes, or its
+#                            file list is cut short), another workflow's or PR's run, and a gh
+#                            error, against a stub `gh` that runs the helper's --jq filters with jq
 #   - octo-approval-match.sh : pattern normalization, malformed patterns, matching (renames
-#                            included), and the incomplete-file-list hold, against a stub `gh`
+#                            included, genesis's entry holding the evals guard but not evals/),
+#                            and the incomplete-file-list hold, against a stub `gh`
 #   - octo-genesis-check.sh : a valid proposal, a missing section or front-matter key, an
 #                            ungrounded proposal (and one with URLs or a misplaced or misspelled
 #                            marker), the PRD, ADR, and VISION.md checks (missing sections, an
 #                            altered or explained baseline constraint, an undetectable,
 #                            mismatched, contradicted, or wrapped test command, quoted and
-#                            commented front-matter values, a URL in an ungrounded PRD), bad
-#                            arguments, --preflight's git, empty-dir, and repo-name checks,
-#                            --values, and --skeleton's detection-file, CI, .gitignore, and
-#                            README checks
-#   - octo-genesis-plan.sh : each stage's ordered steps (scaffold, commit, create, push, setup),
+#                            commented front-matter values, a URL in an ungrounded PRD), the
+#                            PRD's ## Scenarios (missing, empty, no script judge, a bad id,
+#                            requirement, or judge, a duplicate, no text), bad arguments,
+#                            --preflight's git, empty-dir, and repo-name checks, --values, and
+#                            --skeleton's detection-file, CI, .gitignore, and README checks, and
+#                            its evals checks (the runner and guard verbatim, each workflow's
+#                            template lines and triggers, one eval per scenario)
+#   - octo-genesis-plan.sh : each stage's ordered steps (scaffold, commit, create, push, setup;
+#                            git add naming the eval files),
 #                            the re-check after the commit, --private unless visibility: public,
 #                            approval claimed in GENESIS.md ignored, the description's quoting and
 #                            UTF-8-safe cut, git-state failures (a rewrite only a repo's config
@@ -36,6 +46,8 @@
 #   - octo-bench.sh        : the --live gate and --dry-run make no gh / claude call; preflight,
 #                            check's metrics, run's cost cap, and cleanup, against a stub `gh`
 #                            and `claude`
+#
+# The eval templates genesis copies (run.sh, guard.sh) have their own tests: scripts/test/evals.sh.
 #
 # It deliberately never invokes a helper in a way that reaches the real gh / the network.
 # Exits 0 when every check passes, 1 when any check fails.
@@ -99,6 +111,10 @@ expect 2 "octo-merge-state.sh --pr exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-merge-state.sh" --repo o/n --pr
 expect 2 "octo-merge-state.sh non-numeric --tries exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-merge-state.sh" --repo o/n --pr 1 --tries x
+expect 2 "octo-evals-guard.sh --sha exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-evals-guard.sh" --repo o/n --pr 1 --sha
+expect 2 "octo-evals-guard.sh a short --sha exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-evals-guard.sh" --repo o/n --pr 1 --sha abc123
 expect 2 "octo-approval-match.sh --pr exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-approval-match.sh" --pattern a --repo o/n --pr
 expect 2 "octo-approval-match.sh with no --pattern exits 2" \
@@ -199,6 +215,167 @@ expect 0 "gh exit 4 (auth): exits 1, prints nothing" test "$ms_rc/$ms_out" = "1/
 merge_state 0 2
 expect 0 "gh exit 2: exits 1, not the bad-arguments 2" test "$ms_rc/$ms_out" = "1/"
 
+echo "• octo-evals-guard.sh (offline, stub gh)"
+# A stub `gh` first on PATH answers from JSON files in $EG_DIR, through the helper's own --jq
+# filter (jq -r): `pr view` → pr.json, git/ref → the tip, contents → a file or, with $EG_NOGUARD,
+# gh's 404, actions/runs → runs.json, a run's jobs → jobs-<run>.json, the PR's files →
+# files.json, annotations → ann-<id>.json. $EG_RC makes the contents call fail with that code.
+egstub="$wtmp/eg-bin"
+EG_DIR="$wtmp/eg"
+mkdir -p "$egstub" "$EG_DIR"
+cat >"$egstub/gh" <<'STUB'
+#!/usr/bin/env bash
+cmd="$1"; shift; ep="" jq=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --paginate) shift ;; --jq) jq="$2"; shift 2 ;; --repo | --json) shift 2 ;;
+    *) ep="${ep:-$1}"; shift ;;
+  esac
+done
+if [ "$cmd" = pr ]; then f="$EG_DIR/pr.json"; else
+  case "$ep" in
+    */git/ref/heads/main) f="$EG_DIR/ref.json" ;;
+    */contents/*)
+      [ "${EG_RC:-0}" -eq 0 ] || { echo "gh: Server Error (HTTP 500)" >&2; exit "$EG_RC"; }
+      [ -z "${EG_NOGUARD:-}" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+      echo file; exit 0 ;;
+    */actions/runs/*/jobs*) f="${ep%/jobs*}"; f="$EG_DIR/jobs-${f##*/}.json" ;;
+    */actions/runs\?*) f="$EG_DIR/runs.json" ;;
+    */pulls/1/files*) f="$EG_DIR/files.json" ;;
+    */check-runs/*/annotations*) f="${ep%/annotations*}"; f="$EG_DIR/ann-${f##*/}.json"
+      [ -f "$f" ] || { echo '[]' | jq -r "$jq"; exit; } ;;
+    *) echo "stub: unexpected endpoint $ep" >&2; exit 9 ;;
+  esac
+fi
+jq -r "$jq" "$f"
+STUB
+chmod +x "$egstub/gh"
+export EG_DIR
+TIP=1111111111111111111111111111111111111111
+OLD=2222222222222222222222222222222222222222
+HEAD_SHA_EG=3333333333333333333333333333333333333333
+printf '{"object":{"sha":"%s"}}\n' "$TIP" >"$EG_DIR/ref.json"
+EG_WF=.github/workflows/evals-guard.yml
+# eg_runs <id path pr>... : write runs.json, the workflow runs on the head commit.
+eg_runs() {
+  local sep="" body=""
+  while [ $# -ge 3 ]; do
+    body="$body$sep{\"id\":$1,\"path\":\"$2\",\"pull_requests\":[{\"number\":$3}]}"
+    sep=","; shift 3
+  done
+  printf '{"total_count":0,"workflow_runs":[%s]}\n' "$body" >"$EG_DIR/runs.json"
+}
+# eg_jobs <run> <check-run id name status conclusion>... : write that run's jobs; "null" is null.
+eg_jobs() {
+  local run="$1" sep="" body="" c; shift
+  while [ $# -ge 4 ]; do
+    c="\"$4\""; [ "$4" = null ] && c=null
+    body="$body$sep{\"name\":\"$2\",\"status\":\"$3\",\"conclusion\":$c,"
+    body="$body\"check_run_url\":\"https://api.github.com/repos/o/n/check-runs/$1\"}"
+    sep=","; shift 4
+  done
+  printf '{"total_count":0,"jobs":[%s]}\n' "$body" >"$EG_DIR/jobs-$run.json"
+}
+# eg_files <path[:old path]>... : write the PR's changed files, and pr.json with their count
+# (or $EG_COUNT).
+eg_files() {
+  local sep="" body="" n=0 p
+  for p in "$@"; do
+    case "$p" in
+      *:*) body="$body$sep{\"filename\":\"${p%%:*}\",\"previous_filename\":\"${p#*:}\"}" ;;
+      *) body="$body$sep{\"filename\":\"$p\"}" ;;
+    esac
+    sep=","; n=$((n + 1))
+  done
+  printf '[%s]\n' "$body" >"$EG_DIR/files.json"
+  printf '{"baseRefName":"main","changedFiles":%s}\n' "${EG_COUNT:-$n}" >"$EG_DIR/pr.json"
+}
+# eg_base <id> <sha> : the check run's evals-guard-base notice, beside an unrelated annotation.
+eg_base() {
+  printf '[{"title":"other","message":"x"},{"title":"evals-guard-base","message":"%s"}]\n' "$2" \
+    >"$EG_DIR/ann-$1.json"
+}
+# eg : run the helper against the stub; sets eg_out / eg_rc.
+eg() {
+  eg_out="$(PATH="$egstub:$PATH" bounded 10 bash "$SCRIPTS_DIR/octo-evals-guard.sh" --repo o/n \
+    --pr 1 --sha "$HEAD_SHA_EG" 2>/dev/null)"
+  eg_rc=$?
+}
+EG_A="evals-guard append-only" EG_V="evals-guard verdict"
+eg_files evals/recall/scenario.md evals/recall/check.sh
+EG_NOGUARD=1 eg
+expect 0 "no evals-guard.yml on the base branch: prints none, exits 0" \
+  test "$eg_rc/$eg_out" = "0/none"
+# Run 40 is older; 60 is another workflow with jobs of the same names; 70 is another PR's.
+eg_runs 40 "$EG_WF" 1 50 "$EG_WF" 1 60 .github/workflows/ci.yml 1 70 "$EG_WF" 2
+eg_jobs 40 4 "$EG_A" completed failure 5 "$EG_V" completed failure
+eg_jobs 50 10 "$EG_A" completed success 11 "$EG_V" completed success
+eg_jobs 60 12 "$EG_A" completed failure 13 "$EG_V" completed failure
+eg_jobs 70 14 "$EG_A" completed failure 15 "$EG_V" completed failure
+eg_base 10 "$TIP"; eg_base 11 "$TIP"
+eg
+expect 0 "both guard jobs of this PR's newest guard run passed against the tip: prints pass" \
+  test "$eg_rc/$eg_out" = "0/pass"
+eg_runs
+eg
+expect 0 "no guard run (a [skip ci] head): holds" \
+  test "$eg_rc/$eg_out" = "1/evals guard did not pass: $EG_A missing"
+eg_runs 60 .github/workflows/ci.yml 1
+eg_jobs 60 12 "$EG_A" completed success 13 "$EG_V" completed success
+eg_base 12 "$TIP"; eg_base 13 "$TIP"
+eg
+expect 0 "only another workflow's jobs of the same names, passing: holds, missing" \
+  test "$eg_rc/$eg_out" = "1/evals guard did not pass: $EG_A missing"
+eg_runs 70 "$EG_WF" 2
+eg_jobs 70 14 "$EG_A" completed success 15 "$EG_V" completed success
+eg
+expect 0 "only another PR's guard run on the same commit: holds, missing" \
+  test "$eg_rc/$eg_out" = "1/evals guard did not pass: $EG_A missing"
+eg_runs 50 "$EG_WF" 1
+eg_jobs 50 10 "$EG_A" completed success
+eg
+expect 0 "the guard run has no verdict job: holds, verdict missing" \
+  test "$eg_rc/$eg_out" = "1/evals guard did not pass: $EG_V missing"
+eg_jobs 50 10 "$EG_A" completed success 11 "$EG_V" completed skipped
+eg
+expect 0 "verdict skipped (must-fail failed): holds" \
+  test "$eg_rc/$eg_out" = "1/evals guard did not pass: $EG_V skipped"
+eg_jobs 50 10 "$EG_A" in_progress null 11 "$EG_V" queued null
+eg
+expect 0 "append-only still running: holds" \
+  test "$eg_rc/$eg_out" = "1/evals guard did not pass: $EG_A in_progress"
+eg_jobs 50 10 "$EG_A" completed success 11 "$EG_V" completed success
+eg_base 10 "$OLD"
+eg
+expect 0 "a PR adding evals, judged against an older base: holds as stale" \
+  test "$eg_rc/$eg_out" = "1/evals guard stale: $EG_A ran against $OLD, main is at $TIP"
+# The guard's diff is empty on any base for a PR that changes neither evals/ nor .gitattributes:
+# PRs merged one after another must not each wait for a human.
+eg_files src/app.js docs/evals.md
+eg
+expect 0 "a PR that changes no eval, judged against an older base: prints pass" \
+  test "$eg_rc/$eg_out" = "0/pass"
+eg_files src/old.sh:evals/old/check.sh
+eg
+expect 0 "a PR renaming a file out of evals/, judged against an older base: stale" \
+  test "$eg_rc/$eg_out" = "1/evals guard stale: $EG_A ran against $OLD, main is at $TIP"
+eg_files .gitattributes
+eg
+expect 0 "a PR changing the root .gitattributes, judged against an older base: stale" \
+  test "$eg_rc/$eg_out" = "1/evals guard stale: $EG_A ran against $OLD, main is at $TIP"
+EG_COUNT=3000 eg_files src/app.js
+eg
+expect 0 "a file list cut short (3000 files): the base is checked, stale" \
+  test "$eg_rc/$eg_out" = "1/evals guard stale: $EG_A ran against $OLD, main is at $TIP"
+eg_files evals/recall/check.sh
+rm -f "$EG_DIR/ann-10.json"
+eg
+expect 0 "a guard run with no recorded base: holds as stale" test "$eg_rc/$eg_out" = \
+  "1/evals guard stale: $EG_A ran against an unrecorded base, main is at $TIP"
+EG_RC=4 eg
+expect 0 "a gh error (not a 404) reading the workflow: exits 3, prints nothing" \
+  test "$eg_rc/$eg_out" = "3/"
+
 echo "• octo-approval-match.sh (offline, stub gh)"
 # A stub `gh` first on PATH logs each call to $STUB_LOG. `api` prints the file list in $STUB_FILES
 # as the helper's jq filter would (one line per file: its path, a tab, then a rename's old path);
@@ -261,6 +438,13 @@ matches '**/*.tf' 'main.tf modules/net/vpc.tf infra/main.tf'
 matches '.github/workflows/' '.github/workflows/ci.yml'
 matches 'modules/**/vpc.tf' 'modules/net/vpc.tf'
 matches '/infra' 'infra/main.tf'
+# Genesis's approval_paths entry holds a PR that changes the evals guard, not one adding an eval.
+printf '%s\t\n' .github/workflows/evals-guard.yml evals/recall/check.sh evals/guard.sh \
+  >"$STUB_FILES"
+matches '.github/workflows/' '.github/workflows/evals-guard.yml'
+printf '%s\t\n' README.md main.tf main.tfvars modules/net/vpc.tf infra/main.tf infra-old/x \
+  infrastructure/x deploy/infra/run.sh .github/workflows/ci.yml xgithub/workflows/ci.yml \
+  >"$STUB_FILES"
 approval 'docs/**' 'secrets/**' 'Infra'
 expect 0 "no match: exits 0, prints nothing" test "$am_rc" -eq 0 -a -z "$am_out"
 printf 'docs/ci.yml%s.github/workflows/ci.yml\n' "$tab" >"$STUB_FILES"
@@ -287,6 +471,7 @@ expect 0 "gh exit 2: exits 3, not the malformed-pattern 2" test "$am_rc" -eq 3
 
 echo "• octo-genesis-check.sh (offline, temp dirs)"
 GENESIS="$SCRIPTS_DIR/octo-genesis-check.sh"
+TEMPLATES="$SCRIPTS_DIR/../skills/genesis/templates"
 # genesis_fixture <dir> : write a valid, grounded proposal (all five files) into <dir>.
 genesis_fixture() {
   mkdir -p "$1/docs/adr"
@@ -335,7 +520,19 @@ The reply context keeps facts the user stated long ago.
 
 ## Scenarios
 
-#90 adds this section; the check allows it now.
+### recall-turn-3
+
+- requirement: R1
+- judge: script
+
+At turn 200 of a conversation with a stub model, the context still holds the turn-3 fact.
+
+### persona-tone
+
+- requirement: R1
+- judge: model
+
+Over a long conversation, the companion keeps the tone the user picked.
 MD
   cat >"$1/docs/adr/0001-stack.md" <<'MD'
 # ADR 0001: Stack
@@ -611,6 +808,40 @@ awk '/^## Alternatives considered$/ { skip = 1; next } /^## / { skip = 0 } !skip
 genesis_check "$g/noadrsec"
 expect 0 "ADR missing ## Alternatives considered: exits 1, one FAIL line" test "$gc_rc" -eq 1 \
   -a "$gc_out" = "FAIL: docs/adr/0001-stack.md: missing section ## Alternatives considered"
+# The PRD's ## Scenarios: one eval each, so the check is strict about their shape.
+# prd_case <name> <awk program> : a fresh proposal whose PRD is the valid one through <awk>.
+prd_case() {
+  genesis_fixture "$g/$1"
+  awk "$2" "$g/valid/docs/prd.md" >"$g/$1/docs/prd.md"
+  genesis_check "$g/$1"
+}
+prd_case noscen '/^## Scenarios$/ { exit } { print }'
+expect 0 "PRD without ## Scenarios: exits 1, one FAIL line" test "$gc_rc" -eq 1 \
+  -a "$gc_out" = "FAIL: docs/prd.md: missing section ## Scenarios"
+prd_case emptyscen '/^### recall-turn-3$/ { exit } { print }'
+expect 0 "PRD with an empty ## Scenarios: exits 1" test "$gc_rc" -eq 1 \
+  -a "$gc_out" = "FAIL: docs/prd.md: ## Scenarios needs at least one '### <id>' scenario"
+prd_case onlymodel '{ sub(/^- judge: script$/, "- judge: model"); print }'
+expect 0 "PRD scenarios all judge: model: exits 1" test "$gc_rc" -eq 1 \
+  -a "$gc_out" = "FAIL: docs/prd.md: ## Scenarios needs at least one '- judge: script' \
+scenario, or the evals have nothing to count"
+prd_case badscen '{ sub(/^### persona-tone$/, "### Persona Tone")
+  sub(/^- requirement: R1$/, "- requirement: R7"); print }'
+expect 0 "PRD scenario with a bad id, and one covering no requirement: two FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: docs/prd.md: scenario recall-turn-3 covers R7, \
+which is not a ### requirement"$'\n'"FAIL: docs/prd.md: \"### Persona Tone\" is not a '### <id>' \
+scenario heading (lowercase kebab-case)"
+prd_case nojudge '!/^- judge: script$/ { sub(/^- judge: model$/, "- judge: llm"); print }'
+expect 0 "PRD scenarios with no judge and an unknown judge: three FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: docs/prd.md: scenario recall-turn-3 needs a \
+'- judge: script' or '- judge: model' line"$'\n'"FAIL: docs/prd.md: scenario persona-tone: judge \
+must be script or model (got 'llm')"$'\n'"FAIL: docs/prd.md: ## Scenarios needs at least one \
+'- judge: script' scenario, or the evals have nothing to count"
+prd_case dupscen '{ sub(/^### persona-tone$/, "### recall-turn-3"); sub(/^Over a long.*/, "")
+  print }'
+expect 0 "PRD with a duplicate scenario id and no text: two FAIL lines" test "$gc_rc" -eq 1 \
+  -a "$gc_out" = "FAIL: docs/prd.md: scenario recall-turn-3 appears twice"$'\n'"FAIL: \
+docs/prd.md: scenario recall-turn-3 has no scenario text"
 expect 2 "no DIR exits 2"            bounded 10 bash "$GENESIS"
 expect 2 "two DIRs exit 2"           bounded 10 bash "$GENESIS" "$g/valid" "$g/nokey"
 expect 2 "a missing DIR exits 2"     bounded 10 bash "$GENESIS" "$g/nosuch"
@@ -688,6 +919,19 @@ jobs:
       - run: npm install
       - run: npm test
 YML
+  mkdir -p "$1/evals/recall-turn-3" "$1/evals/persona-tone"
+  cp "$TEMPLATES/evals/run.sh" "$TEMPLATES/evals/guard.sh" "$1/evals/"
+  # The workflows as genesis writes them: the stack's setup steps where the template marks them.
+  for w in evals.yml evals-guard.yml; do
+    awk '/# genesis: the stack.s setup/ { print "      - uses: actions/setup-node@v4"
+      print "      - run: npm install"; next } { print }' "$TEMPLATES/.github/workflows/$w" \
+      >"$1/.github/workflows/$w"
+  done
+  printf -- '---\nid: recall-turn-3\njudge: script\nrequirement: R1\n---\n\nAt turn 200 …\n' \
+    >"$1/evals/recall-turn-3/scenario.md"
+  printf '#!/usr/bin/env bash\necho "FAIL: not built"; exit 1\n' >"$1/evals/recall-turn-3/check.sh"
+  printf -- '---\nid: persona-tone\njudge: model\nrequirement: R1\n---\n\nThe tone holds.\n' \
+    >"$1/evals/persona-tone/scenario.md"
 }
 # skeleton_case <name> : a fresh proposal with a valid skeleton in $g/sk-<name>; sets sk.
 skeleton_case() { sk="$g/sk-$1"; genesis_fixture "$sk"; skeleton_fixture "$sk"; }
@@ -750,6 +994,98 @@ printf '# chat-pal\n' >"$sk/README.md"
 genesis_check --skeleton "$sk"
 expect 0 "--skeleton, README without the sentence: exits 1" test "$gc_rc" -eq 1 \
   -a "$gc_out" = "FAIL: README.md: needs GENESIS.md's sentence, quoted"
+# The scenario evals: the runner and guard verbatim, both workflows, one evals/<id>/ per scenario.
+skeleton_case evrun
+rm "$sk/evals/guard.sh"
+echo '# local tweak' >>"$sk/evals/run.sh"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, evals/run.sh changed and evals/guard.sh missing: two FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: evals/run.sh differs from \
+skills/genesis/templates/evals/run.sh: copy it byte for byte"$'\n'"FAIL: evals/guard.sh is \
+missing: copy it from skills/genesis/templates/evals/guard.sh"
+skeleton_case evpr
+awk '{ print } /^  workflow_dispatch:$/ { print "  pull_request:" }' \
+  "$sk/.github/workflows/evals.yml" >"$sk/x" && mv "$sk/x" "$sk/.github/workflows/evals.yml"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, evals.yml on pull_request too: exits 1, the line and the trigger" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/evals.yml: has '  pull_request:' \
+where its template has 'permissions:' (skills/genesis/templates/.github/workflows/evals.yml)"$'\n'"\
+FAIL: .github/workflows/evals.yml: on: must not have the pull_request trigger \
+(only: push workflow_dispatch)"
+skeleton_case evbranch
+sed 's/branches: \[main\]/branches: [main, dev]/' "$sk/.github/workflows/evals.yml" >"$sk/x" \
+  && mv "$sk/x" "$sk/.github/workflows/evals.yml"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, evals.yml pushes from another branch too: exits 1, names the line" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/evals.yml: has '    branches: \
+[main, dev]' where its template has '    branches: [main]' \
+(skills/genesis/templates/.github/workflows/evals.yml)"
+skeleton_case evguard
+sed 's/^  pull_request:$/  pull_request_target:/' "$sk/.github/workflows/evals-guard.yml" >"$sk/x" \
+  && mv "$sk/x" "$sk/.github/workflows/evals-guard.yml"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, the guard on pull_request_target: three FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$(printf '%s\n' "$gc_out" | grep -c '^FAIL: ')" -eq 3 \
+    -a -n "$(printf '%s\n' "$gc_out" | grep -Fx "FAIL: .github/workflows/evals-guard.yml: on: \
+must not have the pull_request_target trigger (only: pull_request)")"
+skeleton_case evguardcopy
+sed 's/^\( *\)bash -c "\$g" guard --diff-only /\1bash evals\/guard.sh --diff-only /' \
+  "$sk/.github/workflows/evals-guard.yml" >"$sk/x" \
+  && mv "$sk/x" "$sk/.github/workflows/evals-guard.yml"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, the append-only job runs the PR's copy of the guard: names the line" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/evals-guard.yml: has '          \
+bash evals/guard.sh --diff-only \"\$BASE_SHA\" \"\$HEAD_SHA\"' where its template has '          \
+bash -c \"\$g\" guard --diff-only \"\$BASE_SHA\" \"\$HEAD_SHA\"' \
+(skills/genesis/templates/.github/workflows/evals-guard.yml)"
+# Setup steps run the PR's code: in the append-only job, before its guard step, they would run it
+# where the hard rule is judged (the PR #98 review's bad-evals-guard.yml).
+skeleton_case evguardsetup
+awk '/^  append-only:$/ { job = 1 } job && /^      - name: Evals only grow/ {
+    print "      - uses: actions/setup-node@v4"; print "      - run: npm install"; job = 0 }
+  { print }' "$sk/.github/workflows/evals-guard.yml" >"$sk/x" \
+  && mv "$sk/x" "$sk/.github/workflows/evals-guard.yml"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, setup steps in the append-only job: exits 1, names the line" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/evals-guard.yml: has '      - uses: \
+actions/setup-node@v4' where its template has '      - name: Evals only grow (the base branch's \
+guard)' (skills/genesis/templates/.github/workflows/evals-guard.yml)"
+skeleton_case evguardverdict
+awk '/^  verdict:$/ { job = 1 } { print } job && /^    runs-on:/ {
+    print "    permissions: write-all"; job = 0 }' "$sk/.github/workflows/evals-guard.yml" >"$sk/x" \
+  && mv "$sk/x" "$sk/.github/workflows/evals-guard.yml"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, a job-level key in the verdict job: exits 1, names the line" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/evals-guard.yml: has '    \
+permissions: write-all' where its template has '    runs-on: ubuntu-latest' \
+(skills/genesis/templates/.github/workflows/evals-guard.yml)"
+# Where the template marks the setup, only step lines go: not a job key such as env:.
+skeleton_case evguardenv
+awk '/# genesis: the stack.s setup/ { print "    env:"; print "      X: y"; next } { print }' \
+  "$TEMPLATES/.github/workflows/evals-guard.yml" >"$sk/.github/workflows/evals-guard.yml"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, a job key where the setup goes: exits 1, names the line" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/evals-guard.yml: has '    env:' \
+after '          fetch-depth: 0': only the setup steps, indented as steps, may go where its \
+template has the '# genesis:' line (skills/genesis/templates/.github/workflows/evals-guard.yml)"
+skeleton_case evscen
+rm -r "$sk/evals/persona-tone"
+rm "$sk/evals/recall-turn-3/check.sh"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, a scenario with no eval and a script eval with no check.sh: two FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: evals/recall-turn-3/check.sh is missing: the \
+scenario is judge: script"$'\n'"FAIL: evals/persona-tone/scenario.md is missing: docs/prd.md has \
+the scenario persona-tone"
+skeleton_case evfm
+printf -- '---\nid: recall-turn-3\njudge: model\n---\n' >"$sk/evals/recall-turn-3/scenario.md"
+printf 'if then\n' >"$sk/evals/recall-turn-3/check.sh"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, scenario.md off the PRD with no text, check.sh broken: four FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: evals/recall-turn-3/scenario.md: front matter needs \
+the line 'judge: script', as docs/prd.md says"$'\n'"FAIL: evals/recall-turn-3/scenario.md: front \
+matter needs the line 'requirement: R1', as docs/prd.md says"$'\n'"FAIL: \
+evals/recall-turn-3/scenario.md: needs the scenario's text"$'\n'"FAIL: \
+evals/recall-turn-3/check.sh: syntax error (bash -n)"
 
 echo "• octo-genesis-plan.sh (offline, temp dirs, stub gh)"
 PLAN="$SCRIPTS_DIR/octo-genesis-plan.sh"
@@ -803,9 +1139,10 @@ expect 0 "scaffold: the epic lookup runs on the folder, before plan-epic and the
 expect 0 "scaffold: gh repo create is --private, from the folder, pushed to origin" \
   test -n "$(pl_line "gh repo create smoke/chat-pal --private --source $p/scaffold --remote \
 origin --push --description='A character-chat app: it remembers you across long conversations\.'$")"
-expect 0 "scaffold: git add names the proposal and skeleton files" \
+expect 0 "scaffold: git add names the proposal, skeleton, and eval files" \
   test -n "$(pl_line "git -C $p/scaffold add -- GENESIS\.md VISION\.md docs/research\.md \
-docs/prd\.md docs/adr/0001-stack\.md README\.md \.gitignore \.github/workflows/ci\.yml package\.json")"
+docs/prd\.md docs/adr/0001-stack\.md README\.md \.gitignore \.github/workflows/ci\.yml \
+\.github/workflows/evals\.yml \.github/workflows/evals-guard\.yml evals package\.json ")"
 expect 0 "the plan writes nothing and calls no gh" \
   test "$(cd "$p/scaffold" && find . | LC_ALL=C sort)" = "$before" -a ! -e "$wtmp/plan-gh.log"
 

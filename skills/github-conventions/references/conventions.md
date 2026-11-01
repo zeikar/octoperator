@@ -48,7 +48,7 @@ a `needs-approval` proposal).
 
 ### Approval gates
 
-Two independent gates keep deploy, spend, and delete changes in front of a human:
+Independent gates keep deploy, spend, and delete changes, and weakened evals, in front of a human:
 - **Issue gate (`autopilot`).** Discovery skips every `needs-approval` issue without `approved` and
   reports it as `gated: needs-approval`. It relies on the label, so an issue nobody labeled is not
   caught.
@@ -56,6 +56,11 @@ Two independent gates keep deploy, spend, and delete changes in front of a human
   `approval_paths` setting (see `settings.md`) with `scripts/octo-approval-match.sh`, and holds
   any PR that touches a match with the reason `needs human approval: <path>`. A human merges it by
   hand. This is the backstop for sensitive files, whatever the issue's labels.
+- **Evals guard (`auto`).** Where the base branch has `.github/workflows/evals-guard.yml` (a repo
+  genesis created), `auto` merges only when `scripts/octo-evals-guard.sh` finds both guard checks
+  passed on the reviewed commit (against the base branch's tip, when the PR changes `evals/` or
+  `.gitattributes`); otherwise it holds the PR with
+  `evals guard did not pass` or `evals guard stale`.
 
 ### Run ledger
 

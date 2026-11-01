@@ -74,7 +74,8 @@ If `--dry-run` is present, print the plan and STOP with no mutation:
   and that blocker/major/minor findings trigger up to 6 fix → re-review rounds (a PR still
   `request_changes` after them is held; leftover minors never hold it).
 - **Merge** — the approval-path gate (the helper's normalized `approval_paths` from step 1,
-  "none", or "unreadable — every PR held"), the bounded wait for running checks, the gate each PR
+  "none", or "unreadable — every PR held"), the bounded wait for running checks, the evals-guard
+  gate (only where the base branch has `.github/workflows/evals-guard.yml`), the gate each PR
   must pass (last review not blocking and taken at the current head, `state OPEN`, not draft,
   `mergeStateStatus == CLEAN`), and that passing PRs merge with a **regular merge commit**
   (`--merge`, never squash/rebase).
@@ -192,6 +193,29 @@ soon as one fails, or immediately when the PR has no checks. Its exit code is in
 gate below still decides. If the timeout expires with checks still pending, stop waiting and let the
 gate hold the PR (reason: checks still pending).
 
+**Then the evals guard.** A repo that genesis created has `.github/workflows/evals-guard.yml`,
+which keeps its evals append-only so that PRs adding evals can merge unattended. `mergeStateStatus`
+can't vouch for it: a head commit whose message holds `[skip ci]` runs no workflow, and with no
+checks and no branch protection the PR still reads `CLEAN`. So ask the helper whether both guard
+checks passed on the reviewed commit (this PR's run of that workflow, not another's job of the same
+name), against the base branch's current tip when the PR changes `evals/` or `.gitattributes`:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-evals-guard.sh" --repo "$REPO" --pr <pr#> \
+  --sha "<reviewed headRefOid>"
+```
+
+Act on its exit code:
+- **0** — `pass` (both guard checks succeeded, against the tip when the PR changes what the guard
+  reads) or `none` (the base branch has no guard workflow); continue.
+- **1** — it printed why. `evals guard did not pass: …` (a check missing, pending, skipped, or
+  failed) → hold with the reason `evals guard did not pass`. `evals guard stale: …` (the guard
+  judged the new evals against an older base, so one may already pass on today's) → hold with the
+  reason `evals guard stale`, and tell the human to re-run all the guard's jobs from the Actions
+  tab: each job judges the base branch's tip as it fetches it. A PR that changes neither `evals/`
+  nor `.gitattributes` is never stale: the guard's diff is empty on any base.
+- **2**, **3**, or anything else — hold (reason: evals guard state unavailable).
+
 Then query its readiness:
 
 ```bash
@@ -203,7 +227,8 @@ gh pr view <pr#> --repo "$REPO" \
 - `headRefOid` equals the commit the last non-blocking review covered (a later push is unreviewed),
 - `state` is `OPEN`,
 - `isDraft` is `false`,
-- `mergeStateStatus` is **`CLEAN`** — the value the helper below prints decides, not a query.
+- `mergeStateStatus` is **`CLEAN`** — the value the helper below prints decides, not a query,
+- and the evals-guard gate above passed (`pass` or `none`).
 
 `CLEAN` is GitHub's "ready to merge" state: it means the PR is mergeable (no conflicts), **every
 required status check has passed**, the branch is not behind in a way protection forbids, and no branch
@@ -296,8 +321,9 @@ resolve conflicts, wait for checks, address the outstanding findings, or merge m
 
 - **Regular merge only** (`gh pr merge --merge`), never `--squash`/`--rebase` — preserve full history.
   If this rule ever changes, change it here AND in `github-conventions/references/conventions.md`.
-- Never merge a draft PR, a PR with conflicts, a PR with failing/pending required checks, or a PR
-  that touches an `approval_paths` pattern.
+- Never merge a draft PR, a PR with conflicts, a PR with failing/pending required checks, a PR
+  that touches an `approval_paths` pattern, or, where the base branch has an evals guard, a PR
+  whose guard checks did not pass on the reviewed commit against the current base.
 - The gate uses the reviewer's **intended** verdict, not GitHub review approval (self-review cannot
   approve own PRs, so it would never be satisfied): `request_changes` blocks, `approve`/`comment` pass
   (after the fix loop has tried their minors), and CI-green + mergeable is still required. A human

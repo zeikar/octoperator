@@ -24,8 +24,11 @@
 #     Prior art has no rows, Sources no items, and the file no http(s) URL. A line that looks
 #     like a misspelled marker is reported.
 #   - docs/prd.md has ## Problem, ## Target users, ## MVP scope, ## Out of scope,
-#     ## Requirements, and ## Success metrics. Requirements holds `### R<n>: <title>` headings,
-#     each with `- ` acceptance criteria; the scope and metrics sections have `- ` items.
+#     ## Requirements, ## Success metrics, and ## Scenarios. Requirements holds `### R<n>: <title>`
+#     headings, each with `- ` acceptance criteria; the scope and metrics sections have `- `
+#     items. Scenarios holds `### <id>` headings (lowercase kebab-case, unique), each with a
+#     `- requirement: R<n>` line naming a requirement above, a `- judge: script` or
+#     `- judge: model` line, and scenario text; at least one is `judge: script`.
 #   - docs/adr/0001-stack.md has ## Context, ## Decision, ## Alternatives considered (`- `
 #     items), and ## Consequences. Decision has a "- Test command: `<test_command>`" item, with
 #     GENESIS.md's test_command, that names the file the command is detected by, backticked,
@@ -54,6 +57,14 @@
 #   - .gitignore has the lines .claude/octoperator.local.md and .octoperator/ (a leading `/`
 #     allowed).
 #   - README.md quotes the sentence: it holds each of the sentence's lines.
+#   - the scenario evals (skills/genesis/references/evals.md): evals/run.sh and evals/guard.sh
+#     are their templates byte for byte (skills/genesis/templates/); .github/workflows/evals.yml
+#     and evals-guard.yml are their template line for line, comments and blank lines aside, with
+#     the stack's setup steps only where the template marks them (in evals-guard.yml, inside the
+#     must-fail job), evals.yml triggers only on push and workflow_dispatch, and evals-guard.yml
+#     only on pull_request; and each PRD scenario has evals/<id>/scenario.md whose front matter has
+#     the lines `id: <id>`, `judge: <judge>`, and `requirement: R<n>` as the PRD says, then text,
+#     plus, for `judge: script`, an evals/<id>/check.sh that parses (`bash -n`). No check runs.
 #
 # Offline: --preflight runs one local `git rev-parse`; no mode calls gh or touches the network.
 #
@@ -63,6 +74,9 @@ set -euo pipefail
 # Bracket ranges like A-Z then match ASCII only, as GitHub's repo names do, in every locale, and
 # git prints its messages untranslated, so --preflight can match them.
 export LC_ALL=C
+
+# The files genesis copies into the new repo for its scenario evals.
+TEMPLATES="$(cd "$(dirname "$0")/../skills/genesis/templates" && pwd)"
 
 MODE=proposal DIR=""
 while [ $# -gt 0 ]; do
@@ -373,11 +387,65 @@ no_urls() {
   [ "$n" -eq 0 ] || fail "$2: research is ungrounded, but $n line(s) cite an http(s) URL"
 }
 
+# scenarios <check|rows> <text> <requirement ids> : reads the PRD's ## Scenarios. `check` prints a
+# `FAIL:` line per problem: each `### <id>` heading (lowercase kebab-case, unique) needs one
+# `- requirement: R<n>` line naming one of the requirement ids (space-separated), one
+# `- judge: script` or `- judge: model` line, and scenario text; at least one scenario, and at
+# least one judged by script. `rows` prints `<id> <judge> <requirement>` per well-formed scenario.
+scenarios() {
+  printf '%s\n' "$2" | awk -v mode="$1" -v rq="$3" '
+    function bad(msg) { if (mode == "check") print "FAIL: docs/prd.md: " msg; broken = 1 }
+    function done_s() {
+      if (id == "") return
+      if (req == "" && !reqbad) bad("scenario " id " needs a \047- requirement: R<n>\047 line")
+      else if (req != "" && !(req in reqs))
+        bad("scenario " id " covers " req ", which is not a ### requirement")
+      if (judge == "" && !judgebad)
+        bad("scenario " id " needs a \047- judge: script\047 or \047- judge: model\047 line")
+      if (!text) bad("scenario " id " has no scenario text")
+      if (mode == "rows" && !broken) print id, judge, req }
+    BEGIN { n = split(rq, a, " "); for (i = 1; i <= n; i++) reqs[a[i]] = 1 }
+    { line = $0; sub(/[ \t\r]+$/, "", line) }
+    line ~ /^### / {
+      done_s(); id = ""; req = ""; judge = ""; text = 0; reqbad = 0; judgebad = 0; broken = 0
+      h = substr(line, 5)
+      if (h !~ /^[a-z0-9]+(-[a-z0-9]+)*$/) {
+        bad("\"### " h "\" is not a \047### <id>\047 scenario heading (lowercase kebab-case)")
+        next }
+      count++; id = h
+      if (id in seen) bad("scenario " id " appears twice")
+      seen[id] = 1; next }
+    id == "" { next }
+    line ~ /^- requirement:/ { v = line; sub(/^- requirement:[ \t]*/, "", v)
+      if (v ~ /^R[0-9]+$/) req = v
+      else { bad("scenario " id ": requirement must be R<n> (got \047" v "\047)"); reqbad = 1 }
+      next }
+    line ~ /^- judge:/ { v = line; sub(/^- judge:[ \t]*/, "", v)
+      if (v == "script" || v == "model") { judge = v; if (v == "script") scripts++ }
+      else { bad("scenario " id ": judge must be script or model (got \047" v "\047)")
+             judgebad = 1 }
+      next }
+    line ~ /[^ \t]/ { text = 1 }
+    END { done_s()
+          if (mode != "check") exit
+          if (!count)
+            print "FAIL: docs/prd.md: ## Scenarios needs at least one \047### <id>\047 scenario"
+          else if (!scripts)
+            print "FAIL: docs/prd.md: ## Scenarios needs at least one \047- judge: script\047" \
+                  " scenario, or the evals have nothing to count" }'
+}
+
+# requirement_ids <prd-file> : prints the ids of the PRD's `### R<n>: ` requirements, one per line.
+requirement_ids() {
+  section "$1" Requirements 2>/dev/null | sed -n 's/^### \(R[0-9][0-9]*\): .*/\1/p'
+}
+
 check_prd() {
   local f="$ABS/docs/prd.md" s body
   [ -f "$f" ] || { fail "docs/prd.md is missing"; return 0; }
-  # Other sections (#90 adds ## Scenarios) are allowed.
-  for s in Problem 'Target users' 'MVP scope' 'Out of scope' Requirements 'Success metrics'; do
+  # Other sections are allowed.
+  for s in Problem 'Target users' 'MVP scope' 'Out of scope' Requirements 'Success metrics' \
+      Scenarios; do
     if ! body="$(section "$f" "$s")"; then
       fail "docs/prd.md: missing section ## $s"
       continue
@@ -385,6 +453,8 @@ check_prd() {
     case "$s" in
       Problem | 'Target users') has_text "$body" || fail "docs/prd.md: ## $s is empty" ;;
       Requirements) requirements "$body" ;;
+      Scenarios)
+        report "$(scenarios check "$body" "$(requirement_ids "$f" | paste -sd ' ' -)")" ;;
       *) [ -n "$(items "$body")" ] || fail "docs/prd.md: ## $s needs at least one '- ' item" ;;
     esac
   done
@@ -452,8 +522,125 @@ check_vision() {
   no_urls "$f" VISION.md
 }
 
+# triggers <workflow> : prints the workflow's triggers, one per line: the words on a top-level
+# `on:` line itself (`on: [push, pull_request]`), or the keys (or `- items`) at the first indent
+# level of its block, up to the next unindented line. A `push:` anywhere else, such as a step's
+# `with:`, is not a trigger.
+triggers() {
+  awk -v sq="'" '
+    BEGIN { q = "[\"" sq "]" }
+    $0 ~ "^" q "?on" q "?:" { in_on = 1; depth = 0; rest = $0; sub(/^[^:]*:/, "", rest)
+      sub(/#.*/, "", rest); gsub("[][{},:\"" sq "]", " ", rest)
+      n = split(rest, w, /[ \t]+/); for (i = 1; i <= n; i++) if (w[i] != "") print w[i]
+      next }
+    !in_on || /^[ \t]*(#.*)?\r?$/ { next }
+    /^[^ \t]/ { in_on = 0; next }
+    { match($0, /^[ \t]+/); if (!depth) depth = RLENGTH
+      if (RLENGTH == depth) { k = substr($0, depth + 1); sub(/^-[ \t]+/, "", k)
+        gsub("[\"" sq "]", "", k); sub(/[: \t#\r].*/, "", k); print k } }' "$1"
+}
+
+# check_eval_workflow <name> <trigger...> : .github/workflows/<name> is its template line for line,
+# comments and blank lines aside, except where the template has the line `# genesis: the stack's
+# setup …`: the stack's setup steps go there, and only there, as lines indented six spaces or more
+# (steps, not a job, a job key such as permissions:, or a top-level key). Setup runs the PR's code,
+# so in evals-guard.yml only the must-fail job may have it. It triggers on exactly the given events.
+check_eval_workflow() {
+  local name="$1" f="$ABS/.github/workflows/$1" t w kind want have src; shift
+  src="(skills/genesis/templates/.github/workflows/$name)"
+  if [ ! -f "$f" ]; then
+    fail ".github/workflows/$name is missing: write it from skills/genesis/templates/"
+    return 0
+  fi
+  # Prints the first difference as `<kind> TAB <template line> TAB <file line>`, or nothing.
+  IFS=$'\t' read -r kind want have <<EOF || true
+$(awk -v ph="# genesis: the stack's setup and install steps from ci.yml" '
+    function norm(s) { sub(/[ \t\r]+$/, "", s); return s }
+    function skip(l) { return l ~ /^[ \t]*(#|$)/ }
+    function diff(k, w, h) { gsub(/\t/, " ", w); gsub(/\t/, " ", h); print k "\t" w "\t" h; exit }
+    NR == FNR { l = norm($0); t = l; sub(/^[ \t]+/, "", t)
+      if (t == ph) { gap = n + 0; has = 1 }
+      else if (!skip(l)) want[++n] = l
+      next }
+    { l = norm($0); if (!skip(l)) have[++m] = l }
+    END {
+      if (!has) gap = n
+      tail = n - gap
+      for (i = 1; i <= gap; i++)
+        if (have[i] != want[i]) diff(i > m ? "missing" : "differs", want[i], have[i])
+      # From the end, so the line named is where the file and the template part.
+      for (i = tail; i >= 1; i--) { j = m - tail + i
+        if (j <= gap) diff("missing", want[gap + i], "")
+        if (have[j] != want[gap + i]) diff("differs", want[gap + i], have[j]) }
+      for (i = gap + 1; i <= m - tail; i++)
+        if (!has || have[i] !~ /^      /) diff("extra", want[gap], have[i])
+    }' "$TEMPLATES/.github/workflows/$name" "$f")
+EOF
+  case "$kind" in
+    missing) fail ".github/workflows/$name: needs its template's line '$want' $src" ;;
+    differs) fail ".github/workflows/$name: has '$have' where its template has '$want' $src" ;;
+    extra) fail ".github/workflows/$name: has '$have' after '$want': only the setup steps," \
+      "indented as steps, may go where its template has the '# genesis:' line $src" ;;
+  esac
+  t="$(triggers "$f" | sort -u)"
+  for w in "$@"; do
+    printf '%s\n' "$t" | grep -Fxq "$w" || fail ".github/workflows/$name: on: needs the $w trigger"
+  done
+  while IFS= read -r w; do
+    [ -n "$w" ] || continue
+    case " $* " in *" $w "*) continue ;; esac
+    fail ".github/workflows/$name: on: must not have the $w trigger (only: $*)"
+  done <<EOF
+$t
+EOF
+}
+
+# check_evals : the eval runner, the guard, their workflows, and one evals/<id>/ per PRD scenario.
+check_evals() {
+  local f prd="$ABS/docs/prd.md" body id judge req fm w
+  for f in evals/run.sh evals/guard.sh; do
+    if [ ! -f "$ABS/$f" ]; then
+      fail "$f is missing: copy it from skills/genesis/templates/$f"
+    elif ! cmp -s "$TEMPLATES/$f" "$ABS/$f"; then
+      fail "$f differs from skills/genesis/templates/$f: copy it byte for byte"
+    fi
+  done
+  # A failing eval on pull_request would hold every PR, the one that fixes it included.
+  check_eval_workflow evals.yml push workflow_dispatch
+  check_eval_workflow evals-guard.yml pull_request
+  # The PRD's own problems are the proposal check's; here only its well-formed scenarios count.
+  [ -f "$prd" ] && body="$(section "$prd" Scenarios)" || return 0
+  while read -r id judge req; do
+    [ -n "$id" ] || continue
+    f="$ABS/evals/$id/scenario.md"
+    if [ ! -f "$f" ]; then
+      fail "evals/$id/scenario.md is missing: docs/prd.md has the scenario $id"
+      continue
+    fi
+    if ! fm="$(front_matter "$f")"; then
+      fail "evals/$id/scenario.md: no front matter (--- … --- at the top)"
+      continue
+    fi
+    for w in "id: $id" "judge: $judge" "requirement: $req"; do
+      printf '%s\n' "$fm" | awk -v w="$w" '{ sub(/[ \t\r]+$/, "") } $0 == w { ok = 1 }
+          END { exit !ok }' \
+        || fail "evals/$id/scenario.md: front matter needs the line '$w', as docs/prd.md says"
+    done
+    awk 'NR == 1 { next } !fm && $0 == "---" { fm = 1; next } fm && /[^ \t\r]/ { ok = 1; exit }
+      END { exit !ok }' "$f" || fail "evals/$id/scenario.md: needs the scenario's text"
+    [ "$judge" = script ] || continue
+    if [ ! -f "$ABS/evals/$id/check.sh" ]; then
+      fail "evals/$id/check.sh is missing: the scenario is judge: script"
+    elif ! bash -n "$ABS/evals/$id/check.sh" 2>/dev/null; then
+      fail "evals/$id/check.sh: syntax error (bash -n)"
+    fi
+  done <<EOF
+$(scenarios rows "$body" "$(requirement_ids "$prd" | paste -sd ' ' -)")
+EOF
+}
+
 check_skeleton() {
-  local f n=0 marker what want w triggers
+  local f n=0 marker what want w trig
   # Without a detectable test_command, check_genesis_md already said so; nothing to compare.
   [ -n "$TEST_CMD" ] || return 0
   # Detection takes the first match, so a file of an earlier rule would run another command.
@@ -479,22 +666,9 @@ check_skeleton() {
   if [ ! -f "$f" ]; then
     fail ".github/workflows/ci.yml is missing"
   else
-    # The triggers: the words on a top-level `on:` line itself (`on: [push, pull_request]`), or
-    # the keys (or `- items`) at the first indent level of its block, up to the next unindented
-    # line. A `push:` anywhere else, such as a step's `with:`, is not a trigger.
-    triggers="$(awk -v sq="'" '
-      BEGIN { q = "[\"" sq "]" }
-      $0 ~ "^" q "?on" q "?:" { in_on = 1; depth = 0; rest = $0; sub(/^[^:]*:/, "", rest)
-        sub(/#.*/, "", rest); gsub("[][{},:\"" sq "]", " ", rest)
-        n = split(rest, w, /[ \t]+/); for (i = 1; i <= n; i++) if (w[i] != "") print w[i]
-        next }
-      !in_on || /^[ \t]*(#.*)?\r?$/ { next }
-      /^[^ \t]/ { in_on = 0; next }
-      { match($0, /^[ \t]+/); if (!depth) depth = RLENGTH
-        if (RLENGTH == depth) { k = substr($0, depth + 1); sub(/^-[ \t]+/, "", k)
-          gsub("[\"" sq "]", "", k); sub(/[: \t#\r].*/, "", k); print k } }' "$f")"
+    trig="$(triggers "$f")"
     for want in push pull_request; do
-      printf '%s\n' "$triggers" | grep -Fxq "$want" \
+      printf '%s\n' "$trig" | grep -Fxq "$want" \
         || fail ".github/workflows/ci.yml: on: needs the $want trigger"
     done
     awk -v c="$TEST_CMD" '{ line = $0; sub(/^[ \t]*(-[ \t]+)?/, "", line)
@@ -523,6 +697,8 @@ check_skeleton() {
 $(sentence_lines "$GENESIS_FM")
 EOF
   fi
+
+  check_evals
 }
 
 case "$MODE" in

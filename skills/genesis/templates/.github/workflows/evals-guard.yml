@@ -1,0 +1,101 @@
+# Written by /octoperator:genesis. Fails a PR that modifies, deletes, or renames an eval, or adds
+# one that already passes on the base branch. Every job runs the base branch's evals/guard.sh, so
+# a PR cannot change its own judge; this file is in approval_paths for the same reason.
+#
+# append-only runs no PR code: no setup step, and the guard read from the base's git objects. It
+# is the hard rule. must-fail installs the PR's dependencies (which runs PR code) and runs each new
+# check on the base; verdict, again with no PR code, judges what must-fail recorded. PR code in
+# must-fail can forge that record, so the must-fail verdict is advisory (skills/genesis/references/
+# evals.md). append-only and verdict record the base they judged against as an evals-guard-base
+# notice: auto merges a PR that changes evals/ only when both passed against the base branch's tip.
+#
+# The base is the base branch's tip as this run fetched it, not the event's base.sha, so re-running
+# all jobs from the Actions tab judges against the current tip. must-fail writes the base it used
+# into the artifact, and verdict fails when its own fetch saw another one and the PR changes
+# evals/ or the root .gitattributes (for any other PR the guard has nothing to judge).
+name: Evals guard
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  append-only:
+    name: evals-guard append-only
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Evals only grow (the base branch's guard)
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          export GIT_NO_REPLACE_OBJECTS=1
+          BASE_SHA="$(git rev-parse --verify "refs/remotes/origin/$GITHUB_BASE_REF^{commit}")" \
+            || { echo "::error::no fetched tip for the base branch $GITHUB_BASE_REF"; exit 1; }
+          echo "::notice title=evals-guard-base::$BASE_SHA"
+          g="$(git show "$BASE_SHA:evals/guard.sh")" && [ -n "$g" ] \
+            || { echo "::error::no evals/guard.sh at $BASE_SHA"; exit 1; }
+          bash -c "$g" guard --diff-only "$BASE_SHA" "$HEAD_SHA"
+
+  must-fail:
+    name: evals-guard must-fail
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # genesis: the stack's setup and install steps from ci.yml
+      - name: Run each new check on the base (the base branch's guard)
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          export GIT_NO_REPLACE_OBJECTS=1
+          BASE_SHA="$(git rev-parse --verify "refs/remotes/origin/$GITHUB_BASE_REF^{commit}")" \
+            || { echo "::error::no fetched tip for the base branch $GITHUB_BASE_REF"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/must-fail" && echo "$BASE_SHA" >"$RUNNER_TEMP/must-fail/base.txt"
+          g="$(git show "$BASE_SHA:evals/guard.sh")" && [ -n "$g" ] \
+            || { echo "::error::no evals/guard.sh at $BASE_SHA"; exit 1; }
+          bash -c "$g" guard --run-new "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/must-fail/results.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evals-guard-must-fail
+          path: ${{ runner.temp }}/must-fail/
+
+  verdict:
+    name: evals-guard verdict
+    needs: must-fail
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: evals-guard-must-fail
+          path: ${{ runner.temp }}/must-fail
+      - name: New evals fail on the base (the base branch's guard)
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          export GIT_NO_REPLACE_OBJECTS=1
+          BASE_SHA="$(git rev-parse --verify "refs/remotes/origin/$GITHUB_BASE_REF^{commit}")" \
+            || { echo "::error::no fetched tip for the base branch $GITHUB_BASE_REF"; exit 1; }
+          # The base branch moved between the jobs: must-fail judged an older base. That matters
+          # only to a PR that changes what the guard reads, evals/ or the root .gitattributes.
+          if [ "$(cat "$RUNNER_TEMP/must-fail/base.txt" 2>/dev/null)" != "$BASE_SHA" ]; then
+            MB="$(git merge-base "$BASE_SHA" "$HEAD_SHA")" \
+              || { echo "::error::no merge base of $BASE_SHA and $HEAD_SHA"; exit 1; }
+            READ="$(GIT_LITERAL_PATHSPECS=1 git diff --no-color --no-renames --no-ext-diff \
+              --no-textconv --raw "$MB" "$HEAD_SHA" -- evals .gitattributes)" \
+              || { echo "::error::git diff failed"; exit 1; }
+            [ -z "$READ" ] \
+              || { echo "::error::must-fail judged another base: re-run all jobs"; exit 1; }
+          fi
+          echo "::notice title=evals-guard-base::$BASE_SHA"
+          g="$(git show "$BASE_SHA:evals/guard.sh")" && [ -n "$g" ] \
+            || { echo "::error::no evals/guard.sh at $BASE_SHA"; exit 1; }
+          bash -c "$g" guard --verdict "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/must-fail/results.txt"

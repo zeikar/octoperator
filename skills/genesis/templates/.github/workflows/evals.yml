@@ -1,0 +1,19 @@
+# Written by /octoperator:genesis. Runs the offline scenario evals on the default branch only:
+# never on pull_request, where a failing eval would hold every PR, the fix included.
+name: Evals
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # genesis: the stack's setup and install steps from ci.yml
+      - run: bash evals/run.sh
