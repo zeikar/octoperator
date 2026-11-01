@@ -154,17 +154,19 @@ fm_value() {
     print v; exit }'
 }
 
-# fm_has_sentence <front-matter> : exits 0 when `sentence` has a non-empty value, inline or as a
-# `|` / `>` block scalar followed by an indented line.
+# fm_has_sentence <front-matter> : exits 0 when `sentence` has a non-empty value, inline (as
+# fm_value reads it) or as a `|` / `>` block scalar followed by an indented line.
 fm_has_sentence() {
-  printf '%s\n' "$1" | awk '
-    block { if ($0 ~ /^[ \t]+[^ \t]/) ok = 1; exit }
-    index($0, "sentence:") == 1 {
-      v = substr($0, 10); gsub(/^[ \t]+|[ \t\r]+$/, "", v)
-      if (v ~ /^[|>][-+]?$/) { block = 1; next }
-      if (v != "" && v != "\"\"" && v != "'\'''\''") ok = 1
-      exit }
-    END { exit !ok }'
+  local v
+  v="$(fm_value "$1" sentence)"
+  if printf '%s\n' "$v" | grep -Eqx '[|>][-+]?'; then
+    printf '%s\n' "$1" | awk '
+      block { if ($0 ~ /^[ \t]+[^ \t]/) ok = 1; exit }
+      index($0, "sentence:") == 1 { block = 1 }
+      END { exit !ok }'
+  else
+    [ -n "$v" ]
+  fi
 }
 
 check_genesis_md() {

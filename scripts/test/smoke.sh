@@ -548,7 +548,8 @@ expect 0 "ADR Test command item wrapped onto a continuation line: exits 0" \
 genesis_fixture "$g/fmquote"
 sed -e 's/^test_command: .*/test_command: "npm test"/' \
   -e "s/^visibility: .*/visibility: 'private'/" \
-  -e 's/^repo: .*/repo: smoke\/chat-pal  # rename at will/' "$g/valid/GENESIS.md" \
+  -e 's/^repo: .*/repo: smoke\/chat-pal  # rename at will/' \
+  -e 's/^sentence: |-$/sentence: |-  # one line/' "$g/valid/GENESIS.md" \
   >"$g/fmquote/GENESIS.md"
 genesis_check "$g/fmquote"
 expect 0 "quoted and commented front-matter values: exits 0" test "$gc_rc" -eq 0 -a -z "$gc_out"
@@ -559,6 +560,14 @@ genesis_check "$g/fmcomment"
 expect 0 "stack that is only a comment: exits 1 with a FAIL line" test "$gc_rc" -eq 1 \
   -a -n "$(printf '%s\n' "$gc_out" | grep -Fx \
     "FAIL: GENESIS.md: front matter needs a non-empty stack")"
+# The same holds for sentence, whose usual form is a block scalar.
+genesis_fixture "$g/sentcomment"
+awk '/^sentence:/ { print "sentence: # todo"; skip = 1; next } skip { skip = 0; next } { print }' \
+  "$g/valid/GENESIS.md" >"$g/sentcomment/GENESIS.md"
+genesis_check "$g/sentcomment"
+expect 0 "sentence that is only a comment: exits 1 with a FAIL line" test "$gc_rc" -eq 1 \
+  -a -n "$(printf '%s\n' "$gc_out" | grep -Fx \
+    "FAIL: GENESIS.md: front matter needs a non-empty sentence")"
 # An explanation after a baseline line, as Octoperator's own VISION.md has, is allowed.
 genesis_fixture "$g/viselab"
 sed 's/^- Deploying, .* approval\.$/& Enforced by approval gates./' "$g/valid/VISION.md" \

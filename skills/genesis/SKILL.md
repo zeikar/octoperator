@@ -135,8 +135,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-genesis-check.sh" "<dir>"
 
 Exit 0 → the checkpoint. Exit 1 → fix each `FAIL:` line by rewriting that file with Write (a file
 this run wrote), and re-run. In an ungrounded run, never add a URL, row, or source to clear a
-`FAIL:` line; fix the marker instead. After two failed rewrites, stop with `proposal invalid`,
-quoting the lines, and leave the files for the human. Exit 2 → stop with `check failed`.
+`FAIL:` line; fix the marker instead, and when a stage-2 file cites a URL, remove the URL, never
+the marker. After two failed rewrites, stop with `proposal invalid`, quoting the lines, and leave
+the files for the human. Exit 2 → stop with `check failed`.
 
 ## Checkpoint
 
