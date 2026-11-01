@@ -17,8 +17,7 @@ All notable changes to Octoperator are documented in this file. The format is ba
   <reason>`. Without web access it marks the research `ungrounded: no web access`. It makes no
   GitHub write; its only `gh` call is `gh api user`. A new offline helper,
   `scripts/octo-genesis-check.sh`, checks the directory first (`--preflight`) and the proposal
-  after. `VISION.md`'s roadmap item 6 now points to epic #85. The later stages (#88, #89, #93) are
-  not built yet.
+  after. `VISION.md`'s roadmap item 6 now points to epic #85.
 - `genesis` stage 2 (#87): in the same run, after research, it writes `docs/prd.md` (Problem,
   Target users, MVP scope, Out of scope seeded from research's Skip list, `### R<n>:`
   requirements with acceptance criteria, Success metrics), `docs/adr/0001-stack.md` (Context,
@@ -32,6 +31,24 @@ All notable changes to Octoperator are documented in this file. The format is ba
   the human owns (stack, repo name, visibility) and that a private repo's Actions minutes count
   against the plan's quota. Genesis never regenerates an existing file; to start over, delete the
   proposal files. Still no GitHub write.
+- `genesis --approve [--dry-run]`, stage 3 (#88): typed by the human in the proposal folder, it
+  writes a minimal skeleton for the ADR's stack (one module, one passing test, the test command's
+  detection file and no earlier one, `.github/workflows/ci.yml` on `push` and `pull_request`, a
+  `.gitignore` listing `.claude/octoperator.local.md` and `.octoperator/`, and a README quoting
+  the sentence), runs the test command once locally, then `git init`, commits, re-checks the
+  folder's git state, checks GitHub (`gh auth status`, a GraphQL call that stops with the #79
+  reason, and the name), runs
+  `gh repo create --private` (`--public` only for `visibility: public`) with the sentence as the
+  description, and runs setup with fixed answers: no board, the labels, and settings with
+  `approval_paths: [".github/workflows/"]`. It ends with `genesis: scaffolded <repo>`. A failing
+  test stops before any git or `gh` write; a missing `workflow` scope stops with the
+  `gh auth refresh -s workflow` hint. A re-run resumes from the folder's git state and creates
+  nothing twice. `--dry-run` prints the ordered commands and writes nothing. New offline helper
+  `scripts/octo-genesis-plan.sh` works out the stage and prints the commands; the description is
+  made one line, quoted, and cut to GitHub's 350-character limit on a UTF-8 boundary.
+  `octo-genesis-check.sh` gains `--skeleton` and `--values`. The skill's `allowed-tools` add
+  `Bash(git:*)`, `Edit`, and `Task`; the test command itself can't be pre-allowed and prompts
+  once. The MVP handoff (#89) and the next milestone (#93) are not built yet.
 - README → "Running continuously": copy-paste recipes for re-running `autopilot` with Claude
   Code's own scheduling on your machine — an in-session cron task in a background session (the
   default), `/loop`, `/goal`, and `claude -p` under launchd or crontab with `--cycles 1`,
