@@ -136,8 +136,8 @@ Run the **`research`** procedure (`${CLAUDE_PLUGIN_ROOT}/skills/research/SKILL.m
 
 - **Cycle cap:** `--cycles` iterations completed.
 - **No-progress cycle:** discovery yields no not-yet-attempted actionable issues AND `research --create`
-  filed **zero new issues** (it generated no proposals, or every proposal deduped against an existing
-  issue) → STOP. Nothing remains that a retry would change.
+  filed **zero new issues** (it found no evidenced proposals, or every proposal deduped against an
+  existing issue) → STOP. Nothing remains that a retry would change.
 - **semi mode** always stops at its first refill (step 3c): once no `ready` issues remain it proposes
   and stops — it never builds `proposed` work. The `--cycles` cap still applies when `ready` issues span
   multiple cycles; whichever arrives first ends the run.
