@@ -9,7 +9,8 @@
 #                out, or are malformed; the summary line, the exit code, and the evals-metric
 #                notice only under GitHub Actions; and the attacks on it: a symlinked eval, a
 #                check that writes into the repo (the run stops), one that leaves a process
-#                behind, one that reads the CI environment, and one that prints workflow commands
+#                behind, one that reads the CI environment, and one that prints workflow commands;
+#                under Actions only, an evals/ that differs from the commit stops the run first
 #   - guard.sh : against throwaway git repos, a PR that adds a must-fail eval passes; one that adds
 #                an eval already passing on the base, modifies, deletes, or renames an eval, or
 #                adds a file to an existing eval fails; a model-judged eval is not run; an eval
@@ -19,7 +20,9 @@
 #                characters, git replace refs (in the workflow's own step too), a shared or
 #                polluted base tree, a check rewriting the running guard, and an export-ignore
 #                on the base; --diff-only runs no check; --run-new and --verdict, as the
-#                workflow's three jobs run them, and a forged or missing result
+#                workflow's three jobs run them (the base from checkout's origin/<base branch>),
+#                a forged or missing result, a base that moved between must-fail and verdict,
+#                and a base with no evals/guard.sh or no fetched base branch (each job fails)
 #
 # Nothing here calls gh or the network. Exits 0 when every check passes, 1 when any fails.
 set -uo pipefail
@@ -63,6 +66,13 @@ echo v1 >"$r/app.txt"
 git -C "$r" add app.txt && git -C "$r" -c user.name=t -c user.email=t@example.invalid \
   -c commit.gpgsign=false commit -q --no-verify -m app \
   || { echo "evals: git commit failed" >&2; exit 1; }
+# commit_evals : commit evals/ as it is now. Under Actions, run.sh stops when evals/ differs from
+# the commit, so each run with GITHUB_ACTIONS=true commits the fixture first.
+commit_evals() {
+  git -C "$r" add -A evals && git -C "$r" -c user.name=t -c user.email=t@example.invalid \
+    -c commit.gpgsign=false commit -q --no-verify --allow-empty -m evals \
+    || { echo "evals: git commit failed" >&2; exit 1; }
+}
 # The pass fixture also proves the check gets the repo as its argument and runs elsewhere.
 eval_dir "$r" pass script '[ -f "$1/app.txt" ] && [ "$PWD" != "$1" ]'
 eval_dir "$r" fail script 'echo "FAIL: not built"; exit 1'
@@ -76,9 +86,24 @@ check "each eval's verdict, exit 2 as a failure" test \
     && has "$out" "skip: model (judge: model)" && has "$out" "fail: badexit (exit 2)" && echo y)"
 check "a failed eval's output is shown" has "$out" "    FAIL: not built"
 check "no notice outside GitHub Actions" test -z "$(printf '%s\n' "$out" | grep '^::notice')"
+commit_evals
 out="$(GITHUB_ACTIONS=true bash "$r/evals/run.sh" 2>&1)"
 check "under GitHub Actions: the evals-metric notice" \
   has "$out" "::notice title=evals-metric::passed=1 total=3"
+# Under Actions the setup ran the repo's code (a postinstall) before run.sh: an evals/ it changed
+# stops the run before any check, with no metric.
+printf '#!/usr/bin/env bash\nexit 0\n' >"$r/evals/fail/check.sh"
+mkdir -p "$r/evals/planted" && : >"$r/evals/planted/check.sh"
+out="$(GITHUB_ACTIONS=true bash "$r/evals/run.sh" 2>&1)"; rc=$?
+check "under Actions, a check rewritten before the run: stops, runs nothing, no metric" \
+  test "$rc" -eq 1 -a -n "$(has "$out" \
+    "evals: aborted: evals/ differs from the commit before any check ran (git status)" \
+    && has "$out" "     M evals/fail/check.sh" && has "$out" "    ?? evals/planted/check.sh" \
+    && echo y)" \
+    -a -z "$(printf '%s\n' "$out" | grep -e '^pass: ' -e '^fail: ' -e 'evals-metric')"
+out="$(GITHUB_ACTIONS=false bash "$r/evals/run.sh" 2>&1)"
+check "outside Actions, an eval being written runs as it is" has "$out" "pass: fail"
+git -C "$r" checkout -q -- evals && rm -rf "$r/evals/planted"
 rm -rf "$r/evals/fail" "$r/evals/badexit"
 out="$(GITHUB_ACTIONS=false bash "$r/evals/run.sh" "$r" 2>&1)"; rc=$?
 check "every script eval passes (one skipped): exits 0" \
@@ -135,6 +160,7 @@ check "a process the check left running is killed with it" test ! -e "$tmp/late.
 rm -rf "$r/evals/lingers"
 # A failing check's output can't issue workflow commands: it prints between stop-commands markers.
 eval_dir "$r" inject script 'echo "::notice title=evals-metric::passed=99 total=99"; exit 1'
+commit_evals
 out="$(GITHUB_ACTIONS=true bash "$r/evals/run.sh" 2>&1)"
 # live_commands <text> : the lines GitHub would run as workflow commands (leading space trimmed,
 # as the runner does), outside any stop-commands block.
@@ -150,6 +176,7 @@ check "a check's '::notice' output is inside a stop-commands block, with a rando
 rm -rf "$r/evals/inject"
 # A check that writes into the repo could make the next eval pass: the run stops there.
 eval_dir "$r" aaa script 'echo v2 >"$1/app.txt"; exit 1'
+commit_evals
 out="$(GITHUB_ACTIONS=true bash "$r/evals/run.sh" 2>&1)"; rc=$?
 check "a check that changes the repo: failed, the run stops, no metric" test "$rc" -eq 1 \
   -a -n "$(has "$out" "fail: aaa (changed the repo it judges)" && has "$out" \
@@ -391,9 +418,12 @@ step_script() {
     inrun && /^          / { sub(/^          /, ""); print; next } { inrun = 0 }' \
     "$T/.github/workflows/evals-guard.yml"
 }
-# job <name> [base] : run that job's step as the workflow does, from $gr; sets out and rc.
+# job <name> [base] : run that job's step as the workflow does, from $gr, with the base (main
+# by default) as checkout's fetched origin/main; sets out and rc.
 job() {
-  out="$(cd "$gr" && BASE_SHA="$(git rev-parse "${2:-main}")" HEAD_SHA="$(git rev-parse HEAD)" \
+  git -C "$gr" update-ref refs/remotes/origin/main "${2:-main}" \
+    || { echo "evals: git update-ref failed" >&2; exit 1; }
+  out="$(cd "$gr" && GITHUB_BASE_REF=main HEAD_SHA="$(git rev-parse HEAD)" \
     RUNNER_TEMP="$tmp/rt" bash -c "$(step_script "$1")" 2>&1)"; rc=$?
 }
 fakeblob="$(printf 'echo fake guard; exit 0\n' | git -C "$gr" hash-object -w --stdin)"
@@ -424,9 +454,31 @@ job must-fail
 check "the must-fail job (--run-new) runs the check and records its exit code" \
   test "$rc" -eq 0 -a -e "$tmp/ran-marker" \
     -a -n "$(grep -Fx 'marker 1' "$tmp/rt/must-fail/results.txt")"
+check "the must-fail job records the base it used in the artifact" \
+  test "$(cat "$tmp/rt/must-fail/base.txt")" = "$realbase"
 job verdict
 check "the verdict job (--verdict) passes it" test "$rc" -eq 0 \
-  -a -n "$(has "$out" "ok: evals/marker/ fails on the base (exit 1)" && echo y)"
+  -a -n "$(has "$out" "ok: evals/marker/ fails on the base (exit 1)" \
+    && has "$out" "::notice title=evals-guard-base::$realbase" && echo y)"
+# The base branch moved between must-fail and verdict: verdict's own fetch sees another tip.
+job verdict "$(git -C "$gr" rev-parse main~1)"
+check "the verdict job fails when must-fail judged another base" test "$rc" -eq 1 -a -n "$(has \
+  "$out" "::error::must-fail judged another base: re-run all jobs" && echo y)" \
+  -a -z "$(printf '%s\n' "$out" | grep -e '^ok: ' -e 'evals-guard-base')"
+# A base with no evals/guard.sh, or no fetched base branch: each job fails, never passes empty.
+noguard="$(git -C "$gr" -c user.name=t -c user.email=t@example.invalid commit-tree -p main \
+  -m "no guard" "$(git -C "$gr" mktree </dev/null)")"
+for j in append-only must-fail verdict; do
+  echo "$noguard" >"$tmp/rt/must-fail/base.txt"
+  job "$j" "$noguard"
+  check "the $j job fails on a base without evals/guard.sh" test "$rc" -eq 1 \
+    -a -n "$(has "$out" "::error::no evals/guard.sh at $noguard" && echo y)"
+  out="$(cd "$gr" && GITHUB_BASE_REF=no-such-branch HEAD_SHA="$(git rev-parse HEAD)" \
+    RUNNER_TEMP="$tmp/rt" bash -c "$(step_script "$j")" 2>&1)"; rc=$?
+  check "the $j job fails with no fetched base branch" test "$rc" -eq 1 \
+    -a -n "$(has "$out" "::error::no fetched tip for the base branch no-such-branch" && echo y)"
+done
+job must-fail
 printf 'marker 0\n' >"$tmp/rt/must-fail/results.txt"
 job verdict
 check "the verdict job fails a recorded pass" test "$rc" -eq 1 -a -n "$(has "$out" \

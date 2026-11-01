@@ -86,9 +86,14 @@ All notable changes to Octoperator are documented in this file. The format is ba
   failed check's output with workflow commands stopped. The guard workflow is covered by the
   settings' `.github/workflows/` approval path; `evals/` is not, so must-fail additions merge
   unattended. `auto`'s merge gate gains an evals-guard step: where the base branch has the guard
-  workflow, new read-only helper `scripts/octo-evals-guard.sh` must find both guard checks passed
-  on the reviewed commit against the base branch's tip, or the PR is held (`evals guard did not
-  pass`, for a `[skip ci]` head too, or `evals guard stale`).
+  workflow, new read-only helper `scripts/octo-evals-guard.sh` must find both guard jobs of the
+  PR's own guard run passed on the reviewed commit, against the base branch's tip when the PR
+  changes `evals/` or `.gitattributes`, or the PR is held (`evals guard did not pass`, for a
+  `[skip ci]` head too, or `evals guard stale`). Each guard job judges the base branch's tip as it
+  fetched it, so re-running the jobs refreshes a stale guard, and a base without `evals/guard.sh`
+  fails the job. `octo-genesis-check.sh --skeleton` holds both eval workflows to their templates
+  line for line, with setup steps only where the template marks them. Under Actions, `run.sh`
+  stops before any check when `evals/` differs from the commit.
   The VISION template's quality bar says evals only grow. `octo-genesis-check.sh` checks the
   scenarios and, with `--skeleton`, the eval files; the plan's `git add` names them. The handoff
   asks the human to confirm the first `Evals` run on `main` is red. New

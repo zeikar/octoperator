@@ -7,7 +7,11 @@
 # check on the base; verdict, again with no PR code, judges what must-fail recorded. PR code in
 # must-fail can forge that record, so the must-fail verdict is advisory (skills/genesis/references/
 # evals.md). append-only and verdict record the base they judged against as an evals-guard-base
-# notice: auto merges only when both passed, against the base branch's tip.
+# notice: auto merges a PR that changes evals/ only when both passed against the base branch's tip.
+#
+# The base is the base branch's tip as this run fetched it, not the event's base.sha, so re-running
+# all jobs from the Actions tab judges against the current tip. must-fail writes the base it used
+# into the artifact, and verdict fails when its own fetch saw another one.
 name: Evals guard
 
 on:
@@ -26,12 +30,15 @@ jobs:
           fetch-depth: 0
       - name: Evals only grow (the base branch's guard)
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           export GIT_NO_REPLACE_OBJECTS=1
+          BASE_SHA="$(git rev-parse --verify "refs/remotes/origin/$GITHUB_BASE_REF^{commit}")" \
+            || { echo "::error::no fetched tip for the base branch $GITHUB_BASE_REF"; exit 1; }
           echo "::notice title=evals-guard-base::$BASE_SHA"
-          bash -c "$(git show "$BASE_SHA:evals/guard.sh")" guard --diff-only "$BASE_SHA" "$HEAD_SHA"
+          g="$(git show "$BASE_SHA:evals/guard.sh")" && [ -n "$g" ] \
+            || { echo "::error::no evals/guard.sh at $BASE_SHA"; exit 1; }
+          bash -c "$g" guard --diff-only "$BASE_SHA" "$HEAD_SHA"
 
   must-fail:
     name: evals-guard must-fail
@@ -43,16 +50,19 @@ jobs:
       # genesis: the stack's setup and install steps from ci.yml
       - name: Run each new check on the base (the base branch's guard)
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           export GIT_NO_REPLACE_OBJECTS=1
-          mkdir -p "$RUNNER_TEMP/must-fail"
-          bash -c "$(git show "$BASE_SHA:evals/guard.sh")" guard --run-new "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/must-fail/results.txt"
+          BASE_SHA="$(git rev-parse --verify "refs/remotes/origin/$GITHUB_BASE_REF^{commit}")" \
+            || { echo "::error::no fetched tip for the base branch $GITHUB_BASE_REF"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/must-fail" && echo "$BASE_SHA" >"$RUNNER_TEMP/must-fail/base.txt"
+          g="$(git show "$BASE_SHA:evals/guard.sh")" && [ -n "$g" ] \
+            || { echo "::error::no evals/guard.sh at $BASE_SHA"; exit 1; }
+          bash -c "$g" guard --run-new "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/must-fail/results.txt"
       - uses: actions/upload-artifact@v4
         with:
           name: evals-guard-must-fail
-          path: ${{ runner.temp }}/must-fail/results.txt
+          path: ${{ runner.temp }}/must-fail/
 
   verdict:
     name: evals-guard verdict
@@ -68,9 +78,15 @@ jobs:
           path: ${{ runner.temp }}/must-fail
       - name: New evals fail on the base (the base branch's guard)
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           export GIT_NO_REPLACE_OBJECTS=1
+          BASE_SHA="$(git rev-parse --verify "refs/remotes/origin/$GITHUB_BASE_REF^{commit}")" \
+            || { echo "::error::no fetched tip for the base branch $GITHUB_BASE_REF"; exit 1; }
+          # The base branch moved between the jobs: must-fail judged an older base.
+          [ "$(cat "$RUNNER_TEMP/must-fail/base.txt" 2>/dev/null)" = "$BASE_SHA" ] \
+            || { echo "::error::must-fail judged another base: re-run all jobs"; exit 1; }
           echo "::notice title=evals-guard-base::$BASE_SHA"
-          bash -c "$(git show "$BASE_SHA:evals/guard.sh")" guard --verdict "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/must-fail/results.txt"
+          g="$(git show "$BASE_SHA:evals/guard.sh")" && [ -n "$g" ] \
+            || { echo "::error::no evals/guard.sh at $BASE_SHA"; exit 1; }
+          bash -c "$g" guard --verdict "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/must-fail/results.txt"

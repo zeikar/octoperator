@@ -17,7 +17,9 @@
 #
 # A check must leave REPO_DIR as it found it. When its HEAD or `git status --ignored -uall`
 # differs after a check, that eval fails and the run stops there, printing `evals: aborted …`
-# instead of the summary: a check that writes into the repo could make the next one pass.
+# instead of the summary: a check that writes into the repo could make the next one pass. Under
+# GitHub Actions, the run also stops before any check when evals/ differs from the commit
+# (`git status -- evals`): the setup before it ran the repo's code, which could rewrite a check.
 #
 # It prints one line per eval, then `evals: <passed>/<total> passed (<skipped> skipped)`, where
 # total counts the script evals. Under GitHub Actions (GITHUB_ACTIONS=true) it also prints
@@ -108,6 +110,19 @@ failed_eval() {
 
 snap >"$tmp/before" 2>"$tmp/snap.err" \
   || { echo "run: git status failed in $REPO" >&2; cat "$tmp/snap.err" >&2; exit 2; }
+
+# Under Actions the stack's setup ran the repo's code first (a postinstall, …), which could have
+# rewritten a check, so evals/ must match the commit. Not locally, where a new eval is untracked
+# while it is being written.
+if [ "${GITHUB_ACTIONS:-}" = true ]; then
+  dirty="$(git -C "$REPO" --no-optional-locks status --porcelain -uall -- evals)" \
+    || { echo "run: git status failed in $REPO" >&2; exit 2; }
+  if [ -n "$dirty" ]; then
+    echo "evals: aborted: evals/ differs from the commit before any check ran (git status)"
+    printf '%s\n' "$dirty" | head -n 20 | sed 's/^/    /'
+    exit 1
+  fi
+fi
 
 for d in "$EVALS"/*/; do
   d="${d%/}" id="${d##*/}"

@@ -58,7 +58,8 @@ Independent gates keep deploy, spend, and delete changes, and weakened evals, in
   hand. This is the backstop for sensitive files, whatever the issue's labels.
 - **Evals guard (`auto`).** Where the base branch has `.github/workflows/evals-guard.yml` (a repo
   genesis created), `auto` merges only when `scripts/octo-evals-guard.sh` finds both guard checks
-  passed on the reviewed commit against the base branch's tip; otherwise it holds the PR with
+  passed on the reviewed commit (against the base branch's tip, when the PR changes `evals/` or
+  `.gitattributes`); otherwise it holds the PR with
   `evals guard did not pass` or `evals guard stale`.
 
 ### Run ledger

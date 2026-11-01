@@ -59,9 +59,10 @@
 #   - README.md quotes the sentence: it holds each of the sentence's lines.
 #   - the scenario evals (skills/genesis/references/evals.md): evals/run.sh and evals/guard.sh
 #     are their templates byte for byte (skills/genesis/templates/); .github/workflows/evals.yml
-#     and evals-guard.yml hold their template's lines in order (the stack's setup steps may go
-#     between), evals.yml triggers only on push and workflow_dispatch, and evals-guard.yml only
-#     on pull_request; and each PRD scenario has evals/<id>/scenario.md whose front matter has
+#     and evals-guard.yml are their template line for line, comments and blank lines aside, with
+#     the stack's setup steps only where the template marks them (in evals-guard.yml, inside the
+#     must-fail job), evals.yml triggers only on push and workflow_dispatch, and evals-guard.yml
+#     only on pull_request; and each PRD scenario has evals/<id>/scenario.md whose front matter has
 #     the lines `id: <id>`, `judge: <judge>`, and `requirement: R<n>` as the PRD says, then text,
 #     plus, for `judge: script`, an evals/<id>/check.sh that parses (`bash -n`). No check runs.
 #
@@ -539,21 +540,48 @@ triggers() {
         gsub("[\"" sq "]", "", k); sub(/[: \t#\r].*/, "", k); print k } }' "$1"
 }
 
-# check_eval_workflow <name> <trigger...> : .github/workflows/<name> holds its template's lines
-# (all but comments and blank lines) in order, so the stack's setup steps may go between them,
-# and triggers on exactly the given events.
+# check_eval_workflow <name> <trigger...> : .github/workflows/<name> is its template line for line,
+# comments and blank lines aside, except where the template has the line `# genesis: the stack's
+# setup …`: the stack's setup steps go there, and only there, as lines indented six spaces or more
+# (steps, not a job, a job key such as permissions:, or a top-level key). Setup runs the PR's code,
+# so in evals-guard.yml only the must-fail job may have it. It triggers on exactly the given events.
 check_eval_workflow() {
-  local name="$1" f="$ABS/.github/workflows/$1" t w missing; shift
+  local name="$1" f="$ABS/.github/workflows/$1" t w kind want have src; shift
+  src="(skills/genesis/templates/.github/workflows/$name)"
   if [ ! -f "$f" ]; then
     fail ".github/workflows/$name is missing: write it from skills/genesis/templates/"
     return 0
   fi
-  missing="$(awk 'function norm(s) { sub(/[ \t\r]+$/, "", s); return s }
-    NR == FNR { l = norm($0); if (l !~ /^[ \t]*(#|$)/) want[++n] = l; next }
-    p < n && norm($0) == want[p + 1] { p++ }
-    END { if (p < n) print want[p + 1] }' "$TEMPLATES/.github/workflows/$name" "$f")"
-  [ -z "$missing" ] || fail ".github/workflows/$name: needs its template's line '$missing'" \
-    "(skills/genesis/templates/.github/workflows/$name), in order"
+  # Prints the first difference as `<kind> TAB <template line> TAB <file line>`, or nothing.
+  IFS=$'\t' read -r kind want have <<EOF || true
+$(awk -v ph="# genesis: the stack's setup and install steps from ci.yml" '
+    function norm(s) { sub(/[ \t\r]+$/, "", s); return s }
+    function skip(l) { return l ~ /^[ \t]*(#|$)/ }
+    function diff(k, w, h) { gsub(/\t/, " ", w); gsub(/\t/, " ", h); print k "\t" w "\t" h; exit }
+    NR == FNR { l = norm($0); t = l; sub(/^[ \t]+/, "", t)
+      if (t == ph) { gap = n + 0; has = 1 }
+      else if (!skip(l)) want[++n] = l
+      next }
+    { l = norm($0); if (!skip(l)) have[++m] = l }
+    END {
+      if (!has) gap = n
+      tail = n - gap
+      for (i = 1; i <= gap; i++)
+        if (have[i] != want[i]) diff(i > m ? "missing" : "differs", want[i], have[i])
+      # From the end, so the line named is where the file and the template part.
+      for (i = tail; i >= 1; i--) { j = m - tail + i
+        if (j <= gap) diff("missing", want[gap + i], "")
+        if (have[j] != want[gap + i]) diff("differs", want[gap + i], have[j]) }
+      for (i = gap + 1; i <= m - tail; i++)
+        if (!has || have[i] !~ /^      /) diff("extra", want[gap], have[i])
+    }' "$TEMPLATES/.github/workflows/$name" "$f")
+EOF
+  case "$kind" in
+    missing) fail ".github/workflows/$name: needs its template's line '$want' $src" ;;
+    differs) fail ".github/workflows/$name: has '$have' where its template has '$want' $src" ;;
+    extra) fail ".github/workflows/$name: has '$have' after '$want': only the setup steps," \
+      "indented as steps, may go where its template has the '# genesis:' line $src" ;;
+  esac
   t="$(triggers "$f" | sort -u)"
   for w in "$@"; do
     printf '%s\n' "$t" | grep -Fxq "$w" || fail ".github/workflows/$name: on: needs the $w trigger"

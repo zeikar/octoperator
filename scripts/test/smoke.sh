@@ -12,10 +12,11 @@
 #   - octo-exclude.sh      : run for real against a throwaway local `git init` repo
 #   - octo-worktree.sh     : add / detach / list / remove run for real in a throwaway local repo
 #   - octo-merge-state.sh  : the UNKNOWN re-query loop and gh-error exit, against a stub `gh`
-#   - octo-evals-guard.sh  : no guard workflow, both guard checks passed, one missing (a
+#   - octo-evals-guard.sh  : no guard workflow, both guard jobs passed, one missing (a
 #                            `[skip ci]` head), pending, skipped, or failed, a stale or unrecorded
-#                            base, another app's check of the same name, and a gh error, against
-#                            a stub `gh` that runs the helper's --jq filters with jq
+#                            base (held only when the PR changes evals/ or .gitattributes, or its
+#                            file list is cut short), another workflow's or PR's run, and a gh
+#                            error, against a stub `gh` that runs the helper's --jq filters with jq
 #   - octo-approval-match.sh : pattern normalization, malformed patterns, matching (renames
 #                            included, genesis's entry holding the evals guard but not evals/),
 #                            and the incomplete-file-list hold, against a stub `gh`
@@ -215,31 +216,37 @@ merge_state 0 2
 expect 0 "gh exit 2: exits 1, not the bad-arguments 2" test "$ms_rc/$ms_out" = "1/"
 
 echo "• octo-evals-guard.sh (offline, stub gh)"
-# A stub `gh` first on PATH. `pr view` prints main; `api` answers per endpoint from JSON files
-# in $EG_DIR, through the helper's own --jq filter (jq -r): git/ref → the tip, contents → a file
-# or, with $EG_NOGUARD, gh's 404, check-runs → check-runs.json, annotations → ann-<id>.json.
-# $EG_RC makes the contents call fail with that exit code.
+# A stub `gh` first on PATH answers from JSON files in $EG_DIR, through the helper's own --jq
+# filter (jq -r): `pr view` → pr.json, git/ref → the tip, contents → a file or, with $EG_NOGUARD,
+# gh's 404, actions/runs → runs.json, a run's jobs → jobs-<run>.json, the PR's files →
+# files.json, annotations → ann-<id>.json. $EG_RC makes the contents call fail with that code.
 egstub="$wtmp/eg-bin"
 EG_DIR="$wtmp/eg"
 mkdir -p "$egstub" "$EG_DIR"
 cat >"$egstub/gh" <<'STUB'
 #!/usr/bin/env bash
-[ "$1" = pr ] && { echo main; exit 0; }
-shift; ep="" jq=""
+cmd="$1"; shift; ep="" jq=""
 while [ $# -gt 0 ]; do
-  case "$1" in --paginate) shift ;; --jq) jq="$2"; shift 2 ;; *) ep="$1"; shift ;; esac
+  case "$1" in
+    --paginate) shift ;; --jq) jq="$2"; shift 2 ;; --repo | --json) shift 2 ;;
+    *) ep="${ep:-$1}"; shift ;;
+  esac
 done
-case "$ep" in
-  */git/ref/heads/main) f="$EG_DIR/ref.json" ;;
-  */contents/*)
-    [ "${EG_RC:-0}" -eq 0 ] || { echo "gh: Server Error (HTTP 500)" >&2; exit "$EG_RC"; }
-    [ -z "${EG_NOGUARD:-}" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
-    echo file; exit 0 ;;
-  */commits/*/check-runs*) f="$EG_DIR/check-runs.json" ;;
-  */check-runs/*/annotations*) f="${ep%/annotations*}"; f="$EG_DIR/ann-${f##*/}.json"
-    [ -f "$f" ] || { echo '[]' | jq -r "$jq"; exit; } ;;
-  *) echo "stub: unexpected endpoint $ep" >&2; exit 9 ;;
-esac
+if [ "$cmd" = pr ]; then f="$EG_DIR/pr.json"; else
+  case "$ep" in
+    */git/ref/heads/main) f="$EG_DIR/ref.json" ;;
+    */contents/*)
+      [ "${EG_RC:-0}" -eq 0 ] || { echo "gh: Server Error (HTTP 500)" >&2; exit "$EG_RC"; }
+      [ -z "${EG_NOGUARD:-}" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+      echo file; exit 0 ;;
+    */actions/runs/*/jobs*) f="${ep%/jobs*}"; f="$EG_DIR/jobs-${f##*/}.json" ;;
+    */actions/runs\?*) f="$EG_DIR/runs.json" ;;
+    */pulls/1/files*) f="$EG_DIR/files.json" ;;
+    */check-runs/*/annotations*) f="${ep%/annotations*}"; f="$EG_DIR/ann-${f##*/}.json"
+      [ -f "$f" ] || { echo '[]' | jq -r "$jq"; exit; } ;;
+    *) echo "stub: unexpected endpoint $ep" >&2; exit 9 ;;
+  esac
+fi
 jq -r "$jq" "$f"
 STUB
 chmod +x "$egstub/gh"
@@ -248,18 +255,42 @@ TIP=1111111111111111111111111111111111111111
 OLD=2222222222222222222222222222222222222222
 HEAD_SHA_EG=3333333333333333333333333333333333333333
 printf '{"object":{"sha":"%s"}}\n' "$TIP" >"$EG_DIR/ref.json"
-# eg_runs <id name status conclusion app>... : write check-runs.json; "null" is a JSON null.
+EG_WF=.github/workflows/evals-guard.yml
+# eg_runs <id path pr>... : write runs.json, the workflow runs on the head commit.
 eg_runs() {
   local sep="" body=""
-  while [ $# -ge 5 ]; do
-    c="\"$4\""; [ "$4" = null ] && c=null
-    body="$body$sep{\"id\":$1,\"name\":\"$2\",\"status\":\"$3\",\"conclusion\":$c,"
-    body="$body\"app\":{\"slug\":\"$5\"}}"
-    sep=","; shift 5
+  while [ $# -ge 3 ]; do
+    body="$body$sep{\"id\":$1,\"path\":\"$2\",\"pull_requests\":[{\"number\":$3}]}"
+    sep=","; shift 3
   done
-  printf '{"total_count":0,"check_runs":[%s]}\n' "$body" >"$EG_DIR/check-runs.json"
+  printf '{"total_count":0,"workflow_runs":[%s]}\n' "$body" >"$EG_DIR/runs.json"
 }
-# eg_base <id> <sha> : the run's evals-guard-base notice, beside an unrelated annotation.
+# eg_jobs <run> <check-run id name status conclusion>... : write that run's jobs; "null" is null.
+eg_jobs() {
+  local run="$1" sep="" body="" c; shift
+  while [ $# -ge 4 ]; do
+    c="\"$4\""; [ "$4" = null ] && c=null
+    body="$body$sep{\"name\":\"$2\",\"status\":\"$3\",\"conclusion\":$c,"
+    body="$body\"check_run_url\":\"https://api.github.com/repos/o/n/check-runs/$1\"}"
+    sep=","; shift 4
+  done
+  printf '{"total_count":0,"jobs":[%s]}\n' "$body" >"$EG_DIR/jobs-$run.json"
+}
+# eg_files <path[:old path]>... : write the PR's changed files, and pr.json with their count
+# (or $EG_COUNT).
+eg_files() {
+  local sep="" body="" n=0 p
+  for p in "$@"; do
+    case "$p" in
+      *:*) body="$body$sep{\"filename\":\"${p%%:*}\",\"previous_filename\":\"${p#*:}\"}" ;;
+      *) body="$body$sep{\"filename\":\"$p\"}" ;;
+    esac
+    sep=","; n=$((n + 1))
+  done
+  printf '[%s]\n' "$body" >"$EG_DIR/files.json"
+  printf '{"baseRefName":"main","changedFiles":%s}\n' "${EG_COUNT:-$n}" >"$EG_DIR/pr.json"
+}
+# eg_base <id> <sha> : the check run's evals-guard-base notice, beside an unrelated annotation.
 eg_base() {
   printf '[{"title":"other","message":"x"},{"title":"evals-guard-base","message":"%s"}]\n' "$2" \
     >"$EG_DIR/ann-$1.json"
@@ -271,37 +302,72 @@ eg() {
   eg_rc=$?
 }
 EG_A="evals-guard append-only" EG_V="evals-guard verdict"
+eg_files evals/recall/scenario.md evals/recall/check.sh
 EG_NOGUARD=1 eg
 expect 0 "no evals-guard.yml on the base branch: prints none, exits 0" \
   test "$eg_rc/$eg_out" = "0/none"
-# An older failed append-only run, and another app's check of the same name, are not the guard's.
-eg_runs 5 "$EG_A" completed failure github-actions 10 "$EG_A" completed success github-actions \
-  11 "$EG_V" completed success github-actions 12 "$EG_V" completed failure other-app
+# Run 40 is older; 60 is another workflow with jobs of the same names; 70 is another PR's.
+eg_runs 40 "$EG_WF" 1 50 "$EG_WF" 1 60 .github/workflows/ci.yml 1 70 "$EG_WF" 2
+eg_jobs 40 4 "$EG_A" completed failure 5 "$EG_V" completed failure
+eg_jobs 50 10 "$EG_A" completed success 11 "$EG_V" completed success
+eg_jobs 60 12 "$EG_A" completed failure 13 "$EG_V" completed failure
+eg_jobs 70 14 "$EG_A" completed failure 15 "$EG_V" completed failure
 eg_base 10 "$TIP"; eg_base 11 "$TIP"
 eg
-expect 0 "both guard checks passed against the tip: prints pass, exits 0" \
+expect 0 "both guard jobs of this PR's newest guard run passed against the tip: prints pass" \
   test "$eg_rc/$eg_out" = "0/pass"
 eg_runs
 eg
-expect 0 "no guard check runs (a [skip ci] head): holds" \
+expect 0 "no guard run (a [skip ci] head): holds" \
   test "$eg_rc/$eg_out" = "1/evals guard did not pass: $EG_A missing"
-eg_runs 10 "$EG_A" completed success github-actions 12 "$EG_V" completed failure other-app
+eg_runs 60 .github/workflows/ci.yml 1
+eg_jobs 60 12 "$EG_A" completed success 13 "$EG_V" completed success
+eg_base 12 "$TIP"; eg_base 13 "$TIP"
 eg
-expect 0 "only another app's verdict check: holds, verdict missing" \
+expect 0 "only another workflow's jobs of the same names, passing: holds, missing" \
+  test "$eg_rc/$eg_out" = "1/evals guard did not pass: $EG_A missing"
+eg_runs 70 "$EG_WF" 2
+eg_jobs 70 14 "$EG_A" completed success 15 "$EG_V" completed success
+eg
+expect 0 "only another PR's guard run on the same commit: holds, missing" \
+  test "$eg_rc/$eg_out" = "1/evals guard did not pass: $EG_A missing"
+eg_runs 50 "$EG_WF" 1
+eg_jobs 50 10 "$EG_A" completed success
+eg
+expect 0 "the guard run has no verdict job: holds, verdict missing" \
   test "$eg_rc/$eg_out" = "1/evals guard did not pass: $EG_V missing"
-eg_runs 10 "$EG_A" completed success github-actions 11 "$EG_V" completed skipped github-actions
+eg_jobs 50 10 "$EG_A" completed success 11 "$EG_V" completed skipped
 eg
 expect 0 "verdict skipped (must-fail failed): holds" \
   test "$eg_rc/$eg_out" = "1/evals guard did not pass: $EG_V skipped"
-eg_runs 10 "$EG_A" in_progress null github-actions 11 "$EG_V" queued null github-actions
+eg_jobs 50 10 "$EG_A" in_progress null 11 "$EG_V" queued null
 eg
 expect 0 "append-only still running: holds" \
   test "$eg_rc/$eg_out" = "1/evals guard did not pass: $EG_A in_progress"
-eg_runs 10 "$EG_A" completed success github-actions 11 "$EG_V" completed success github-actions
+eg_jobs 50 10 "$EG_A" completed success 11 "$EG_V" completed success
 eg_base 10 "$OLD"
 eg
-expect 0 "a guard run against an older base: holds as stale" \
+expect 0 "a PR adding evals, judged against an older base: holds as stale" \
   test "$eg_rc/$eg_out" = "1/evals guard stale: $EG_A ran against $OLD, main is at $TIP"
+# The guard's diff is empty on any base for a PR that changes neither evals/ nor .gitattributes:
+# PRs merged one after another must not each wait for a human.
+eg_files src/app.js docs/evals.md
+eg
+expect 0 "a PR that changes no eval, judged against an older base: prints pass" \
+  test "$eg_rc/$eg_out" = "0/pass"
+eg_files src/old.sh:evals/old/check.sh
+eg
+expect 0 "a PR renaming a file out of evals/, judged against an older base: stale" \
+  test "$eg_rc/$eg_out" = "1/evals guard stale: $EG_A ran against $OLD, main is at $TIP"
+eg_files .gitattributes
+eg
+expect 0 "a PR changing the root .gitattributes, judged against an older base: stale" \
+  test "$eg_rc/$eg_out" = "1/evals guard stale: $EG_A ran against $OLD, main is at $TIP"
+EG_COUNT=3000 eg_files src/app.js
+eg
+expect 0 "a file list cut short (3000 files): the base is checked, stale" \
+  test "$eg_rc/$eg_out" = "1/evals guard stale: $EG_A ran against $OLD, main is at $TIP"
+eg_files evals/recall/check.sh
 rm -f "$EG_DIR/ann-10.json"
 eg
 expect 0 "a guard run with no recorded base: holds as stale" test "$eg_rc/$eg_out" = \
@@ -941,16 +1007,19 @@ skeleton_case evpr
 awk '{ print } /^  workflow_dispatch:$/ { print "  pull_request:" }' \
   "$sk/.github/workflows/evals.yml" >"$sk/x" && mv "$sk/x" "$sk/.github/workflows/evals.yml"
 genesis_check --skeleton "$sk"
-expect 0 "--skeleton, evals.yml on pull_request too: exits 1, one FAIL line" test "$gc_rc" -eq 1 \
-  -a "$gc_out" = "FAIL: .github/workflows/evals.yml: on: must not have the pull_request trigger \
+expect 0 "--skeleton, evals.yml on pull_request too: exits 1, the line and the trigger" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/evals.yml: has '  pull_request:' \
+where its template has 'permissions:' (skills/genesis/templates/.github/workflows/evals.yml)"$'\n'"\
+FAIL: .github/workflows/evals.yml: on: must not have the pull_request trigger \
 (only: push workflow_dispatch)"
 skeleton_case evbranch
 sed 's/branches: \[main\]/branches: [main, dev]/' "$sk/.github/workflows/evals.yml" >"$sk/x" \
   && mv "$sk/x" "$sk/.github/workflows/evals.yml"
 genesis_check --skeleton "$sk"
 expect 0 "--skeleton, evals.yml pushes from another branch too: exits 1, names the line" \
-  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/evals.yml: needs its template's \
-line '    branches: [main]' (skills/genesis/templates/.github/workflows/evals.yml), in order"
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/evals.yml: has '    branches: \
+[main, dev]' where its template has '    branches: [main]' \
+(skills/genesis/templates/.github/workflows/evals.yml)"
 skeleton_case evguard
 sed 's/^  pull_request:$/  pull_request_target:/' "$sk/.github/workflows/evals-guard.yml" >"$sk/x" \
   && mv "$sk/x" "$sk/.github/workflows/evals-guard.yml"
@@ -960,14 +1029,45 @@ expect 0 "--skeleton, the guard on pull_request_target: three FAIL lines" \
     -a -n "$(printf '%s\n' "$gc_out" | grep -Fx "FAIL: .github/workflows/evals-guard.yml: on: \
 must not have the pull_request_target trigger (only: pull_request)")"
 skeleton_case evguardcopy
-sed 's/^\( *\)bash -c "\$(git show "\$BASE_SHA:evals\/guard.sh")" guard --diff-only /\1bash \
-evals\/guard.sh --diff-only /' "$sk/.github/workflows/evals-guard.yml" >"$sk/x" \
+sed 's/^\( *\)bash -c "\$g" guard --diff-only /\1bash evals\/guard.sh --diff-only /' \
+  "$sk/.github/workflows/evals-guard.yml" >"$sk/x" \
   && mv "$sk/x" "$sk/.github/workflows/evals-guard.yml"
 genesis_check --skeleton "$sk"
 expect 0 "--skeleton, the append-only job runs the PR's copy of the guard: names the line" \
-  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/evals-guard.yml: needs its \
-template's line '          bash -c \"\$(git show \"\$BASE_SHA:evals/guard.sh\")\" guard --diff-only \
-\"\$BASE_SHA\" \"\$HEAD_SHA\"' (skills/genesis/templates/.github/workflows/evals-guard.yml), in order"
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/evals-guard.yml: has '          \
+bash evals/guard.sh --diff-only \"\$BASE_SHA\" \"\$HEAD_SHA\"' where its template has '          \
+bash -c \"\$g\" guard --diff-only \"\$BASE_SHA\" \"\$HEAD_SHA\"' \
+(skills/genesis/templates/.github/workflows/evals-guard.yml)"
+# Setup steps run the PR's code: in the append-only job, before its guard step, they would run it
+# where the hard rule is judged (the PR #98 review's bad-evals-guard.yml).
+skeleton_case evguardsetup
+awk '/^  append-only:$/ { job = 1 } job && /^      - name: Evals only grow/ {
+    print "      - uses: actions/setup-node@v4"; print "      - run: npm install"; job = 0 }
+  { print }' "$sk/.github/workflows/evals-guard.yml" >"$sk/x" \
+  && mv "$sk/x" "$sk/.github/workflows/evals-guard.yml"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, setup steps in the append-only job: exits 1, names the line" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/evals-guard.yml: has '      - uses: \
+actions/setup-node@v4' where its template has '      - name: Evals only grow (the base branch's \
+guard)' (skills/genesis/templates/.github/workflows/evals-guard.yml)"
+skeleton_case evguardverdict
+awk '/^  verdict:$/ { job = 1 } { print } job && /^    runs-on:/ {
+    print "    permissions: write-all"; job = 0 }' "$sk/.github/workflows/evals-guard.yml" >"$sk/x" \
+  && mv "$sk/x" "$sk/.github/workflows/evals-guard.yml"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, a job-level key in the verdict job: exits 1, names the line" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/evals-guard.yml: has '    \
+permissions: write-all' where its template has '    runs-on: ubuntu-latest' \
+(skills/genesis/templates/.github/workflows/evals-guard.yml)"
+# Where the template marks the setup, only step lines go: not a job key such as env:.
+skeleton_case evguardenv
+awk '/# genesis: the stack.s setup/ { print "    env:"; print "      X: y"; next } { print }' \
+  "$TEMPLATES/.github/workflows/evals-guard.yml" >"$sk/.github/workflows/evals-guard.yml"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, a job key where the setup goes: exits 1, names the line" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/evals-guard.yml: has '    env:' \
+after '          fetch-depth: 0': only the setup steps, indented as steps, may go where its \
+template has the '# genesis:' line (skills/genesis/templates/.github/workflows/evals-guard.yml)"
 skeleton_case evscen
 rm -r "$sk/evals/persona-tone"
 rm "$sk/evals/recall-turn-3/check.sh"

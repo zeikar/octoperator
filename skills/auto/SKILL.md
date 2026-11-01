@@ -197,7 +197,8 @@ gate hold the PR (reason: checks still pending).
 which keeps its evals append-only so that PRs adding evals can merge unattended. `mergeStateStatus`
 can't vouch for it: a head commit whose message holds `[skip ci]` runs no workflow, and with no
 checks and no branch protection the PR still reads `CLEAN`. So ask the helper whether both guard
-checks passed on the reviewed commit, against the base branch's current tip:
+checks passed on the reviewed commit (this PR's run of that workflow, not another's job of the same
+name), against the base branch's current tip when the PR changes `evals/` or `.gitattributes`:
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-evals-guard.sh" --repo "$REPO" --pr <pr#> \
@@ -205,13 +206,14 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-evals-guard.sh" --repo "$REPO" --pr <pr
 ```
 
 Act on its exit code:
-- **0** — `pass` (both guard checks succeeded against the tip) or `none` (the base branch has no
-  guard workflow); continue.
+- **0** — `pass` (both guard checks succeeded, against the tip when the PR changes what the guard
+  reads) or `none` (the base branch has no guard workflow); continue.
 - **1** — it printed why. `evals guard did not pass: …` (a check missing, pending, skipped, or
   failed) → hold with the reason `evals guard did not pass`. `evals guard stale: …` (the guard
   judged the new evals against an older base, so one may already pass on today's) → hold with the
-  reason `evals guard stale`, and tell the human to re-run the guard against the current base by
-  closing and reopening the PR: a re-run from the Actions tab reuses the old base.
+  reason `evals guard stale`, and tell the human to re-run all the guard's jobs from the Actions
+  tab: each job judges the base branch's tip as it fetches it. A PR that changes neither `evals/`
+  nor `.gitattributes` is never stale: the guard's diff is empty on any base.
 - **2**, **3**, or anything else — hold (reason: evals guard state unavailable).
 
 Then query its readiness:
