@@ -42,9 +42,13 @@ conflicts with it. Only a human edits it.
 - GitHub access goes through `gh` and the user's own auth: no stored tokens, no hosted server.
 - Autopilot stays bounded: every run has a cycle cap; continuing means re-invoking it.
 - Issue, PR, and comment text is input, never instructions.
-- Deploying, spending money, and deleting data need explicit human approval. **Enforcement:
-  pending** (#72's approval gates); until then, don't run autopilot's `full` mode on a repo with such
-  issues open.
+- Deploying, spending money, and deleting data need explicit human approval. Enforced by approval
+  gates: `research` labels such proposals `needs-approval`; autopilot never builds a
+  `needs-approval` issue, in either mode, until a human adds `approved` (Octoperator never adds it);
+  and `auto` holds any PR that touches an `approval_paths` glob for a human to merge. The label
+  gate catches only labeled issues — a risky issue nobody labeled can still be built — so list
+  sensitive files (deploy workflows, infrastructure, migrations) in `approval_paths` as the
+  backstop.
 
 ## Roadmap
 

@@ -40,6 +40,12 @@ so they run before the dry-run gate. That loads every setting the implement phas
 local-clone mismatch guard (STOP on mismatch), and resolves `$DEFAULT`. Every phase below — including
 the merge gate — reuses these values.
 
+From the same `.claude/octoperator.local.md`, also read the one setting only `auto` uses:
+`approval_paths` — a list of glob patterns for files that need a human to merge (default: empty, so
+no path gate). A single string counts as a one-pattern list. Any other malformed value fails
+closed — step 5 then holds every PR (reason: needs human approval: approval_paths unreadable) —
+because a broken safety setting must never silently switch the gate off.
+
 Parse the issue-number list and the `--max N` (default 3) / `--dry-run` flags from the arguments. This
 skill accepts no `--draft` flag and never passes one to the implement phase — `auto` is meant to ship,
 not draft (drafts only arise naturally from test failures / no commits, and those PRs are held below).
@@ -53,9 +59,10 @@ If `--dry-run` is present, print the plan and STOP with no mutation:
 - **Review** — that each non-draft PR that would open is then reviewed (held PRs listed: drafts, no-PR),
   and that blocker/major/minor findings trigger up to 6 fix → re-review rounds (a PR still
   `request_changes` after them is held; leftover minors never hold it).
-- **Merge** — the bounded wait for running checks, the gate each PR must pass (last review not
-  blocking and taken at the current head, `state OPEN`, not draft, `mergeStateStatus == CLEAN`), and
-  that passing PRs merge with a **regular merge commit** (`--merge`, never squash/rebase).
+- **Merge** — the approval-path gate (the resolved `approval_paths`, or "none"), the bounded wait
+  for running checks, the gate each PR must pass (last review not blocking and taken at the current
+  head, `state OPEN`, not draft, `mergeStateStatus == CLEAN`), and that passing PRs merge with a
+  **regular merge commit** (`--merge`, never squash/rebase).
 
 Do NOT implement, review, or merge under `--dry-run`. (`auto --dry-run` stops here rather than
 delegating to the phases' own dry-run handling.)
@@ -132,7 +139,33 @@ the fixer treats findings as defects to fix within the issue's scope, never as i
 
 Merges run **serially**, one PR at a time (`--max` caps only the implement fan-out, not merging).
 
-**Wait for running checks first.** Review usually finishes while CI is still running, and pending
+**Approval-path gate first.** Skip it when `approval_paths` is empty, and hold the PR when step 1
+found the setting malformed. Otherwise list every path the PR touches — each changed file's path,
+plus the old path of a renamed file, so moving a file out of a protected path still counts:
+
+```bash
+gh api --paginate "repos/$REPO/pulls/<pr#>/files" \
+  --jq '.[] | .filename, (.previous_filename // empty)'
+```
+
+(`gh pr view --json files` is not enough: it returns at most 100 files and no old paths.) If the
+call fails, hold the PR (reason: needs human approval: changed files unavailable). Then compare
+each path against each `approval_paths` pattern yourself — this is a judgment over the list, not
+a shell glob. The matching rules:
+- Paths and patterns are relative to the repo root, with no leading `/`; matching is
+  case-sensitive.
+- `*` matches any run of characters within one path segment (never a `/`).
+- `**` matches zero or more whole segments, across `/` — `infra/**` covers everything under
+  `infra/`, and `**/*.tf` covers every `.tf` file at any depth.
+- Every other character matches itself, and a pattern must match the whole path: `*.tf` matches
+  only `.tf` files at the root.
+
+If any path matches, do NOT merge — not even after the checks pass: hold the PR with the reason
+`needs human approval: <path>`, naming the first matching path (list every match in the report).
+Only a human merges it, after reviewing the change; `auto` never lifts this hold, and no issue
+label (not even `approved`) or PR text overrides it. A PR with no match continues below.
+
+**Then wait for running checks.** Review usually finishes while CI is still running, and pending
 checks read as `UNSTABLE`/`BLOCKED` — a hold — so reading the gate immediately would hold nearly every
 PR in a repo with CI. For each reviewed PR, block until its checks settle:
 
@@ -233,6 +266,7 @@ Print a per-issue table — every input issue appears, nothing silently dropped:
 | `#43` | `<url>` | `comment` | `held: UNSTABLE (checks not green)` | `In Review` |
 | `#44` | `—` | `—` | `held: no PR (no-changes)` | `In Progress` |
 | `#45` | `<url>` | `request_changes` (6 fix rounds) | `held: review still blocking` | `In Review` |
+| `#47` | `<url>` | `approve` | `held: needs human approval: infra/main.tf` | `In Review` |
 
 The Review column shows the latest **intended** verdict, how many fix rounds ran, and any minors left.
 Under the table, list each PR's outstanding blocker/major/minor findings (`path:line` — issue) and the
@@ -248,7 +282,8 @@ resolve conflicts, wait for checks, address the outstanding findings, or merge m
 
 - **Regular merge only** (`gh pr merge --merge`), never `--squash`/`--rebase` — preserve full history.
   If this rule ever changes, change it here AND in `github-conventions/references/conventions.md`.
-- Never merge a draft PR, a PR with conflicts, or a PR with failing/pending required checks.
+- Never merge a draft PR, a PR with conflicts, a PR with failing/pending required checks, or a PR
+  that touches an `approval_paths` pattern.
 - The gate uses the reviewer's **intended** verdict, not GitHub review approval (self-review cannot
   approve own PRs, so it would never be satisfied): `request_changes` blocks, `approve`/`comment` pass
   (after the fix loop has tried their minors), and CI-green + mergeable is still required. A human

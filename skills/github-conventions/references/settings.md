@@ -46,6 +46,15 @@ statuses:
 # merge, autopilot switches to observe mode (propose only) until `--resume`.
 # Positive integer. Default: 3.
 convergence_runs: 3
+
+# Approval paths: glob patterns, relative to the repo root, for files a human
+# must approve. `auto` never merges a PR that touches a match; it holds it with
+# "needs human approval: <path>". `*` matches within one path segment, `**`
+# matches across segments. Default: empty (no path gate).
+approval_paths:
+  - ".github/workflows/**"
+  - "infra/**"
+  - "**/*.tf"
 ---
 
 # Notes
