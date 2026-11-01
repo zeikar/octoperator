@@ -232,6 +232,17 @@ gh label create approved --repo "$REPO" --color 0E8A16 \
   --description "Human-approved to build a needs-approval issue (never set by Octoperator)"
 ```
 
+`approved` is a common label name. If its create reports that the label already exists, read the
+existing description:
+
+```bash
+gh api "repos/$REPO/labels/approved" --jq .description
+```
+
+If it differs from the one above, the repo may already use `approved` for something else (or let
+a bot or issue template set it). Warn about it in the report: autopilot treats the label as
+approval to build a `needs-approval` issue.
+
 Map the proposal's **category** to the single best-fit type label: `feature` → `feature`; `refactor` /
 `debt` / `dx` / `tests` → `chore`; `docs` → `docs`; an outright defect → `bug` (default `feature`).
 Always attach a priority (default `p2`) — never use `enhancement` or omit the priority. Every created issue carries the **`proposed`** label so a
@@ -245,8 +256,8 @@ create nothing, labels included.
 ### 6. Report
 
 Print the ranked proposals and, when `--create` ran, the URLs of the issues filed (marking those
-labeled `needs-approval`) and the count skipped as duplicates, plus the **Unevidenced (not filed)**
-and **Evidence not found** lists. When nothing evidenced is worth proposing, say so plainly — do not invent low-value work to fill `--count`.
+labeled `needs-approval`), any `approved` label warning, and the count skipped as duplicates,
+plus the **Unevidenced (not filed)** and **Evidence not found** lists. When nothing evidenced is worth proposing, say so plainly — do not invent low-value work to fill `--count`.
 Filing nothing is a valid outcome: it is how `autopilot`'s no-progress stop learns the repo has
 nothing proven left to fix.
 

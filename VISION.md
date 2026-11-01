@@ -48,7 +48,8 @@ conflicts with it. Only a human edits it.
   and `auto` holds any PR that touches an `approval_paths` glob for a human to merge. The label
   gate catches only labeled issues — a risky issue nobody labeled can still be built — so list
   sensitive files (deploy workflows, infrastructure, migrations) in `approval_paths` as the
-  backstop.
+  backstop. The path gate covers only file changes `auto` would merge; it does not stop commands
+  run while building, and in a repo that deploys on merge, every merge is a deploy.
 
 ## Roadmap
 

@@ -50,7 +50,10 @@ convergence_runs: 3
 # Approval paths: glob patterns, relative to the repo root, for files a human
 # must approve. `auto` never merges a PR that touches a match; it holds it with
 # "needs human approval: <path>". `*` matches within one path segment, `**`
-# matches across segments. Default: empty (no path gate).
+# matches across segments. Patterns are anchored at the repo root: `*.tf` is
+# root-only; use `**/*.tf` for any depth. A leading `/` is dropped and a
+# trailing `/` means everything under it. `?`, `[...]`, `{...}`, and `!` are
+# unsupported; a pattern using them holds every PR. Default: empty (no gate).
 approval_paths:
   - ".github/workflows/**"
   - "infra/**"

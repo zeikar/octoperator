@@ -42,7 +42,11 @@ the merge gate — reuses these values.
 
 From the same `.claude/octoperator.local.md`, also read the one setting only `auto` uses:
 `approval_paths` — a list of glob patterns for files that need a human to merge (default: empty, so
-no path gate). A single string counts as a one-pattern list. Any other malformed value fails
+no path gate). A single string counts as a one-pattern list. Normalize each pattern before use:
+strip a leading `/` or `./`, and turn a trailing `/` into `/**` (`/infra/` → `infra/**`,
+`.github/workflows/` → `.github/workflows/**`). Patterns are anchored at the repo root, so `*.tf`
+stays root-only. A pattern containing any of `?` `[` `]` `{` `}` `!` is malformed — those are not
+supported, and reading them as literals would match nothing. Any malformed value fails
 closed — step 5 then holds every PR (reason: needs human approval: approval_paths unreadable) —
 because a broken safety setting must never silently switch the gate off.
 
@@ -59,10 +63,11 @@ If `--dry-run` is present, print the plan and STOP with no mutation:
 - **Review** — that each non-draft PR that would open is then reviewed (held PRs listed: drafts, no-PR),
   and that blocker/major/minor findings trigger up to 6 fix → re-review rounds (a PR still
   `request_changes` after them is held; leftover minors never hold it).
-- **Merge** — the approval-path gate (the resolved `approval_paths`, or "none"), the bounded wait
-  for running checks, the gate each PR must pass (last review not blocking and taken at the current
-  head, `state OPEN`, not draft, `mergeStateStatus == CLEAN`), and that passing PRs merge with a
-  **regular merge commit** (`--merge`, never squash/rebase).
+- **Merge** — the approval-path gate (the normalized `approval_paths`, "none", or "unreadable —
+  every PR held"), the bounded wait for running checks, the gate each PR must pass (last review
+  not blocking and taken at the current head, `state OPEN`, not draft, `mergeStateStatus ==
+  CLEAN`), and that passing PRs merge with a **regular merge commit** (`--merge`, never
+  squash/rebase).
 
 Do NOT implement, review, or merge under `--dry-run`. (`auto --dry-run` stops here rather than
 delegating to the phases' own dry-run handling.)
@@ -141,19 +146,27 @@ Merges run **serially**, one PR at a time (`--max` caps only the implement fan-o
 
 **Approval-path gate first.** Skip it when `approval_paths` is empty, and hold the PR when step 1
 found the setting malformed. Otherwise list every path the PR touches — each changed file's path,
-plus the old path of a renamed file, so moving a file out of a protected path still counts:
+plus the old path of a renamed file, so moving a file out of a protected path still counts. It
+prints one line per file; a renamed file's line carries its old path after a tab:
 
 ```bash
 gh api --paginate "repos/$REPO/pulls/<pr#>/files" \
-  --jq '.[] | .filename, (.previous_filename // empty)'
+  --jq '.[] | [.filename, (.previous_filename // empty)] | join("\t")'
 ```
 
-(`gh pr view --json files` is not enough: it returns at most 100 files and no old paths.) If the
-call fails, hold the PR (reason: needs human approval: changed files unavailable). Then compare
-each path against each `approval_paths` pattern yourself — this is a judgment over the list, not
-a shell glob. The matching rules:
-- Paths and patterns are relative to the repo root, with no leading `/`; matching is
-  case-sensitive.
+(`gh pr view --json files` is not enough: it returns at most 100 files and no old paths.) This
+endpoint stops at 3000 files even with `--paginate`, so also read the PR's true file count:
+
+```bash
+gh pr view <pr#> --repo "$REPO" --json changedFiles --jq .changedFiles
+```
+
+If either call fails, or the count is 3000 or more, or the count exceeds the number of lines the
+list returned, hold the PR (reason: needs human approval: changed files unavailable) — unchecked
+files must never merge. Then compare each path against each normalized `approval_paths` pattern
+yourself — this is a judgment over the list, not a shell glob. The matching rules:
+- Paths and patterns are relative to the repo root (step 1 already stripped any leading `/` or
+  `./` from patterns); matching is case-sensitive.
 - `*` matches any run of characters within one path segment (never a `/`).
 - `**` matches zero or more whole segments, across `/` — `infra/**` covers everything under
   `infra/`, and `**/*.tf` covers every `.tf` file at any depth.
