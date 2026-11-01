@@ -182,8 +182,9 @@ expect 0 "gh exit 2: exits 1, not the bad-arguments 2" test "$ms_rc/$ms_out" = "
 
 echo "• octo-approval-match.sh (offline, stub gh)"
 # A stub `gh` first on PATH logs each call to $STUB_LOG. `api` prints the file list in $STUB_FILES
-# (one line per file, a rename's old path after a tab); `pr view` prints $STUB_COUNT, or the
-# list's line count when that is unset. Both exit $STUB_GH_RC when that is non-zero.
+# as the helper's jq filter would (one line per file: its path, a tab, then a rename's old path);
+# it does not run the filter itself. `pr view` prints $STUB_COUNT, or the list's line count when
+# that is unset. Both exit $STUB_GH_RC when that is non-zero.
 astub="$wtmp/approval-bin"
 mkdir -p "$astub"
 cat >"$astub/gh" <<'STUB'
@@ -202,7 +203,8 @@ export STUB_LOG STUB_FILES
 # norm <pattern> : the helper's normalized form of one pattern.
 norm() { bounded 10 bash "$SCRIPTS_DIR/octo-approval-match.sh" --pattern "$1" --normalize; }
 for case in '/infra/=infra/**' 'infra/=infra/**' 'infra=**/infra' '*.tf=**/*.tf' \
-    '**/*.tf=**/*.tf' '.github/workflows/=.github/workflows/**' './a/b=a/b' '**/**/x=**/x'; do
+    '**/*.tf=**/*.tf' '.github/workflows/=.github/workflows/**' './a/b=a/b' '**/**/x=**/x' \
+    '/infra=infra' './infra=infra' '/*.tf=*.tf'; do
   expect 0 "normalizes ${case%%=*} to ${case#*=}" test "$(norm "${case%%=*}")" = "${case#*=}"
 done
 for bad in '' / 'a?' 'a[b]' '{a,b}' '!a' 'a\b' 'a**' '**b/c' 'a//b' '../x'; do
@@ -221,7 +223,7 @@ approval() {
   am_rc=$?
 }
 tab="$(printf '\t')"
-printf '%s\n' README.md main.tf main.tfvars modules/net/vpc.tf infra/main.tf infra-old/x \
+printf '%s\t\n' README.md main.tf main.tfvars modules/net/vpc.tf infra/main.tf infra-old/x \
   infrastructure/x deploy/infra/run.sh .github/workflows/ci.yml xgithub/workflows/ci.yml \
   >"$STUB_FILES"
 # matches <pattern> <expected paths, space-separated> : the helper exits 1 and prints exactly
@@ -239,6 +241,7 @@ matches '*.tf' 'main.tf modules/net/vpc.tf infra/main.tf'
 matches '**/*.tf' 'main.tf modules/net/vpc.tf infra/main.tf'
 matches '.github/workflows/' '.github/workflows/ci.yml'
 matches 'modules/**/vpc.tf' 'modules/net/vpc.tf'
+matches '/infra' 'infra/main.tf'
 approval 'docs/**' 'secrets/**' 'Infra'
 expect 0 "no match: exits 0, prints nothing" test "$am_rc" -eq 0 -a -z "$am_out"
 printf 'docs/ci.yml%s.github/workflows/ci.yml\n' "$tab" >"$STUB_FILES"
@@ -247,6 +250,17 @@ expect 0 "rename: the old path alone matches" \
   test "$am_rc" -eq 1 -a "$am_out" = ".github/workflows/ci.yml$tab.github/workflows/"
 STUB_COUNT=2 approval 'nothing'
 expect 0 "fewer files listed than changedFiles: exits 3" test "$am_rc" -eq 3
+# A tab or newline inside a path would split it into pieces the pattern misses. Real gh fails in
+# the jq filter; these cases cover the helper's own line checks behind it.
+printf '.github/workflows/x\t.yml\t\n' >"$STUB_FILES"
+approval '.github/workflows/*.yml'
+expect 0 "tab in a changed path: exits 3" test "$am_rc" -eq 3
+printf '.github/workflows/x\n.yml\t\n' >"$STUB_FILES"
+STUB_COUNT=1 approval '.github/workflows/*.yml'
+expect 0 "newline in a changed path: exits 3" test "$am_rc" -eq 3
+printf 'a\tb\nc\t\n' >"$STUB_FILES"
+STUB_COUNT=1 approval 'nothing'
+expect 0 "tab and newline in one path: exits 3" test "$am_rc" -eq 3
 STUB_COUNT=3000 approval 'nothing'
 expect 0 "3000 changed files (the API limit): exits 3" test "$am_rc" -eq 3
 STUB_GH_RC=2 approval 'nothing'
