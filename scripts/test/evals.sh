@@ -63,6 +63,9 @@ trap 'rm -rf "$tmp"' EXIT
 # A developer's own git config (identity, signing, hooks, a default branch) must not change the
 # fixtures.
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+# CI runs this suite under Actions, where GITHUB_ACTIONS=true would make run.sh refuse the
+# uncommitted fixtures. A test that wants the Actions behavior sets it on its own command.
+export GITHUB_ACTIONS=false
 
 # eval_dir <repo> <id> <judge> [check body] : write evals/<id>/ with scenario.md, and check.sh when
 # a body is given.
