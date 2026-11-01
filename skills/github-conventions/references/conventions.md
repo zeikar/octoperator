@@ -38,9 +38,26 @@ when an issue must signal state without a project (e.g. repos without a project 
 |-------|---------|
 | `ready` | Blessed for automated build. `autopilot --mode semi` builds **only** `ready` issues. A human (or `autopilot --mode full`) decides what becomes `ready`. |
 | `proposed` | Created by `research` as a candidate. In `semi` mode it awaits human triage — relabel it `ready` to build; `full` mode builds `proposed` issues directly. |
+| `octoperator-ledger` | Marks the run ledger (below). Autopilot never builds it, and `research` never counts it as user feedback. |
 
-These are optional and only relevant when using `research` / `autopilot`; the skills create either
-label if it is missing.
+These are optional and only relevant when using `research` / `autopilot`; the skills create any of
+these labels that are missing.
+
+### Run ledger
+
+`autopilot` keeps its state between runs in GitHub, on one open issue labeled `octoperator-ledger`
+(titled "Octoperator run ledger"; autopilot creates it on its first run). Each run appends one
+comment holding a fenced JSON entry: time, mode, cycles used, merged, held, proposals filed, metric,
+cost, and kind (`run`, `observe`, or `reset`). Autopilot reads the newest entries to detect
+convergence: after `convergence_runs` entries in a row without a merge (see `settings.md`), it
+switches to observe mode — `research` proposes, nothing is built — until a human runs
+`autopilot --resume`. Only comments from an `OWNER`, `MEMBER`, or `COLLABORATOR` count as entries,
+so a scheduled runner must post with a PAT or GitHub App that has one of those roles — a bot token
+without one (e.g. `github-actions[bot]`) gets its entries skipped, and autopilot never converges.
+`research` may cite an entry as `failure-log` evidence, but only for a proposal about the held
+issues it names or about why runs stopped merging. The ledger is not work, so it carries no type or
+priority label. Keep it open; the entry format is defined in
+`skills/autopilot/SKILL.md` → Run ledger and convergence.
 
 ## Branch naming
 
@@ -138,6 +155,7 @@ board item to the mapped `done` status afterward with
 | issue → PR             | PR body `Closes #<issue>`                    |
 | PR → review            | review posted to the PR on GitHub           |
 | issue/PR → board       | project item with mirrored Status field     |
+| autopilot run → ledger | one entry comment on the `octoperator-ledger` issue |
 
 When any link cannot be established automatically, state which link is missing so the user can repair
 it — never leave a silently broken chain.

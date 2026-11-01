@@ -71,10 +71,10 @@ Build an evidence base before proposing — read, do not write:
     gh run view <databaseId> --repo "$REPO" --log-failed
     ```
     Cite the run URL.
-  - **failure-log** — a PR `auto`/`autopilot` left held, or a ledger entry once #72's ledger issue
-    exists. `auto` reports hold reasons only in its terminal table, so on GitHub a held PR is an open
-    PR on an Octoperator branch (matching `branch_pattern`, default `{number}-{slug}`) that has been
-    idle for over an hour (`updatedAt`) and either is a draft or has a latest *Octoperator* review
+  - **failure-log** — a PR `auto`/`autopilot` left held, or an autopilot ledger entry. `auto`
+    reports hold reasons only in its terminal table, so on GitHub a held PR is an open PR on an
+    Octoperator branch (matching `branch_pattern`, default `{number}-{slug}`) that has been idle
+    for over an hour (`updatedAt`) and either is a draft or has a latest *Octoperator* review
     with verdict `request_changes`. An Octoperator review is one whose body carries a `Verdict:` or
     `Intended verdict:` line (a self-review states it in a COMMENT review); other reviews, such as
     a bot's, are skipped. The idle rule stands in for "no `auto` run is fixing it", which research
@@ -85,15 +85,31 @@ Build an evidence base before proposing — read, do not write:
     gh pr list --repo "$REPO" --state open --json number,url,isDraft,headRefName,updatedAt,reviews \
       --jq '.[] | select(now - (.updatedAt | fromdateiso8601) > 3600)'
     ```
-    Cite the PR or comment URL. A held PR is in-flight work, so it supports a root-cause or tooling
-    proposal (why such PRs get held) — never a re-proposal of the held PR's own issue (step 3 dedupes
-    that away).
+    The ledger is the open issue labeled `octoperator-ledger`; each autopilot run appends one entry
+    to it. Format, validity rules, and the read command (the newest 20 entry-shaped comments from
+    allowed authors) are in the Run ledger section of
+    `${CLAUDE_PLUGIN_ROOT}/skills/autopilot/SKILL.md`; find the issue with:
+    ```bash
+    gh issue list --repo "$REPO" --label octoperator-ledger --state open --json number,url
+    ```
+    A valid entry counts only when `held` is above 0 (its summary line names the held issues and
+    reasons) or it is part of a no-gain streak: one of `convergence_runs` (the setting in
+    `.claude/octoperator.local.md`, default `3`) consecutive entries since the last `reset` with
+    `merged` at 0.
+    Cite the PR or the entry's comment URL. Both are narrow evidence. A held PR is in-flight work,
+    so it supports a root-cause or tooling proposal (why such PRs get held) — never a re-proposal of
+    the held PR's own issue (step 3 dedupes that away). A ledger entry supports only a proposal
+    about why the issues it names were held, or, for a no-merge streak, about why runs stopped
+    merging (the loop or its tooling). Neither is ever evidence for an unrelated proposal: an entry
+    exists after every quiet run, so citing it elsewhere would let any lead pass as evidenced.
   - **user-feedback** — an issue or comment a person wrote, not one Octoperator generated. The author
     can't tell them apart (Octoperator posts as the same GitHub user), so exclude: issues labeled
     `proposed`; issues whose body has a `## Evidence` section (research's own, even after a human
     relabeled them `ready`); issues `plan-epic` filed (an epic with a `## Children` section, or a child
     whose body opens with `Part of #<epic>`); descriptions of PRs on Octoperator branches (matching
-    `branch_pattern`, default `{number}-{slug}`); and Octoperator reviews. Read a candidate with:
+    `branch_pattern`, default `{number}-{slug}`); Octoperator reviews; and the ledger issue (label
+    `octoperator-ledger`) with every comment on it — autopilot writes its entries, and a run's
+    record is failure-log evidence at most. Read a candidate with:
     ```bash
     gh issue view <n> --repo "$REPO" --json url,body,state,stateReason,comments
     ```
@@ -168,15 +184,15 @@ File the top `--count` **evidenced** proposals — never fill `--count` with une
 **Re-check the evidence first.** Right before filing a proposal, re-read every entry it cites, using
 the step 2 command for its type: re-run the eval's `gh run list --branch <default> --workflow "<name>"
 … --limit 1` query, `gh pr view <n> --repo "$REPO" --json state,isDraft,reviews` for a failure-log PR,
-`gh issue view` (or the comment's issue) for a user-feedback link, Read for a benchmark file. Confirm
-the cited run, PR, comment, or task line is really there and still says what the entry claims. If any
-entry can't be found or no longer holds — a newer run of the workflow on the default branch is no
-longer a failure, the run was re-run green, the PR merged or closed, a cited issue body's issue is
-closed as completed (whenever that happened), a cited comment is gone — drop that entry. A cited
-comment counts as long as it exists, whatever its issue's state: "still broken" on a closed issue
-is often the best feedback. A proposal left with no entry is not filed — report it under
-**Evidence not found**, and the next-ranked **evidenced** proposal takes its slot (never an
-unevidenced one). The re-check is read-only, so it runs under `--dry-run` too.
+`gh issue view` (or the comment's issue) for a user-feedback link or a ledger entry, Read for a
+benchmark file. Confirm the cited run, PR, comment, or task line is really there and still says
+what the entry claims. If any entry can't be found or no longer holds — a newer run of the
+workflow on the default branch is no longer a failure, the run was re-run green, the PR merged or
+closed, a cited issue body's issue is closed as completed (whenever that happened), a cited comment
+is gone — drop that entry. A cited comment counts as long as it exists, whatever its issue's
+state: "still broken" on a closed issue is often the best feedback. A proposal left with no entry
+is not filed — report it under **Evidence not found**, and the next-ranked **evidenced** proposal
+takes its slot (never an unevidenced one). The re-check is read-only, so it runs under `--dry-run` too.
 
 File them using Octoperator's own label taxonomy (see
 `github-conventions/references/conventions.md`): exactly one **type** label (`feature` / `bug` /

@@ -41,6 +41,11 @@ statuses:
   in_review: In Review
   blocked: Blocked
   done: Done
+
+# Autopilot convergence: after this many ledger entries in a row without a
+# merge, autopilot switches to observe mode (propose only) until `--resume`.
+# Positive integer. Default: 3.
+convergence_runs: 3
 ---
 
 # Notes
