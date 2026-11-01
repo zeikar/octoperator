@@ -79,9 +79,11 @@ Build an evidence base before proposing — read, do not write:
     `Intended verdict:` line (a self-review states it in a COMMENT review); other reviews, such as
     a bot's, are skipped. The idle rule stands in for "no `auto` run is fixing it", which research
     can't observe: a fix loop pushes and re-reviews within minutes. A loop stalled for over an hour
-    still looks held, and a fresh hold is picked up by the next run.
+    still looks held, and a fresh hold is picked up by the next run. Measure idleness inside `gh`'s
+    `--jq` (its `now` is the current time) — this skill can run only `gh`, so never `date`:
     ```bash
-    gh pr list --repo "$REPO" --state open --json number,url,isDraft,headRefName,updatedAt,reviews
+    gh pr list --repo "$REPO" --state open --json number,url,isDraft,headRefName,updatedAt,reviews \
+      --jq '.[] | select(now - (.updatedAt | fromdateiso8601) > 3600)'
     ```
     Cite the PR or comment URL. A held PR is in-flight work, so it supports a root-cause or tooling
     proposal (why such PRs get held) — never a re-proposal of the held PR's own issue (step 3 dedupes
@@ -95,7 +97,9 @@ Build an evidence base before proposing — read, do not write:
     ```bash
     gh issue view <n> --repo "$REPO" --json url,body,state,stateReason,comments
     ```
-    Cite the issue or comment URL.
+    Cite the issue or comment URL. An issue *body* stops counting once its issue is closed as
+    completed (`stateReason` `COMPLETED`), whenever that happened — the request was already met. A
+    cited *comment* counts as long as it exists, whatever its issue's state.
 
   Code-level gaps above are leads, not evidence: a TODO or a doc/code mismatch can point at a problem,
   but it is filed only if one of these four backs it — even a critical bug found only by reading code
@@ -167,8 +171,8 @@ the step 2 command for its type: re-run the eval's `gh run list --branch <defaul
 `gh issue view` (or the comment's issue) for a user-feedback link, Read for a benchmark file. Confirm
 the cited run, PR, comment, or task line is really there and still says what the entry claims. If any
 entry can't be found or no longer holds — a newer run of the workflow on the default branch is no
-longer a failure, the run was re-run green, the PR merged or closed, a cited issue was itself closed
-as completed after the entry was gathered, a cited comment is gone — drop that entry. A cited
+longer a failure, the run was re-run green, the PR merged or closed, a cited issue body's issue is
+closed as completed (whenever that happened), a cited comment is gone — drop that entry. A cited
 comment counts as long as it exists, whatever its issue's state: "still broken" on a closed issue
 is often the best feedback. A proposal left with no entry is not filed — report it under
 **Evidence not found**, and the next-ranked **evidenced** proposal takes its slot (never an
