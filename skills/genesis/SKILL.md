@@ -323,8 +323,10 @@ plan-epic's procedure reads them as written and files everything in `<repo>`.
     - **The lookup again, once the epic exists**: right after plan-epic's step 5, before any
       child, run the epic lookup again. Go on only when it prints `epic: <N>` for the epic just
       created. Anything else on exit 0 → stop with `epic misses the sentence`: a re-run would
-      file a second epic, so ask the human to quote the sentence in epic #N's body. Any other
-      exit → `epic lookup failed`.
+      file a second epic. Any other exit → `epic lookup failed`. Both stops leave epic #N with no
+      children, so say no child was filed and offer two ways out: close #N and re-run
+      `--approve`, which plans everything again; or make sure #N's body quotes the sentence and
+      add the children with `/octoperator:issue`.
 
     A failed plan-epic step → stop with `plan-epic failed`, with plan-epic's report of the step
     and what it had already created. Once the epic exists, the next `--approve` finds it and
