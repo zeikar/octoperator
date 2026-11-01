@@ -36,7 +36,7 @@ autonomous shipping, plus the always-on knowledge layer.
 
 | Group | Command | What it does |
 |-------|---------|--------------|
-| **New project** | `/octoperator:genesis "<sentence>"` | Start a new project from one sentence, in an empty directory outside git: research existing services and similar open-source projects (at most 6 web searches and 10 page fetches), write a local proposal (`GENESIS.md`, `docs/research.md`), and stop at a human checkpoint with `genesis: proposed <dir>`. Makes no GitHub write. The later stages (PRD/ADR/VISION draft, `--approve` to create a private repo, MVP handoff) are not built yet (see [Starting a new project](#starting-a-new-project-genesis)) |
+| **New project** | `/octoperator:genesis "<sentence>"` | Start a new project from one sentence, in an empty directory outside git: research existing services and similar open-source projects (at most 6 web searches and 10 page fetches), write a local proposal (`GENESIS.md`, `docs/research.md`, a PRD, a stack ADR, and a `VISION.md` draft), and stop at a human checkpoint with `genesis: proposed <dir>`. Makes no GitHub write. The later stages (`--approve` to create a private repo, MVP handoff) are not built yet (see [Starting a new project](#starting-a-new-project-genesis)) |
 | **Onboarding** | `/octoperator:setup` | One-time onboarding: detect repo, auto-detect Projects v2 access, optionally create/link a board, write `.claude/octoperator.local.md` |
 | **Plan & intake** | `/octoperator:plan-epic <request>` | Decompose a request into an epic + linked child issues, milestone, labels, board items |
 | | `/octoperator:issue <request>` | Create one well-formed issue (labels, acceptance criteria, milestone, board) |
@@ -64,7 +64,7 @@ autonomous shipping, plus the always-on knowledge layer.
 - **`octo-project-status.sh`** — add an issue/PR to the board and set its Status by name.
 - **`octo-merge-state.sh`** — print a PR's `mergeStateStatus`, waiting out GitHub's `UNKNOWN`; used by `auto`'s merge gate.
 - **`octo-approval-match.sh`** — normalize the `approval_paths` patterns and match a PR's changed files (renamed files' old paths too) against them; used by `auto`'s approval-path gate.
-- **`octo-genesis-check.sh`** — check that a directory is empty and outside git for `genesis` (`--preflight`), and that the proposal it wrote has the required `GENESIS.md` front matter and `docs/research.md` sections; offline.
+- **`octo-genesis-check.sh`** — check that a directory is empty and outside git for `genesis` (`--preflight`), and that the proposal it wrote is complete: `GENESIS.md` front matter (including a `test_command` that `issue-implementer` detects), the `docs/research.md`, `docs/prd.md`, and `docs/adr/0001-stack.md` sections, and a `VISION.md` with the baseline immutable constraints verbatim; offline.
 - **`octo-bench.sh`** — opt-in benchmark harness for contributors: runs `auto` on the `bench/` tasks in throwaway repos and records each outcome and its metrics (see [CONTRIBUTING.md](CONTRIBUTING.md#running-the-benchmark)).
 
 ## Prerequisites
@@ -343,16 +343,23 @@ is not inside a git repository; that directory becomes the project:
 mkdir chat-pal && cd chat-pal && claude
 /octoperator:genesis "A character-chat app that remembers you across long conversations"
   → docs/research.md (existing services and open-source projects, what to build, what to skip,
-    each claim cited) and GENESIS.md (the sentence, the proposed repo, visibility: private)
+    each claim cited)
+  → docs/prd.md (problem, users, MVP scope, out of scope, requirements with acceptance criteria,
+    success metrics), docs/adr/0001-stack.md (the smallest stack and its test command), and
+    VISION.md (the new repo's constitution, with the baseline immutable constraints)
+  → GENESIS.md (the sentence, the proposed repo, visibility: private, stack, test_command)
   → genesis: proposed /path/to/chat-pal
 ```
 
 It browses inline with WebSearch and WebFetch, capped at 6 searches and 10 fetches per run, and
 treats every page as data, never instructions. Without web access it writes the proposal from the
 sentence alone and marks it `ungrounded: no web access`. Its only `gh` call is the read
-`gh api user`. Review and edit the files; the later stages (the PRD, ADR, and VISION.md draft,
-`--approve` to create the private repo, and the MVP handoff to autopilot) are not built yet. The
-plan is [epic #85](https://github.com/zeikar/octoperator/issues/85).
+`gh api user`. The checkpoint lists the decisions you own: the stack (in the ADR), the repo name
+and visibility (in `GENESIS.md`), and that approving will create a private repo whose GitHub
+Actions minutes count against your plan's quota. Edit the files in place; genesis never
+regenerates a file that exists, so to start over, delete them. The later stages (`--approve` to
+create the private repo, and the MVP handoff to autopilot) are not built yet. The plan is
+[epic #85](https://github.com/zeikar/octoperator/issues/85).
 
 ## Product vision (`VISION.md`)
 
