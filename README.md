@@ -44,7 +44,7 @@ always-on knowledge layer.
 | | `/octoperator:autopilot [--mode semi\|full] [--cycles N] [--max M] [--dry-run]` | Bounded loop: discover work → `auto` (implement→review→merge) → when empty, `research` refills. `semi` builds only `ready` issues then proposes; `full` runs unattended to the cycle cap |
 | **Review & status** | `/octoperator:review <pr#>` | Run a structured review and post the verdict + findings to the PR |
 | | `/octoperator:sync` | Standup-style status report; auto-reconciles board drift |
-| **What's next** | `/octoperator:research [--create] [--count N] [--focus <feature\|refactor\|debt\|tests\|docs\|dx\|all>] [--dry-run]` | Analyze the repo and produce a ranked list of proposals balanced across features, refactoring, tech debt, tests, docs, and DX; with `--create`, file the top ones as `proposed` issues |
+| **What's next** | `/octoperator:research [--create] [--count N] [--focus <feature\|refactor\|debt\|tests\|docs\|dx\|all>] [--dry-run]` | Analyze the repo and produce a ranked list of proposals balanced across features, refactoring, tech debt, tests, docs, and DX; with `--create`, file the top ones as `proposed` issues — only proposals backed by verifiable evidence (a benchmark result, failing CI, a held PR, or user feedback) |
 | **Knowledge layer** | `github-conventions` *(auto-loaded)* | Source-of-truth conventions, `gh` cookbook, settings schema shared by all actions |
 
 ### Agents

@@ -136,8 +136,8 @@ Run the **`research`** procedure (`${CLAUDE_PLUGIN_ROOT}/skills/research/SKILL.m
 
 - **Cycle cap:** `--cycles` iterations completed.
 - **No-progress cycle:** discovery yields no not-yet-attempted actionable issues AND `research --create`
-  filed **zero new issues** (it generated no proposals, or every proposal deduped against an existing
-  issue) → STOP. Nothing remains that a retry would change.
+  filed **zero new issues** (it found no evidenced proposals, or every proposal deduped against an
+  existing issue) → STOP. Nothing remains that a retry would change.
 - **semi mode** always stops at its first refill (step 3c): once no `ready` issues remain it proposes
   and stops — it never builds `proposed` work. The `--cycles` cap still applies when `ready` issues span
   multiple cycles; whichever arrives first ends the run.
@@ -149,8 +149,9 @@ Run the **`research`** procedure (`${CLAUDE_PLUGIN_ROOT}/skills/research/SKILL.m
 
 Print a per-cycle summary and an overall result:
 - per cycle: issues attempted, `merged` vs `held: <reason>`, issues skipped because an open PR already
-  holds them (closes them or uses their branch; `#<issue> → PR #<pr>`), and any `research` proposals
-  filed (URLs);
+  holds them (closes them or uses their branch; `#<issue> → PR #<pr>`), any `research` proposals
+  filed (URLs), and research's **Unevidenced (not filed)** and **Evidence not found** lists — a
+  defect found only by reading code is never filed, so this is the only place it surfaces;
 - overall: total merged, total held (with reasons), proposed issues awaiting triage, cycles consumed
   vs the cap, and the **next action** (semi: "relabel proposed → ready, then re-run autopilot"; full:
   "re-run to continue, or inspect held PRs").
