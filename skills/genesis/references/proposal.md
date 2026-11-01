@@ -43,8 +43,8 @@ Front-matter rules:
 - `sentence` — the sentence exactly as the user typed it, as a `|-` block scalar so no character
   needs escaping. **Checked:** present and non-empty (a plain inline value also passes).
 - `repo` — `<login>/<name>`: `<login>` from `gh api user --jq .login`, `<name>` the directory's
-  basename. **Checked:** `OWNER/NAME` with letters, digits, and `-` in the owner, and letters,
-  digits, `.`, `-`, `_` in the name.
+  basename. **Checked:** `OWNER/NAME` with letters, digits, `-`, and `_` in the owner (`_` for
+  Enterprise Managed User logins), and letters, digits, `.`, `-`, `_` in the name.
 - `visibility` — always `private` when genesis writes it. Only the human changes it. **Checked:**
   `private` or `public`.
 
@@ -75,7 +75,7 @@ ungrounded: no web access
 
 ## Skip
 
-- <capability> — <reason to leave it out: covered well elsewhere, costly, off the sentence> (<URL>)
+- <capability> — <reason to leave it out: covered well elsewhere, costly, off the sentence>
 
 ## Sources
 
@@ -93,7 +93,8 @@ Rules:
 - **Build** and **Skip** are `- ` lists, at least one item each (**checked**). Each Skip item gives
   its reason. When nothing is worth skipping, say so as one item with its reason.
 - **Citations.** Every claim cites a URL, and every cited URL is in `## Sources`. **Checked:** each
-  Build and Skip item contains a URL.
+  Build item contains a URL. A Skip item needs only its reason; cite a URL when the reason rests
+  on a source (for example "covered well elsewhere"), never one added for show.
 - **Sources.** **Checked:** each item is `- <URL> … accessed YYYY-MM-DD`, at least one. The date is
   the day the page was read, the session's current date. Don't run `date`.
 - **Ungrounded.** Write the `ungrounded: no web access` line only when the run read no source at
@@ -101,4 +102,6 @@ Rules:
   fills Problem, Build, and Skip from the sentence alone, keeps the Prior art table to its header,
   leaves `## Sources` empty, and cites no URLs. **Checked:** the line comes before `## Problem`,
   and the file then has no Prior art row, no Sources item, and no `http://` or `https://` URL, in
-  place of the row, citation, and source minimums. Never invent a URL to look grounded.
+  place of the row, citation, and source minimums. A near miss such as
+  `**ungrounded: no web access**` fails (**checked**): write the line exactly. Never invent a URL
+  to look grounded.

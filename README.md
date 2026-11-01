@@ -64,7 +64,7 @@ autonomous shipping, plus the always-on knowledge layer.
 - **`octo-project-status.sh`** — add an issue/PR to the board and set its Status by name.
 - **`octo-merge-state.sh`** — print a PR's `mergeStateStatus`, waiting out GitHub's `UNKNOWN`; used by `auto`'s merge gate.
 - **`octo-approval-match.sh`** — normalize the `approval_paths` patterns and match a PR's changed files (renamed files' old paths too) against them; used by `auto`'s approval-path gate.
-- **`octo-genesis-check.sh`** — check that a directory is empty for `genesis` (`--preflight`), and that the proposal it wrote has the required `GENESIS.md` front matter and `docs/research.md` sections; offline.
+- **`octo-genesis-check.sh`** — check that a directory is empty and outside git for `genesis` (`--preflight`), and that the proposal it wrote has the required `GENESIS.md` front matter and `docs/research.md` sections; offline.
 - **`octo-bench.sh`** — opt-in benchmark harness for contributors: runs `auto` on the `bench/` tasks in throwaway repos and records each outcome and its metrics (see [CONTRIBUTING.md](CONTRIBUTING.md#running-the-benchmark)).
 
 ## Prerequisites

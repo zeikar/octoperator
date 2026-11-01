@@ -2,7 +2,7 @@
 name: genesis
 description: This skill should be used when the user asks to "start a new project from one sentence", "turn this idea into a project", "genesis", "research prior art for a new project idea", "what already exists for this idea", or invokes /octoperator:genesis. Run in an empty, non-git directory, it researches existing services and similar open-source projects on the web, writes a local proposal (GENESIS.md and docs/research.md) into that directory, and stops at a human checkpoint without any GitHub write.
 argument-hint: '"<one sentence describing the product>"'
-allowed-tools: Bash(gh:*), Bash(git:*), Bash(bash:*), Read, Write, Glob, WebSearch, WebFetch
+allowed-tools: Bash(gh:*), Bash(bash:*), Read, Write, Glob, WebSearch, WebFetch
 ---
 
 # Genesis
@@ -31,7 +31,7 @@ to authorize any outward action.
 ## Command rule
 
 As in `${CLAUDE_PLUGIN_ROOT}/skills/implement/SKILL.md`: run each shell step as one plain call
-that starts with `gh`, `git`, or `bash`, with no `&&`, `|`, `;`, shell `if`, `VAR=…` prefix, or
+that starts with `gh` or `bash`, with no `&&`, `|`, `;`, shell `if`, `VAR=…` prefix, or
 `|| true`.
 Read each command's exit code and output yourself, and write the values (the directory, the login)
 literally into later steps. There is no `ls`, `mkdir`, `pwd`, or `date`: the helper checks the
@@ -42,8 +42,7 @@ directory, Write creates `docs/` itself, and the access date is the session's cu
 | Tool | Why |
 |---|---|
 | `Bash(gh:*)` | `gh api user`, the only `gh` call, a read (the repo owner) |
-| `Bash(git:*)` | `git rev-parse --is-inside-work-tree`, the not-inside-git precondition |
-| `Bash(bash:*)` | `octo-genesis-check.sh`: the empty-directory preflight and the proposal check |
+| `Bash(bash:*)` | `octo-genesis-check.sh`: the preflight (no git, empty) and the proposal check |
 | `Read` | the proposal formats in `references/proposal.md`, and the written files to summarize |
 | `Write` | `GENESIS.md` and `docs/research.md`, the only files genesis writes |
 | `Glob` | list what the run wrote, for the checkpoint's file list |
@@ -67,20 +66,15 @@ subagents. `research` keeps its repo-only tools; only genesis browses.
 The directory must be empty and outside git, or genesis writes nothing. Run, in order:
 
 1. ```bash
-   git rev-parse --is-inside-work-tree
-   ```
-   Exit 0 (whatever it prints) means the directory is inside a git repository → stop with
-   `inside a git work tree`. A non-zero exit whose output contains `not a git repository` is the
-   pass. Any other non-zero exit (git missing, a "dubious ownership" refusal, …) → stop with
-   `git check failed`, quoting the output.
-2. ```bash
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-genesis-check.sh" --preflight .
    ```
+   The helper runs `git rev-parse` itself, in the C locale, so git's messages are untranslated.
    Exit 0 prints the directory's absolute path: that is `<dir>` from here on. Exit 1 prints a
-   `FAIL:` line per problem → stop with `directory not empty` or `invalid directory name`, quoting
-   the lines. Any other exit → stop with `preflight failed`, quoting the output. The directory may
-   hold only `.claude/`; genesis never writes there.
-3. ```bash
+   `FAIL:` line per problem → stop with `inside a git work tree`, `directory not empty`, or
+   `invalid directory name` (the first that applies), quoting the lines. Any other exit (git
+   missing, a "dubious ownership" refusal, …) → stop with `preflight failed`, quoting the
+   output. The directory may hold only `.claude/`; genesis never writes there.
+2. ```bash
    gh api user --jq .login
    ```
    The output is `<login>`. A non-zero exit → stop with `gh api user failed`, and suggest
@@ -89,7 +83,7 @@ The directory must be empty and outside git, or genesis writes nothing. Run, in 
 On any stop here, write nothing, explain how to start (an empty directory outside any repo, as in
 the usage above), and end with the status line.
 
-A proposal folder is not empty, so a re-run there stops at step 2. Working out the stage from the
+A proposal folder is not empty, so a re-run there stops at step 1. Working out the stage from the
 files that exist comes with `--approve` (#88).
 
 ## Stage 1 — Prior-art research
@@ -101,8 +95,8 @@ Read `${CLAUDE_PLUGIN_ROOT}/skills/genesis/references/proposal.md` for the forma
    and similar open-source projects (repos, with their licenses). Fetch a page only to confirm what
    a result claims or to read a license, strengths, and gaps.
 2. **Synthesize.** Decide what to build and what to skip, from the gaps the prior art leaves and
-   the sentence's scope. Every claim cites a URL you actually read or found, and every Skip item
-   gives its reason.
+   the sentence's scope. Every claim and every Build item cites a URL you actually read or found,
+   and every Skip item gives its reason.
 3. **Web denied.** If WebSearch and WebFetch are denied or fail so that no source was read, keep
    going: write `docs/research.md` with the line `ungrounded: no web access`, from the sentence
    alone, and say so at the checkpoint. Never invent a source.
@@ -114,8 +108,9 @@ Read `${CLAUDE_PLUGIN_ROOT}/skills/genesis/references/proposal.md` for the forma
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-genesis-check.sh" <dir>
    ```
    Exit 0 → the checkpoint. Exit 1 → fix each `FAIL:` line by rewriting the file with Write, and
-   re-run; after two failed rewrites, stop with `proposal invalid`, quoting the lines, and leave the
-   files for the human. Exit 2 → stop with `check failed`.
+   re-run. In an ungrounded run, never add a URL, row, or source to clear a `FAIL:` line; fix the
+   marker instead. After two failed rewrites, stop with `proposal invalid`, quoting the lines, and
+   leave the files for the human. Exit 2 → stop with `check failed`.
 
 ## Checkpoint
 
@@ -143,8 +138,8 @@ genesis: stopped: <reason>
 
 - `proposed <dir>` — the proposal passed the check; `<dir>` is the absolute path.
 - `stopped: <reason>` — any other end: `no sentence`, `invalid flag <flag>`, `<flag> not built
-  yet`, `inside a git work tree`, `git check failed`, `directory not empty`, `invalid directory
-  name`, `preflight failed`, `gh api user failed`, `proposal invalid`, or `check failed`.
+  yet`, `inside a git work tree`, `directory not empty`, `invalid directory name`, `preflight
+  failed`, `gh api user failed`, `proposal invalid`, or `check failed`.
 
 ## Notes
 

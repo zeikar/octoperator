@@ -13,20 +13,23 @@
 #     ## Sources. Prior art has a Name | Kind | URL | License | Strengths | Gaps table whose
 #     rows have a kind of service or OSS and an http(s) URL. Build and Skip have at least one
 #     `- ` item each. Each Sources item is `- <URL> … accessed YYYY-MM-DD`. Grounded, Prior
-#     art has at least one row, every Build and Skip item cites a URL, and Sources has at least
-#     one item. Ungrounded (the line `ungrounded: no web access` before ## Problem), Prior art
-#     has no rows, Sources no items, and the file no http(s) URL.
+#     art has at least one row, every Build item cites a URL (Skip items may), and Sources has
+#     at least one item. Ungrounded (the line `ungrounded: no web access` before ## Problem),
+#     Prior art has no rows, Sources no items, and the file no http(s) URL. A line that looks
+#     like a misspelled marker is reported.
 #
-# --preflight checks DIR before genesis writes anything: it holds nothing but a `.claude/`
-# directory, and its name is a valid GitHub repo name (letters, digits, `.`, `-`, `_`). On
-# success it prints DIR's absolute path.
+# --preflight checks DIR before genesis writes anything: it is outside any git work tree, it
+# holds nothing but a `.claude/` directory, and its name is a valid GitHub repo name (letters,
+# digits, `.`, `-`, `_`). On success it prints DIR's absolute path.
 #
-# Offline: neither mode calls gh or git or touches the network.
+# Offline: --preflight runs one local `git rev-parse`; neither mode calls gh or touches the
+# network.
 #
 # Exit codes: 0 valid, 1 one `FAIL: <problem>` line printed per problem, 2 bad arguments or
-# DIR is not a directory.
+# DIR is not a directory, 3 git could not check DIR (git's output on stderr).
 set -euo pipefail
-# Bracket ranges like A-Z then match ASCII only, as GitHub's repo names do, in every locale.
+# Bracket ranges like A-Z then match ASCII only, as GitHub's repo names do, in every locale, and
+# git prints its messages untranslated, so --preflight can match them.
 export LC_ALL=C
 
 PREFLIGHT=0 DIR=""
@@ -50,8 +53,21 @@ fail() { echo "FAIL: $*"; FAILS=$((FAILS + 1)); }
 # How many unexpected entries --preflight names before summing up the rest.
 SHOW_MAX=5
 
+# git_check : FAIL when DIR is inside a git work tree. Exits 3 when git cannot tell (git missing,
+# a "dubious ownership" refusal, …).
+git_check() {
+  local out rc=0
+  out="$(git -C "$ABS" rev-parse --is-inside-work-tree 2>&1)" || rc=$?
+  case "$rc:$out" in
+    0:*) fail "directory is inside a git work tree" ;;
+    128:*"not a git repository"*) ;;
+    *) printf 'git rev-parse failed (exit %s): %s\n' "$rc" "$out" >&2; exit 3 ;;
+  esac
+}
+
 preflight() {
   local p e extra=0
+  git_check
   case "${ABS##*/}" in
     '' | *[!A-Za-z0-9._-]*)
       fail "directory name '${ABS##*/}' is not a valid repo name (use letters, digits, . - _)" ;;
@@ -106,7 +122,7 @@ check_genesis_md() {
   fi
   fm_has_sentence "$fm" || fail "GENESIS.md: front matter needs a non-empty sentence"
   repo="$(fm_value "$fm" repo)"
-  if ! printf '%s\n' "$repo" | grep -Eqx '[A-Za-z0-9-]+/[A-Za-z0-9._-]+'; then
+  if ! printf '%s\n' "$repo" | grep -Eqx '[A-Za-z0-9_-]+/[A-Za-z0-9._-]+'; then
     fail "GENESIS.md: front matter needs repo as OWNER/NAME (got '$repo')"
   fi
   vis="$(fm_value "$fm" visibility)"
@@ -130,18 +146,24 @@ section() {
 items() { printf '%s\n' "$1" | grep -E '^- ' || true; }
 
 check_research_md() {
-  local f="$ABS/docs/research.md" grounded=1 s body missing=0 n
+  local f="$ABS/docs/research.md" grounded=1 s body missing=0 n url
   local problem="" prior="" build="" skip="" sources=""
   [ -f "$f" ] || { fail "docs/research.md is missing"; return 0; }
-  # The marker counts only above ## Problem; a misplaced one is reported, and the file is
-  # checked as grounded.
-  case "$(awk '{ line = $0; sub(/[ \t\r]+$/, "", line) }
+  # The marker counts only above ## Problem; a misplaced or misspelled one is reported, and the
+  # file is checked as grounded. Misspelled: no exact marker, but a line above ## Problem that
+  # mentions "ungrounded", or one anywhere that also mentions "web access".
+  case "$(awk '{ line = $0; sub(/[ \t\r]+$/, "", line); low = tolower(line) }
                line == "## Problem" { above = 1 }
-               line == "ungrounded: no web access" { print (above ? "late" : "early"); exit }' \
+               line == "ungrounded: no web access" {
+                 print (above ? "late" : "early"); found = 1; exit }
+               index(low, "ungrounded") && (!above || index(low, "web access")) { near = 1 }
+               END { if (!found && near) print "near" }' \
             "$f")" in
     early) grounded=0 ;;
     late) fail "docs/research.md: the line 'ungrounded: no web access' must come" \
             "before ## Problem" ;;
+    near) fail "docs/research.md: write the marker exactly as the line" \
+            "'ungrounded: no web access'" ;;
   esac
   for s in Problem 'Prior art' Build Skip Sources; do
     if body="$(section "$f" "$s")"; then
@@ -189,13 +211,17 @@ check_research_md() {
     FAILS=$((FAILS + $(printf '%s\n' "$body" | grep -c '')))
   fi
 
+  # An http(s) URL: the scheme and at least one host character, so "http:// to https://" in
+  # prose is not one.
+  url='https\{0,1\}://[^[:space:]<>()|]'
+  # Only Build items must cite a URL; a Skip item needs its reason, and may cite one.
   for s in Build Skip; do
     if [ "$s" = Build ]; then body="$(items "$build")"; else body="$(items "$skip")"; fi
     if [ -z "$body" ]; then
       fail "docs/research.md: ## $s needs at least one '- ' item"
-    elif [ "$grounded" -eq 1 ]; then
-      n="$(printf '%s\n' "$body" | grep -cv 'https\{0,1\}://' || true)"
-      [ "$n" -eq 0 ] || fail "docs/research.md: $n ## $s item(s) cite no URL"
+    elif [ "$s" = Build ] && [ "$grounded" -eq 1 ]; then
+      n="$(printf '%s\n' "$body" | grep -cv "$url" || true)"
+      [ "$n" -eq 0 ] || fail "docs/research.md: $n ## Build item(s) cite no URL"
     fi
   done
 
@@ -204,7 +230,7 @@ check_research_md() {
     # An ungrounded run read nothing, so any source or URL in the file was made up.
     n="$(printf '%s' "$body" | grep -c '' || true)"
     [ "$n" -eq 0 ] || fail "docs/research.md: ungrounded, but ## Sources has $n item(s)"
-    n="$(grep -c 'https\{0,1\}://' "$f" || true)"
+    n="$(grep -c "$url" "$f" || true)"
     [ "$n" -eq 0 ] || fail "docs/research.md: ungrounded, but $n line(s) cite an http(s) URL"
   elif [ -z "$body" ]; then
     fail "docs/research.md: ## Sources has no items"

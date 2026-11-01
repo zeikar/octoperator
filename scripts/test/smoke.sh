@@ -15,8 +15,9 @@
 #   - octo-approval-match.sh : pattern normalization, malformed patterns, matching (renames
 #                            included), and the incomplete-file-list hold, against a stub `gh`
 #   - octo-genesis-check.sh : a valid proposal, a missing section or front-matter key, an
-#                            ungrounded proposal (and one with URLs or a misplaced marker), bad
-#                            arguments, and --preflight's empty-dir and repo-name checks
+#                            ungrounded proposal (and one with URLs or a misplaced or misspelled
+#                            marker), bad arguments, and --preflight's git, empty-dir, and
+#                            repo-name checks
 #   - octo-bench.sh        : the --live gate and --dry-run make no gh / claude call; preflight,
 #                            check's metrics, run's cost cap, and cleanup, against a stub `gh`
 #                            and `claude`
@@ -352,6 +353,31 @@ expect 0 "ungrounded marker with rows, sources, and URLs: exits 1, three FAIL li
     = "FAIL: docs/research.md: ungrounded, but ## Prior art has 2 row(s)"$'\n'"FAIL: \
 docs/research.md: ungrounded, but ## Sources has 2 item(s)"$'\n'"FAIL: docs/research.md: \
 ungrounded, but 7 line(s) cite an http(s) URL"
+# A bare scheme in prose is not a URL, so an ungrounded file may mention one.
+genesis_fixture "$g/ungscheme"
+sed 's|^- Long-term memory per user$|- Follow http:// to https:// redirects|' \
+  "$g/ungrounded/docs/research.md" >"$g/ungscheme/docs/research.md"
+genesis_check "$g/ungscheme"
+expect 0 "ungrounded, a bare http:// in a Build item: exits 0" \
+  test "$gc_rc" -eq 0 -a -z "$gc_out"
+genesis_fixture "$g/ungbold"
+sed 's|^ungrounded: no web access$|**ungrounded: no web access**|' \
+  "$g/ungrounded/docs/research.md" >"$g/ungbold/docs/research.md"
+genesis_check "$g/ungbold"
+expect 0 "a bold ungrounded marker: exits 1, names the marker first" test "$gc_rc" -eq 1 \
+  -a "$(printf '%s\n' "$gc_out" | head -n 1)" = "FAIL: docs/research.md: write the marker \
+exactly as the line 'ungrounded: no web access'"
+# Grounded: a Skip item needs only its reason.
+genesis_fixture "$g/skipnourl"
+sed 's|^- Voice calls .*|- Nothing to skip — the sentence is already narrow|' \
+  "$g/valid/docs/research.md" >"$g/skipnourl/docs/research.md"
+genesis_check "$g/skipnourl"
+expect 0 "grounded Skip item with no URL: exits 0" test "$gc_rc" -eq 0 -a -z "$gc_out"
+# An Enterprise Managed User login has a `_`.
+genesis_fixture "$g/emu"
+sed 's|^repo: .*|repo: al_ice/chat-pal|' "$g/valid/GENESIS.md" >"$g/emu/GENESIS.md"
+genesis_check "$g/emu"
+expect 0 "an owner with _: exits 0" test "$gc_rc" -eq 0 -a -z "$gc_out"
 genesis_fixture "$g/unglate"
 # The ungrounded proposal, its marker moved under ## Problem.
 awk '/^ungrounded:/ { next } { print } /^## Problem$/ { print "ungrounded: no web access" }' \
@@ -368,6 +394,25 @@ mkdir -p "$g/empty-1/.claude"
 genesis_check --preflight "$g/empty-1"
 expect 0 "--preflight, only .claude/: exits 0, prints the path" \
   test "$gc_rc" -eq 0 -a "$gc_out" = "$(cd "$g/empty-1" && pwd)"
+# Inside a git work tree, even in an empty subdirectory, fails.
+mkdir -p "$g/ingit/sub"
+git init -q "$g/ingit" || { echo "smoke: git init failed in $g/ingit" >&2; exit 1; }
+genesis_check --preflight "$g/ingit/sub"
+expect 0 "--preflight, inside a git work tree: exits 1, one FAIL line" test "$gc_rc" -eq 1 \
+  -a "$gc_out" = "FAIL: directory is inside a git work tree"
+mkdir -p "$wtmp/genesis-plain"
+genesis_check --preflight "$wtmp/genesis-plain"
+expect 0 "--preflight, a plain temp dir outside git: exits 0" test "$gc_rc" -eq 0 \
+  -a "$gc_out" = "$(cd "$wtmp/genesis-plain" && pwd)"
+# A git that fails some other way (here a stub exiting 1) is not a pass.
+gstub="$wtmp/genesis-bin"
+mkdir -p "$gstub"
+printf '#!/usr/bin/env bash\necho "fatal: detected dubious ownership" >&2\nexit 1\n' \
+  >"$gstub/git"
+chmod +x "$gstub/git"
+gc_out="$(PATH="$gstub:$PATH" bounded 10 bash "$GENESIS" --preflight \
+  "$wtmp/genesis-plain" 2>/dev/null)"; gc_rc=$?
+expect 0 "--preflight, git fails another way: exits 3" test "$gc_rc" -eq 3 -a -z "$gc_out"
 genesis_check --preflight "$g/valid"
 # Glob order depends on the locale, so compare sorted.
 expect 0 "--preflight, non-empty: exits 1, names each entry" test "$gc_rc" -eq 1 \
