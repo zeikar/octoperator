@@ -16,12 +16,15 @@
 # Every stage ends with the same tail: the MVP epic lookup (octo-genesis-epic.sh), plan-epic
 # when that finds none, and the handoff.
 #
-# It prints `dir:`, `repo:`, and `stage:` lines, then one numbered step per line, in run order.
+# It prints `dir:`, `repo:`, and `stage:` lines, then, when the PRD has `judge: model` scenarios,
+# `model_scenarios: <n>` and `model_call_cap: <calls>` (the most model calls one dispatch of
+# .github/workflows/evals-model.yml makes), then one numbered step per line, in run order.
 # A step that starts with `write ` is a file to write (skills/genesis/references/skeleton.md and
 # evals.md), and one that starts with `plan ` or `print ` is a procedure the skill runs
 # (skills/genesis/SKILL.md); every other step is one plain command to run as printed, except that
 # `<the skeleton's other files>` in `git add` stands for the skeleton's module, test, and any
-# stack manifest its `test_command` needs; `evals` adds the evals/ directory genesis wrote.
+# stack manifest its `test_command` needs; `evals` adds the evals/ directory genesis wrote, and
+# evals-model.yml is named only when the PRD has a `judge: model` scenario.
 # Visibility is --private unless GENESIS.md says `visibility: public`. The gh repo create
 # description is the sentence on one line, its control characters made spaces, cut to GitHub's
 # 350-character limit, and single-quoted.
@@ -67,6 +70,7 @@ esac
 value() { printf '%s\n' "$values" | sed -n "s/^$1: //p"; }
 REPO="$(value repo)" VIS="$(value visibility)" CMD="$(value test_command)"
 TEST_FILE="$(value test_file)" SENTENCE="$(value sentence)"
+MODELS="$(value model_scenarios)" CAP="$(value model_call_cap)"
 ABS="$(cd "$DIR" && pwd)"
 PHYS="$(cd "$DIR" && pwd -P)"
 
@@ -189,6 +193,11 @@ step() { N=$((N + 1)); printf '%s. %s\n' "$N" "$*"; }
 D="$(q "$ABS")"
 
 printf 'dir: %s\nrepo: %s\nstage: %s\n' "$ABS" "$REPO" "$STAGE"
+MODEL_WF=""
+if [ "${MODELS:-0}" -gt 0 ]; then
+  printf 'model_scenarios: %s\nmodel_call_cap: %s\n' "$MODELS" "$CAP"
+  MODEL_WF=" .github/workflows/evals-model.yml"
+fi
 case "$STAGE" in
   scaffold | commit)
     step "write the skeleton for \`$CMD\` (skills/genesis/references/skeleton.md) and the" \
@@ -198,7 +207,7 @@ case "$STAGE" in
     [ "$STAGE" = commit ] || step "git -C $D init -b main"
     step "git -C $D add -- GENESIS.md VISION.md docs/research.md docs/prd.md" \
       "docs/adr/0001-stack.md README.md .gitignore .github/workflows/ci.yml" \
-      ".github/workflows/evals.yml .github/workflows/evals-guard.yml evals $TEST_FILE" \
+      ".github/workflows/evals.yml .github/workflows/evals-guard.yml$MODEL_WF evals $TEST_FILE" \
       "<the skeleton's other files>"
     step "git -C $D commit -m 'chore: scaffold from genesis'"
     step "bash $(q "$HERE/octo-genesis-plan.sh") $D" ;;

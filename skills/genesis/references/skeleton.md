@@ -12,8 +12,9 @@ The skeleton is the smallest project the ADR's stack needs, so its test command 
 in CI. It has no product code beyond one module, and it installs nothing on your machine: the
 module and test use only the language's standard library and the test runner. The MVP is built
 later, through the MVP epic's issues, which `--approve` files by plan-epic's procedure once the
-repo exists. The scenario evals are written in the same step: `evals/`, `evals.yml`, and
-`evals-guard.yml`, from `references/evals.md`, which says what `--skeleton` checks in them.
+repo exists. The scenario evals are written in the same step: `evals/`, `evals.yml`,
+`evals-guard.yml`, and, for a PRD with a `judge: model` scenario, `evals-model.yml`, from
+`references/evals.md`, which says what `--skeleton` checks in them.
 
 ## Files
 
@@ -31,9 +32,10 @@ repo exists. The scenario evals are written in the same step: `evals/`, `evals.y
 - **One module and one test** — in the stack's usual layout. The test imports the module and
   checks one real behavior, so the test command passes because a test ran: `pytest` fails when it
   collects no test, and a runner that passes on zero tests proves nothing.
-- **The scenario evals** — `evals/run.sh`, `evals/guard.sh`, `.github/workflows/evals.yml`,
-  `.github/workflows/evals-guard.yml`, and one `evals/<id>/` per PRD scenario, as
-  `references/evals.md` says. **Checked** there.
+- **The scenario evals** — `evals/run.sh`, `evals/judge.sh`, `evals/guard.sh`,
+  `.github/workflows/evals.yml`, `.github/workflows/evals-guard.yml`, `evals-model.yml` only for a
+  `judge: model` scenario, and one `evals/<id>/` per PRD scenario, as `references/evals.md` says.
+  **Checked** there.
 
 | `test_command` | Detection file holds | Must not exist | CI setup and install |
 |---|---|---|---|
@@ -73,8 +75,8 @@ jobs:
 ```
 
 Workflow files are in `approval_paths` (below), so `auto` never merges a change to CI, the evals
-workflow, or the evals guard without a human. `evals.yml` and `evals-guard.yml`'s `must-fail` job
-take the same setup and install steps as `ci.yml` (`references/evals.md`).
+workflows, or the evals guard without a human. `evals.yml`, `evals-guard.yml`'s `must-fail` job,
+and `evals-model.yml` take the same setup and install steps as `ci.yml` (`references/evals.md`).
 
 ## Settings
 
@@ -118,8 +120,9 @@ statuses:
   done: Done
 
 # Files a human must approve: auto holds any PR that touches one. This covers
-# .github/workflows/evals-guard.yml; evals/ stays out, so PRs that only add
-# must-fail evals merge (the guard holds the rest).
+# .github/workflows/evals-guard.yml and evals-model.yml (its trigger, call cap,
+# and timeout); evals/ stays out, so PRs that only add must-fail evals merge
+# (the guard holds the rest).
 approval_paths:
   - ".github/workflows/"
 ---

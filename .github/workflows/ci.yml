@@ -30,7 +30,8 @@ jobs:
         run: bash scripts/test/smoke.sh
       - name: Genesis eval template tests
         # Offline: run.sh against pass, fail, skip, and exit-2 fixture evals; guard.sh against
-        # throwaway git repos.
+        # throwaway git repos; run.sh --model and judge.sh against a fake curl, so no model is
+        # ever called.
         run: bash scripts/test/evals.sh
       - name: Benchmark task validation
         # Offline: each task's hidden check must fail on its seed and pass with its reference patch.

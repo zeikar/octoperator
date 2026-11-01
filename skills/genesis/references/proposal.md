@@ -201,7 +201,9 @@ Rules:
   Write one or more per requirement, each something the product must do that the MVP doesn't do
   yet, as the user would see it: `recall-turn-3`, "at turn 200 the context still holds the turn-3
   fact". Prefer `judge: script`, a scenario a script decides, for example by running the app with
-  a stub model; use `judge: model` only when no script can judge it.
+  a stub model; use `judge: model` only when no script can judge it, and then only for the
+  judgment, with a script scenario for the rest (`references/evals.md` → The deterministic part
+  and the judgment). Each model scenario costs model calls on every dispatch.
 - More sections may follow.
 - Ungrounded research → the PRD, the ADR, and `VISION.md` cite no URLs either (**checked**: no
   `http://` or `https://` URL in any of them).

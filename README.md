@@ -415,9 +415,17 @@ and adding must-fail ones merges unattended; weakening one takes a human. Its wo
 checks passed on the reviewed commit against the current `main` (a `[skip ci]` commit has none).
 The append-only rule runs in a job with no PR code, so it holds; whether a new eval fails on `main`
 first is checked after the PR's dependencies install, so it is advisory, and a reviewer still reads
-each new check. Confirm the first `Evals` run on `main` is red. Format and rules:
-[`skills/genesis/references/evals.md`](skills/genesis/references/evals.md). The model-judged eval
-runner, the eval metric, and the next milestone (#91–#93) are not built yet. The plan is
+each new check. Confirm the first `Evals` run on `main` is red.
+
+A `judge: model` scenario, such as whether replies keep a persona's tone, spends model tokens, so
+the offline run skips it. When the PRD has one, genesis also writes `evals-model.yml`, which runs
+those evals only when you dispatch it, with at most `EVALS_MAX_CALLS` model calls (20) and a
+30-minute timeout per run, once you add the `ANTHROPIC_API_KEY` repo secret. Genesis never sets a
+secret or dispatches a workflow, and Octoperator's own CI never calls a model. A failing dispatch
+run stays the latest `eval` evidence until the next dispatch, so dispatch again after a fix
+merges. Format and rules:
+[`skills/genesis/references/evals.md`](skills/genesis/references/evals.md). The eval metric and
+the next milestone (#92, #93) are not built yet. The plan is
 [epic #85](https://github.com/zeikar/octoperator/issues/85).
 
 ## Product vision (`VISION.md`)

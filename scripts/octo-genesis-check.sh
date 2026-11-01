@@ -44,7 +44,9 @@
 #
 # --values checks the proposal as DIR alone does, then prints GENESIS.md's values, one
 # `key: value` line each: repo, visibility, test_command, test_file (the file that detects it),
-# and sentence (its lines joined by spaces). octo-genesis-plan.sh reads them.
+# and sentence (its lines joined by spaces); then model_scenarios (how many PRD scenarios are
+# `judge: model`) and model_call_cap (EVALS_MAX_CALLS in the evals-model.yml template: the most
+# model calls one dispatch makes). octo-genesis-plan.sh reads them.
 #
 # --skeleton checks the skeleton genesis --approve wrote (skills/genesis/references/skeleton.md),
 # against GENESIS.md's test_command:
@@ -57,14 +59,16 @@
 #   - .gitignore has the lines .claude/octoperator.local.md and .octoperator/ (a leading `/`
 #     allowed).
 #   - README.md quotes the sentence: it holds each of the sentence's lines.
-#   - the scenario evals (skills/genesis/references/evals.md): evals/run.sh and evals/guard.sh
-#     are their templates byte for byte (skills/genesis/templates/); .github/workflows/evals.yml
-#     and evals-guard.yml are their template line for line, comments and blank lines aside, with
-#     the stack's setup steps only where the template marks them (in evals-guard.yml, inside the
-#     must-fail job), evals.yml triggers only on push and workflow_dispatch, and evals-guard.yml
-#     only on pull_request; and each PRD scenario has evals/<id>/scenario.md whose front matter has
-#     the lines `id: <id>`, `judge: <judge>`, and `requirement: R<n>` as the PRD says, then text,
-#     plus, for `judge: script`, an evals/<id>/check.sh that parses (`bash -n`). No check runs.
+#   - the scenario evals (skills/genesis/references/evals.md): evals/run.sh, evals/judge.sh, and
+#     evals/guard.sh are their templates byte for byte (skills/genesis/templates/);
+#     .github/workflows/evals.yml and evals-guard.yml, and evals-model.yml when the PRD has a
+#     `judge: model` scenario, are their template line for line, comments and blank lines aside,
+#     with the stack's setup steps only where the template marks them (in evals-guard.yml, inside
+#     the must-fail job); evals.yml triggers only on push and workflow_dispatch, evals-guard.yml
+#     only on pull_request, and evals-model.yml only on workflow_dispatch; without a `judge: model`
+#     scenario, evals-model.yml must not exist; and each PRD scenario has evals/<id>/scenario.md
+#     whose front matter has the lines `id: <id>`, `judge: <judge>`, and `requirement: R<n>` as
+#     the PRD says, then text, plus an evals/<id>/check.sh that parses (`bash -n`). No check runs.
 #
 # Offline: --preflight runs one local `git rev-parse`; no mode calls gh or touches the network.
 #
@@ -595,10 +599,20 @@ $t
 EOF
 }
 
-# check_evals : the eval runner, the guard, their workflows, and one evals/<id>/ per PRD scenario.
+# scenario_rows : the PRD's well-formed scenarios, `<id> <judge> <requirement>` per line, or
+# nothing without a PRD or a ## Scenarios section.
+scenario_rows() {
+  local prd="$ABS/docs/prd.md" body
+  [ -f "$prd" ] && body="$(section "$prd" Scenarios)" || return 0
+  scenarios rows "$body" "$(requirement_ids "$prd" | paste -sd ' ' -)"
+}
+
+# check_evals : the eval runner, the judge, the guard, their workflows, and one evals/<id>/ per PRD
+# scenario.
 check_evals() {
-  local f prd="$ABS/docs/prd.md" body id judge req fm w
-  for f in evals/run.sh evals/guard.sh; do
+  local f rows id judge req fm w
+  rows="$(scenario_rows)"
+  for f in evals/run.sh evals/judge.sh evals/guard.sh; do
     if [ ! -f "$ABS/$f" ]; then
       fail "$f is missing: copy it from skills/genesis/templates/$f"
     elif ! cmp -s "$TEMPLATES/$f" "$ABS/$f"; then
@@ -608,8 +622,15 @@ check_evals() {
   # A failing eval on pull_request would hold every PR, the one that fixes it included.
   check_eval_workflow evals.yml push workflow_dispatch
   check_eval_workflow evals-guard.yml pull_request
+  # Model calls spend money: only a human's dispatch may start them, and only a PRD that needs
+  # them gets the workflow.
+  if printf '%s\n' "$rows" | awk '$2 == "model" { ok = 1 } END { exit !ok }'; then
+    check_eval_workflow evals-model.yml workflow_dispatch
+  elif [ -e "$ABS/.github/workflows/evals-model.yml" ]; then
+    fail ".github/workflows/evals-model.yml: docs/prd.md has no judge: model scenario, so" \
+      "genesis writes no model workflow"
+  fi
   # The PRD's own problems are the proposal check's; here only its well-formed scenarios count.
-  [ -f "$prd" ] && body="$(section "$prd" Scenarios)" || return 0
   while read -r id judge req; do
     [ -n "$id" ] || continue
     f="$ABS/evals/$id/scenario.md"
@@ -628,14 +649,13 @@ check_evals() {
     done
     awk 'NR == 1 { next } !fm && $0 == "---" { fm = 1; next } fm && /[^ \t\r]/ { ok = 1; exit }
       END { exit !ok }' "$f" || fail "evals/$id/scenario.md: needs the scenario's text"
-    [ "$judge" = script ] || continue
     if [ ! -f "$ABS/evals/$id/check.sh" ]; then
-      fail "evals/$id/check.sh is missing: the scenario is judge: script"
+      fail "evals/$id/check.sh is missing: the scenario is judge: $judge"
     elif ! bash -n "$ABS/evals/$id/check.sh" 2>/dev/null; then
       fail "evals/$id/check.sh: syntax error (bash -n)"
     fi
   done <<EOF
-$(scenarios rows "$body" "$(requirement_ids "$prd" | paste -sd ' ' -)")
+$rows
 EOF
 }
 
@@ -726,4 +746,8 @@ if [ "$MODE" = values ]; then
   printf 'repo: %s\nvisibility: %s\ntest_command: %s\ntest_file: %s\nsentence: %s\n' \
     "$(fm_value "$GENESIS_FM" repo)" "$(fm_value "$GENESIS_FM" visibility)" "$TEST_CMD" \
     "$TEST_FILE" "$(sentence_lines "$GENESIS_FM" | paste -sd ' ' -)"
+  printf 'model_scenarios: %s\nmodel_call_cap: %s\n' \
+    "$(scenario_rows | awk '$2 == "model" { n++ } END { print n + 0 }')" \
+    "$(sed -n 's/^ *EVALS_MAX_CALLS: \([0-9][0-9]*\)$/\1/p' \
+      "$TEMPLATES/.github/workflows/evals-model.yml")"
 fi

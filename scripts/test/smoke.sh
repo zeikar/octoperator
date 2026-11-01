@@ -30,10 +30,15 @@
 #                            requirement, or judge, a duplicate, no text), bad arguments,
 #                            --preflight's git, empty-dir, and repo-name checks, --values, and
 #                            --skeleton's detection-file, CI, .gitignore, and README checks, and
-#                            its evals checks (the runner and guard verbatim, each workflow's
-#                            template lines and triggers, one eval per scenario)
+#                            its evals checks (the runner, judge, and guard verbatim, each
+#                            workflow's template lines and triggers, evals-model.yml only with a
+#                            model scenario and never tampered with: a schedule or push trigger,
+#                            a removed or raised call cap, a removed timeout; one eval per
+#                            scenario, each with a check.sh), and --values' model-scenario count
+#                            and call cap
 #   - octo-genesis-plan.sh : each stage's ordered steps (scaffold, commit, create, push, setup;
-#                            git add naming the eval files),
+#                            git add naming the eval files, evals-model.yml and the call cap only
+#                            with a model scenario),
 #                            the re-check after the commit, --private unless visibility: public,
 #                            approval claimed in GENESIS.md ignored, the description's quoting and
 #                            UTF-8-safe cut, git-state failures (a rewrite only a repo's config
@@ -887,9 +892,21 @@ expect 0 "--preflight, a non-ASCII letter under a UTF-8 locale: exits 1" test "$
   -a -n "$(printf '%s\n' "$gc_out" | grep '^FAIL: directory name ')"
 
 genesis_check --values "$g/valid"
-expect 0 "--values: exits 0, prints GENESIS.md's values" test "$gc_rc" -eq 0 -a "$gc_out" = \
+expect 0 "--values: exits 0, prints GENESIS.md's values, the model scenarios, and the call cap" \
+  test "$gc_rc" -eq 0 -a "$gc_out" = \
   "repo: smoke/chat-pal"$'\n'"visibility: private"$'\n'"test_command: npm test"$'\n'"test_file: \
-package.json"$'\n'"sentence: A character-chat app: it remembers you across long conversations."
+package.json"$'\n'"sentence: A character-chat app: it remembers you across long conversations.\
+"$'\n'"model_scenarios: 1"$'\n'"model_call_cap: \
+$(sed -n 's/^ *EVALS_MAX_CALLS: //p' "$TEMPLATES/.github/workflows/evals-model.yml")"
+# no_model <dir> : drop the PRD's judge: model scenario (persona-tone, the fixture's last).
+no_model() {
+  sed '/^### persona-tone$/,$d' "$1/docs/prd.md" >"$1/x" && mv "$1/x" "$1/docs/prd.md"
+}
+genesis_fixture "$g/nomodel"
+no_model "$g/nomodel"
+genesis_check --values "$g/nomodel"
+expect 0 "--values, no judge: model scenario: model_scenarios: 0" \
+  test "$gc_rc" -eq 0 -a -n "$(printf '%s\n' "$gc_out" | grep -Fx 'model_scenarios: 0')"
 genesis_check --values "$g/nokey"
 expect 0 "--values, an invalid proposal: exits 1, FAIL lines only" test "$gc_rc" -eq 1 \
   -a -z "$(printf '%s\n' "$gc_out" | grep -v '^FAIL: ')"
@@ -920,9 +937,10 @@ jobs:
       - run: npm test
 YML
   mkdir -p "$1/evals/recall-turn-3" "$1/evals/persona-tone"
-  cp "$TEMPLATES/evals/run.sh" "$TEMPLATES/evals/guard.sh" "$1/evals/"
+  cp "$TEMPLATES/evals/run.sh" "$TEMPLATES/evals/judge.sh" "$TEMPLATES/evals/guard.sh" "$1/evals/"
   # The workflows as genesis writes them: the stack's setup steps where the template marks them.
-  for w in evals.yml evals-guard.yml; do
+  # evals-model.yml too: the PRD's persona-tone is judge: model.
+  for w in evals.yml evals-guard.yml evals-model.yml; do
     awk '/# genesis: the stack.s setup/ { print "      - uses: actions/setup-node@v4"
       print "      - run: npm install"; next } { print }' "$TEMPLATES/.github/workflows/$w" \
       >"$1/.github/workflows/$w"
@@ -932,6 +950,8 @@ YML
   printf '#!/usr/bin/env bash\necho "FAIL: not built"; exit 1\n' >"$1/evals/recall-turn-3/check.sh"
   printf -- '---\nid: persona-tone\njudge: model\nrequirement: R1\n---\n\nThe tone holds.\n' \
     >"$1/evals/persona-tone/scenario.md"
+  printf '#!/usr/bin/env bash\necho "FAIL: no transcript yet"; exit 1\n' \
+    >"$1/evals/persona-tone/check.sh"
 }
 # skeleton_case <name> : a fresh proposal with a valid skeleton in $g/sk-<name>; sets sk.
 skeleton_case() { sk="$g/sk-$1"; genesis_fixture "$sk"; skeleton_fixture "$sk"; }
@@ -1068,6 +1088,69 @@ expect 0 "--skeleton, a job key where the setup goes: exits 1, names the line" \
   test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/evals-guard.yml: has '    env:' \
 after '          fetch-depth: 0': only the setup steps, indented as steps, may go where its \
 template has the '# genesis:' line (skills/genesis/templates/.github/workflows/evals-guard.yml)"
+# evals-model.yml: written only for a judge: model scenario, its template line for line, and
+# triggered only by a human's dispatch. Each tampered copy below would spend unattended or uncapped.
+MODEL_WF=.github/workflows/evals-model.yml
+MODEL_SRC="(skills/genesis/templates/$MODEL_WF)"
+skeleton_case nomodelwf
+rm "$sk/$MODEL_WF"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, a model scenario and no evals-model.yml: exits 1, names it" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: $MODEL_WF is missing: write it from \
+skills/genesis/templates/"
+skeleton_case strayModelwf
+no_model "$sk"
+rm -r "$sk/evals/persona-tone"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, evals-model.yml with no model scenario: exits 1, names it" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: $MODEL_WF: docs/prd.md has no judge: model \
+scenario, so genesis writes no model workflow"
+rm "$sk/$MODEL_WF"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, no model scenario and no evals-model.yml: exits 0" \
+  test "$gc_rc" -eq 0 -a -z "$gc_out"
+skeleton_case modelsched
+awk '{ print }
+  /^  workflow_dispatch:$/ { print "  schedule:"; print "    - cron: \"0 3 * * *\"" }' \
+  "$sk/$MODEL_WF" >"$sk/x" && mv "$sk/x" "$sk/$MODEL_WF"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, evals-model.yml on a schedule: exits 1, the line and the trigger" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: $MODEL_WF: has '  schedule:' where its template has \
+'permissions:' $MODEL_SRC"$'\n'"FAIL: $MODEL_WF: on: must not have the schedule trigger \
+(only: workflow_dispatch)"
+skeleton_case modelpush
+sed 's/^  workflow_dispatch:$/  push:/' "$sk/$MODEL_WF" >"$sk/x" && mv "$sk/x" "$sk/$MODEL_WF"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, evals-model.yml on push instead: exits 1, three FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: $MODEL_WF: has '  push:' where its template has \
+'  workflow_dispatch:' $MODEL_SRC"$'\n'"FAIL: $MODEL_WF: on: needs the workflow_dispatch \
+trigger"$'\n'"FAIL: $MODEL_WF: on: must not have the push trigger (only: workflow_dispatch)"
+skeleton_case modelnocap
+grep -v 'EVALS_MAX_CALLS' "$sk/$MODEL_WF" >"$sk/x" && mv "$sk/x" "$sk/$MODEL_WF"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, evals-model.yml without the call cap: exits 1, names the line" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: $MODEL_WF: has '        env:' where its template has \
+'          EVALS_MAX_CALLS: 20' $MODEL_SRC"
+skeleton_case modelcap
+sed 's/EVALS_MAX_CALLS: 20$/EVALS_MAX_CALLS: 2000/' "$sk/$MODEL_WF" >"$sk/x" \
+  && mv "$sk/x" "$sk/$MODEL_WF"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, evals-model.yml with a raised call cap: exits 1" test "$gc_rc" -eq 1 \
+  -a -n "$(printf '%s\n' "$gc_out" | grep -F "has '          EVALS_MAX_CALLS: 2000'")"
+skeleton_case modeltimeout
+grep -v 'timeout-minutes' "$sk/$MODEL_WF" >"$sk/x" && mv "$sk/x" "$sk/$MODEL_WF"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, evals-model.yml without timeout-minutes: exits 1, names the line" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: $MODEL_WF: has '    steps:' where its template has \
+'    timeout-minutes: 30' $MODEL_SRC"
+skeleton_case modeljudge
+echo '# local tweak' >>"$sk/evals/judge.sh"
+rm "$sk/evals/persona-tone/check.sh"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, evals/judge.sh changed and a model eval with no check.sh: two FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: evals/judge.sh differs from \
+skills/genesis/templates/evals/judge.sh: copy it byte for byte"$'\n'"FAIL: \
+evals/persona-tone/check.sh is missing: the scenario is judge: model"
 skeleton_case evscen
 rm -r "$sk/evals/persona-tone"
 rm "$sk/evals/recall-turn-3/check.sh"
@@ -1142,7 +1225,17 @@ origin --push --description='A character-chat app: it remembers you across long 
 expect 0 "scaffold: git add names the proposal, skeleton, and eval files" \
   test -n "$(pl_line "git -C $p/scaffold add -- GENESIS\.md VISION\.md docs/research\.md \
 docs/prd\.md docs/adr/0001-stack\.md README\.md \.gitignore \.github/workflows/ci\.yml \
-\.github/workflows/evals\.yml \.github/workflows/evals-guard\.yml evals package\.json ")"
+\.github/workflows/evals\.yml \.github/workflows/evals-guard\.yml \
+\.github/workflows/evals-model\.yml evals package\.json ")"
+expect 0 "scaffold, a model scenario: the plan prints the model scenarios and the call cap" \
+  test -n "$(printf '%s\n' "$pl_out" | grep -Fx 'model_scenarios: 1')" \
+    -a -n "$(printf '%s\n' "$pl_out" | grep -Ex 'model_call_cap: [1-9][0-9]*')"
+genesis_fixture "$p/nomodel"
+no_model "$p/nomodel"
+genesis_plan "$p/nomodel"
+expect 0 "scaffold, no model scenario: no evals-model.yml in git add, no call cap" \
+  test "$pl_rc" -eq 0 -a -n "$(pl_line "git -C $p/nomodel add -- .*evals-guard\.yml evals ")" \
+    -a -z "$(printf '%s\n' "$pl_out" | grep -e evals-model -e '^model_')"
 expect 0 "the plan writes nothing and calls no gh" \
   test "$(cd "$p/scaffold" && find . | LC_ALL=C sort)" = "$before" -a ! -e "$wtmp/plan-gh.log"
 

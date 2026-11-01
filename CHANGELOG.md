@@ -98,8 +98,24 @@ All notable changes to Octoperator are documented in this file. The format is ba
   scenarios and, with `--skeleton`, the eval files; the plan's `git add` names them. The handoff
   asks the human to confirm the first `Evals` run on `main` is red. New
   reference `skills/genesis/references/evals.md`, and new offline tests `scripts/test/evals.sh`,
-  which CI runs; shellcheck now covers `skills/genesis/templates/**/*.sh`. Model-judged evals are
-  skipped until #91; the eval metric and the next milestone (#92, #93) are not built yet.
+  which CI runs; shellcheck now covers `skills/genesis/templates/**/*.sh`. The eval metric and the
+  next milestone (#92, #93) are not built yet.
+- `genesis` model-judged evals (#91): for a PRD with a `judge: model` scenario, `--approve` also
+  writes `.github/workflows/evals-model.yml`, whose only trigger is `workflow_dispatch`, with
+  `timeout-minutes: 30` and `EVALS_MAX_CALLS: 20`. It runs `bash evals/run.sh --model`, which
+  skips the script evals, runs each model eval's `check.sh` to build its evidence offline, and asks
+  new template `evals/judge.sh` (one Anthropic Messages API call with curl, the key from the
+  `ANTHROPIC_API_KEY` repo secret in a header file, `claude-sonnet-5-5` by default) for exactly
+  `PASS` or `FAIL`; any other reply fails the eval. `run.sh --model` refuses to start without the
+  cap or the key, and once the cap is used fails each eval left without a call. The offline run
+  still skips model evals without changing its exit code. Every eval, model-judged ones included,
+  now needs a `check.sh`, in `--skeleton` and the guard. `octo-genesis-check.sh --skeleton` holds
+  `evals-model.yml` to its template line for line (a `schedule:` or `push:` trigger, or a removed
+  or changed cap or timeout, fails) and fails it when the PRD has no model scenario; `--values`
+  prints `model_scenarios` and `model_call_cap`, which the checkpoint, the plan, and the handoff
+  show. Genesis never sets a secret or dispatches a workflow, and Octoperator's CI calls no model:
+  the tests use a fake `curl`. `references/evals.md` documents the deterministic/model split and
+  the caveat that a failing dispatch run stays the latest `eval` evidence until the next dispatch.
 - README → "Running continuously": copy-paste recipes for re-running `autopilot` with Claude
   Code's own scheduling on your machine — an in-session cron task in a background session (the
   default), `/loop`, `/goal`, and `claude -p` under launchd or crontab with `--cycles 1`,

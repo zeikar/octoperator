@@ -11,10 +11,18 @@
 #                check that writes into the repo (the run stops), one that leaves a process
 #                behind, one that reads the CI environment, and one that prints workflow commands;
 #                under Actions only, an evals/ that differs from the commit (an ignored file
-#                there too) stops the run first
+#                there too) stops the run first; skipped model evals never change its exit code
+#                and never reach curl
+#   - run.sh --model and judge.sh : against a fake curl first on PATH (no network, no key): a PASS
+#                reply passes, FAIL fails, and any other reply (extra words, lowercase, two
+#                blocks, an HTTP error) fails; the call cap (EVALS_MAX_CALLS) is required and,
+#                once used, fails the evals left without a call; a check that fails or prints no
+#                evidence makes no call; the prompt holds the scenario and the evidence; the key
+#                goes only into a header file, never into curl's arguments or any output
 #   - guard.sh : against throwaway git repos, a PR that adds a must-fail eval passes; one that adds
 #                an eval already passing on the base, modifies, deletes, or renames an eval, or
-#                adds a file to an existing eval fails; a model-judged eval is not run; an eval
+#                adds a file to an existing eval fails; a model-judged eval is not run, but
+#                needs a check.sh that parses; an eval
 #                the base gained after the PR branched is not read as deleted; and each attack the
 #                PR #98 review reproduced: export-subst, a check that finds itself, .git, or the
 #                CI environment, symlinks, submodules, top-level files, .gitattributes, control
@@ -202,6 +210,135 @@ check "a check that writes an ignored file into the repo: the run stops too" tes
   -a -n "$(has "$out" "fail: aaa (changed the repo it judges)" && echo y)"
 rm -rf "$r/evals/aaa" "$r/build"
 
+echo "• evals/run.sh --model and evals/judge.sh (offline, a fake curl)"
+# The fake curl answers from the request body: a marker in the evidence picks the reply. It logs
+# its arguments and the header file, so the tests see what a real call would have sent.
+fake="$tmp/fake-bin"
+mkdir -p "$fake" || { echo "evals: mkdir failed" >&2; exit 1; }
+cat >"$fake/curl" <<CURL
+#!/usr/bin/env bash
+out="" hdr="" body=""
+printf '%s\n' "\$*" >>"$tmp/curl.args"
+while [ \$# -gt 0 ]; do
+  case "\$1" in
+    -o) out="\$2"; shift 2 ;;
+    -H) hdr="\${2#@}"; shift 2 ;;
+    --data-binary) body="\${2#@}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+cat "\$hdr" >>"$tmp/curl.headers"
+cp "\$body" "$tmp/curl.body"
+reply() { printf '{"content":[{"type":"text","text":"%s"}]}' "\$1" >"\$out"; printf 200; }
+case "\$(cat "\$body")" in
+  *say-pass*) reply ' PASS\\n' ;;
+  *say-fail*) reply FAIL ;;
+  *say-junk*) reply 'PASS, mostly' ;;
+  *say-lower*) reply pass ;;
+  *say-two*) printf '{"content":[{"type":"text","text":"PASS"},{"type":"text","text":"PASS"}]}' \
+    >"\$out"; printf 200 ;;
+  *say-http*) printf '{"type":"error","error":{"type":"authentication_error"}}' >"\$out"
+    printf 401 ;;
+  *) reply '' ;;
+esac
+CURL
+chmod +x "$fake/curl"
+KEY=sk-test-not-a-real-key-0123456789
+# calls : how many times the fake curl ran.
+calls() { if [ -f "$tmp/curl.args" ]; then grep -c '' "$tmp/curl.args"; else echo 0; fi; }
+# judge <evidence marker> : run judge.sh on a prompt holding the marker; sets out and rc.
+judge() {
+  printf 'Scenario:\nThe tone holds.\n\nEvidence:\n%s\n' "$1" >"$tmp/prompt.txt"
+  out="$(PATH="$fake:$PATH" ANTHROPIC_API_KEY="$KEY" bash "$T/evals/judge.sh" "$tmp/prompt.txt" \
+    2>&1)"; rc=$?
+}
+[ "$(PATH="$fake:$PATH" command -v curl)" = "$fake/curl" ] \
+  || { echo "evals: the fake curl is not first on PATH" >&2; exit 1; }
+judge say-pass
+check "judge.sh, a PASS reply (whitespace around it): prints PASS, exits 0" \
+  test "$rc" -eq 0 -a "$out" = PASS
+judge say-fail
+check "judge.sh, a FAIL reply: prints FAIL, exits 1" test "$rc" -eq 1 -a "$out" = FAIL
+for m in say-junk say-lower say-two empty; do
+  judge "$m"
+  check "judge.sh, not exactly PASS or FAIL ($m): a failure, exits 1" test "$rc" -eq 1 \
+    -a "${out%% *}" = "error:"
+done
+judge say-http
+check "judge.sh, an HTTP error: a failure, exits 1, the error type only" test "$rc" -eq 1 \
+  -a "$out" = "error: HTTP 401 (authentication_error)"
+check "judge.sh calls the Messages API with the default model" test -n "$(grep -F \
+  'https://api.anthropic.com/v1/messages' "$tmp/curl.args" | head -n 1)" -a "$(jq -r .model \
+  "$tmp/curl.body")" = claude-sonnet-5-5
+check "judge.sh sends the key, the version, and the content type as headers" test -n "$(has \
+  "$(cat "$tmp/curl.headers")" "x-api-key: $KEY" && has "$(cat "$tmp/curl.headers")" \
+  "anthropic-version: 2023-06-01" && has "$(cat "$tmp/curl.headers")" \
+  "content-type: application/json" && echo y)"
+check "the key is never in curl's arguments" test -z "$(grep -F "$KEY" "$tmp/curl.args")"
+n="$(calls)"
+out="$(PATH="$fake:$PATH" env -u ANTHROPIC_API_KEY bash "$T/evals/judge.sh" "$tmp/prompt.txt" \
+  2>&1)"; rc=$?
+check "judge.sh with no key: exits 2, no call" \
+  test "$rc" -eq 2 -a "$(calls)" -eq "$n" -a "$out" = "error: ANTHROPIC_API_KEY is not set"
+
+m="$tmp/model"
+mkdir -p "$m/evals"
+git -c init.defaultBranch=main init -q "$m" || { echo "evals: git init failed" >&2; exit 1; }
+cp "$T/evals/run.sh" "$T/evals/judge.sh" "$m/evals/"
+eval_dir "$m" a-good model 'echo "user: hi"; echo "bot: hello, say-pass"'
+eval_dir "$m" b-bad model 'echo "bot: say-fail"'
+eval_dir "$m" c-broken model 'echo "FAIL: no transcript" >&2; exit 1'
+eval_dir "$m" d-silent model 'exit 0'
+eval_dir "$m" e-script script 'exit 0'
+# model_run [args...] : run.sh with the fake curl and a fake key; sets out and rc.
+model_run() {
+  out="$(PATH="$fake:$PATH" ANTHROPIC_API_KEY="$KEY" GITHUB_ACTIONS="${GA:-false}" \
+    bash "$m/evals/run.sh" "$@" 2>&1)"; rc=$?
+}
+rm -f "$tmp/curl.args" "$tmp/curl.headers"
+model_run
+check "offline run.sh: model evals skipped, exit 0 from the script eval alone, no model call" \
+  test "$rc" -eq 0 -a "$(calls)" -eq 0 -a -n "$(has "$out" "evals: 1/1 passed (4 skipped)" \
+    && has "$out" "skip: a-good (judge: model)" && echo y)"
+out="$(PATH="$fake:$PATH" ANTHROPIC_API_KEY="$KEY" env -u EVALS_MAX_CALLS \
+  bash "$m/evals/run.sh" --model 2>&1)"; rc=$?
+check "--model with no EVALS_MAX_CALLS: exits 2, no call" test "$rc" -eq 2 -a "$(calls)" -eq 0
+out="$(PATH="$fake:$PATH" EVALS_MAX_CALLS=0 ANTHROPIC_API_KEY="$KEY" \
+  bash "$m/evals/run.sh" --model 2>&1)"; rc=$?
+check "--model with EVALS_MAX_CALLS=0: exits 2, no call" test "$rc" -eq 2 -a "$(calls)" -eq 0
+out="$(PATH="$fake:$PATH" EVALS_MAX_CALLS=5 env -u ANTHROPIC_API_KEY \
+  bash "$m/evals/run.sh" --model 2>&1)"; rc=$?
+check "--model with no key: exits 2, no call" test "$rc" -eq 2 -a "$(calls)" -eq 0
+EVALS_MAX_CALLS=10 model_run --model
+check "--model: PASS passes, FAIL fails, a failed or silent check makes no call, script skipped" \
+  test "$rc" -eq 1 -a "$(calls)" -eq 2 -a -n "$(has "$out" "pass: a-good" \
+    && has "$out" "fail: b-bad (judge: FAIL)" && has "$out" "fail: c-broken (exit 1)" \
+    && has "$out" "    FAIL: no transcript" \
+    && has "$out" "fail: d-silent (check.sh printed no evidence)" \
+    && has "$out" "skip: e-script (judge: script)" && has "$out" "evals: 1/4 passed (1 skipped)" \
+    && has "$out" "evals: model calls: 2/10" && echo y)"
+check "the prompt holds the scenario's text, then the check's evidence" \
+  test "$(jq -r '.messages[0].content' "$tmp/curl.body")" = "Scenario:
+
+The scenario.
+
+Evidence:
+bot: say-fail"
+check "the key never shows in run.sh's output" test -z "$(printf '%s\n' "$out" | grep -F "$KEY")"
+rm -f "$tmp/curl.args"
+EVALS_MAX_CALLS=1 model_run --model
+check "--model, the call cap used: the evals left fail uncalled" test "$rc" -eq 1 \
+  -a "$(calls)" -eq 1 -a -n "$(has "$out" "pass: a-good" \
+    && has "$out" "fail: b-bad (call cap reached: EVALS_MAX_CALLS=1)" \
+    && has "$out" "evals: model calls: 1/1" && echo y)"
+git -C "$m" add -A && git -C "$m" -c user.name=t -c user.email=t@example.invalid \
+  -c commit.gpgsign=false commit -q --no-verify -m evals \
+  || { echo "evals: git commit failed" >&2; exit 1; }
+EVALS_MAX_CALLS=10 GA=true model_run --model
+check "--model under Actions: no evals-metric notice (that is evals.yml's)" \
+  test -n "$(has "$out" "evals: model calls: 2/10" && echo y)" \
+    -a -z "$(printf '%s\n' "$out" | grep -F 'evals-metric')"
+
 echo "• evals/guard.sh (offline, temp repos)"
 gr="$tmp/guard"
 git -c init.defaultBranch=main init -q "$gr" || { echo "evals: git init failed" >&2; exit 1; }
@@ -268,11 +405,21 @@ check "a PR adding a file to an existing eval: fails" test "$rc" -eq 1 \
   -a -n "$(has "$out" "FAIL: evals/old/extra.txt: adds a file to the existing eval evals/old/" \
     && echo y)"
 pr add-model
-eval_dir "$gr" judged model
+eval_dir "$gr" judged model "touch '$tmp/model-ran'; echo transcript"
 gcommit "add a model-judged eval"
 guard
 check "a PR adding a model-judged eval: format checked, not run, passes" test "$rc" -eq 0 \
+  -a ! -e "$tmp/model-ran" \
   -a -n "$(has "$out" "ok: evals/judged/ (judge: model: format checked, not run)" && echo y)"
+pr add-model-bad
+eval_dir "$gr" nojudgecheck model
+eval_dir "$gr" brokenjudge model 'if then'
+gcommit "add model-judged evals without a check.sh, or with a broken one"
+guard
+check "a model-judged eval with no check.sh, or one that doesn't parse: fails" test "$rc" -eq 1 \
+  -a -n "$(has "$out" "FAIL: evals/nojudgecheck/: a judge: model eval needs check.sh" \
+    && printf '%s\n' "$out" | grep -q '^FAIL: evals/brokenjudge/check.sh: syntax error' \
+    && echo y)"
 pr add-bad
 eval_dir "$gr" Bad-Id script 'exit 1'
 eval_dir "$gr" nocheck script

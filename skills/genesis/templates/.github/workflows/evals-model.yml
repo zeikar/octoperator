@@ -1,0 +1,29 @@
+# Written by /octoperator:genesis, only for a PRD with a judge: model scenario. Runs the
+# model-judged evals, which spend model tokens, so its one trigger is workflow_dispatch: each run
+# is a human approving the spend. Dispatch it from the default branch. Each run makes at most
+# EVALS_MAX_CALLS model calls (evals/run.sh --model refuses the rest) and stops after
+# timeout-minutes. It reads the model key from the ANTHROPIC_API_KEY repo secret, which a human
+# adds; only the step that calls the model gets it. This file is in approval_paths, so a new
+# trigger (a schedule: is unattended spend), a higher cap, or a longer timeout needs a human.
+#
+# A failing run stays the latest run of this workflow until the next dispatch: dispatch it again
+# once a fix merges.
+name: Evals (model)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evals-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      # genesis: the stack's setup and install steps from ci.yml
+      - run: bash evals/run.sh --model
+        env:
+          EVALS_MAX_CALLS: 20
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
