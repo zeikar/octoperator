@@ -12,6 +12,8 @@
 #   - octo-exclude.sh      : run for real against a throwaway local `git init` repo
 #   - octo-worktree.sh     : add / detach / list / remove run for real in a throwaway local repo
 #   - octo-merge-state.sh  : the UNKNOWN re-query loop and gh-error exit, against a stub `gh`
+#   - octo-approval-match.sh : pattern normalization, malformed patterns, matching (renames
+#                            included), and the incomplete-file-list hold, against a stub `gh`
 #   - octo-bench.sh        : the --live gate and --dry-run make no gh / claude call; preflight,
 #                            check's metrics, run's cost cap, and cleanup, against a stub `gh`
 #                            and `claude`
@@ -78,6 +80,10 @@ expect 2 "octo-merge-state.sh --pr exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-merge-state.sh" --repo o/n --pr
 expect 2 "octo-merge-state.sh non-numeric --tries exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-merge-state.sh" --repo o/n --pr 1 --tries x
+expect 2 "octo-approval-match.sh --pr exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-approval-match.sh" --pattern a --repo o/n --pr
+expect 2 "octo-approval-match.sh with no --pattern exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-approval-match.sh" --repo o/n --pr 1
 expect 2 "octo-bench.sh setup --run-id exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-bench.sh" setup vsort-numeric --dry-run --run-id
 
@@ -173,6 +179,92 @@ merge_state 0 4
 expect 0 "gh exit 4 (auth): exits 1, prints nothing" test "$ms_rc/$ms_out" = "1/"
 merge_state 0 2
 expect 0 "gh exit 2: exits 1, not the bad-arguments 2" test "$ms_rc/$ms_out" = "1/"
+
+echo "• octo-approval-match.sh (offline, stub gh)"
+# A stub `gh` first on PATH logs each call to $STUB_LOG. `api` prints the file list in $STUB_FILES
+# as the helper's jq filter would (one line per file: its path, a tab, then a rename's old path);
+# it does not run the filter itself. `pr view` prints $STUB_COUNT, or the list's line count when
+# that is unset. Both exit $STUB_GH_RC when that is non-zero.
+astub="$wtmp/approval-bin"
+mkdir -p "$astub"
+cat >"$astub/gh" <<'STUB'
+#!/usr/bin/env bash
+echo "gh $1" >>"$STUB_LOG"
+[ "${STUB_GH_RC:-0}" -eq 0 ] || exit "$STUB_GH_RC"
+case "$1" in
+  api) cat "$STUB_FILES" ;;
+  pr) echo "${STUB_COUNT:-$(grep -c '' "$STUB_FILES")}" ;;
+esac
+STUB
+chmod +x "$astub/gh"
+STUB_LOG="$wtmp/approval-log"
+STUB_FILES="$wtmp/approval-files"
+export STUB_LOG STUB_FILES
+# norm <pattern> : the helper's normalized form of one pattern.
+norm() { bounded 10 bash "$SCRIPTS_DIR/octo-approval-match.sh" --pattern "$1" --normalize; }
+for case in '/infra/=infra/**' 'infra/=infra/**' 'infra=**/infra' '*.tf=**/*.tf' \
+    '**/*.tf=**/*.tf' '.github/workflows/=.github/workflows/**' './a/b=a/b' '**/**/x=**/x' \
+    '/infra=infra' './infra=infra' '/*.tf=*.tf'; do
+  expect 0 "normalizes ${case%%=*} to ${case#*=}" test "$(norm "${case%%=*}")" = "${case#*=}"
+done
+for bad in '' / 'a?' 'a[b]' '{a,b}' '!a' 'a\b' 'a**' '**b/c' 'a//b' '../x'; do
+  rm -f "$STUB_LOG"
+  expect 2 "malformed '$bad' exits 2" \
+    bounded 10 bash "$SCRIPTS_DIR/octo-approval-match.sh" --pattern ok --pattern "$bad" \
+      --repo o/n --pr 1
+  expect 0 "malformed '$bad' makes no gh call" test ! -e "$STUB_LOG"
+done
+# approval <pattern...> : run the helper against the stub's $STUB_FILES; sets am_out / am_rc.
+approval() {
+  local args=() p
+  for p in "$@"; do args+=(--pattern "$p"); done
+  am_out="$(PATH="$astub:$PATH" bounded 10 bash "$SCRIPTS_DIR/octo-approval-match.sh" \
+    "${args[@]}" --repo o/n --pr 1 2>/dev/null)"
+  am_rc=$?
+}
+tab="$(printf '\t')"
+printf '%s\t\n' README.md main.tf main.tfvars modules/net/vpc.tf infra/main.tf infra-old/x \
+  infrastructure/x deploy/infra/run.sh .github/workflows/ci.yml xgithub/workflows/ci.yml \
+  >"$STUB_FILES"
+# matches <pattern> <expected paths, space-separated> : the helper exits 1 and prints exactly
+# these paths, each with the pattern.
+matches() {
+  local want="" p
+  for p in $2; do want="$want$p$tab$1"$'\n'; done
+  approval "$1"
+  expect 0 "'$1' matches only: $2" test "$am_rc" -eq 1 -a "$am_out"$'\n' = "$want"
+}
+matches '/infra/' 'infra/main.tf'
+matches 'infra/' 'infra/main.tf'
+matches 'infra' 'infra/main.tf deploy/infra/run.sh'
+matches '*.tf' 'main.tf modules/net/vpc.tf infra/main.tf'
+matches '**/*.tf' 'main.tf modules/net/vpc.tf infra/main.tf'
+matches '.github/workflows/' '.github/workflows/ci.yml'
+matches 'modules/**/vpc.tf' 'modules/net/vpc.tf'
+matches '/infra' 'infra/main.tf'
+approval 'docs/**' 'secrets/**' 'Infra'
+expect 0 "no match: exits 0, prints nothing" test "$am_rc" -eq 0 -a -z "$am_out"
+printf 'docs/ci.yml%s.github/workflows/ci.yml\n' "$tab" >"$STUB_FILES"
+approval '.github/workflows/'
+expect 0 "rename: the old path alone matches" \
+  test "$am_rc" -eq 1 -a "$am_out" = ".github/workflows/ci.yml$tab.github/workflows/"
+STUB_COUNT=2 approval 'nothing'
+expect 0 "fewer files listed than changedFiles: exits 3" test "$am_rc" -eq 3
+# A tab or newline inside a path would split it into pieces the pattern misses. Real gh fails in
+# the jq filter; these cases cover the helper's own line checks behind it.
+printf '.github/workflows/x\t.yml\t\n' >"$STUB_FILES"
+approval '.github/workflows/*.yml'
+expect 0 "tab in a changed path: exits 3" test "$am_rc" -eq 3
+printf '.github/workflows/x\n.yml\t\n' >"$STUB_FILES"
+STUB_COUNT=1 approval '.github/workflows/*.yml'
+expect 0 "newline in a changed path: exits 3" test "$am_rc" -eq 3
+printf 'a\tb\nc\t\n' >"$STUB_FILES"
+STUB_COUNT=1 approval 'nothing'
+expect 0 "tab and newline in one path: exits 3" test "$am_rc" -eq 3
+STUB_COUNT=3000 approval 'nothing'
+expect 0 "3000 changed files (the API limit): exits 3" test "$am_rc" -eq 3
+STUB_GH_RC=2 approval 'nothing'
+expect 0 "gh exit 2: exits 3, not the malformed-pattern 2" test "$am_rc" -eq 3
 
 echo "• octo-bench.sh (offline, stub gh and claude)"
 # Stubs first on PATH log every call to $STUB_LOG. gh answers from the fixture dir $STUB_CASE:

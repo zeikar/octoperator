@@ -46,6 +46,21 @@ statuses:
 # merge, autopilot switches to observe mode (propose only) until `--resume`.
 # Positive integer. Default: 3.
 convergence_runs: 3
+
+# Approval paths: glob patterns, relative to the repo root, for files a human
+# must approve. `auto` never merges a PR that touches a match; it holds it with
+# "needs human approval: <path>". `*` matches within one path segment, `**`
+# matches across segments. A pattern with a `/` is anchored at the repo root
+# (`infra/` or `/infra/` means the top-level `infra/` only); one with no `/`
+# matches at any depth (`*.tf` matches every `.tf` file, `infra` every `infra`
+# directory). A pattern also covers everything under a directory it matches.
+# `?`, `[...]`, `{...}`, `!`, and a backslash are unsupported; a pattern using
+# them holds every PR. `scripts/octo-approval-match.sh` applies these rules.
+# Default: empty (no gate).
+approval_paths:
+  - ".github/workflows/"
+  - "/infra/"
+  - "*.tf"
 ---
 
 # Notes

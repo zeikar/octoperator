@@ -39,9 +39,23 @@ when an issue must signal state without a project (e.g. repos without a project 
 | `ready` | Blessed for automated build. `autopilot --mode semi` builds **only** `ready` issues. A human (or `autopilot --mode full`) decides what becomes `ready`. |
 | `proposed` | Created by `research` as a candidate. In `semi` mode it awaits human triage — relabel it `ready` to build; `full` mode builds `proposed` issues directly. |
 | `octoperator-ledger` | Marks the run ledger (below). Autopilot never builds it, and `research` never counts it as user feedback. |
+| `needs-approval` | The change would deploy, spend money, or delete data. `research` adds it to such proposals; a human may add it to any issue. Autopilot never builds it, in either mode, until the issue also carries `approved`. |
+| `approved` | A human's approval to build a `needs-approval` issue. **Only a human adds it** — Octoperator never does. In `semi` mode the issue still needs `ready` too. |
 
 These are optional and only relevant when using `research` / `autopilot`; the skills create any of
-these labels that are missing.
+these labels that are missing (`research` creates `needs-approval` and `approved` when it first files
+a `needs-approval` proposal).
+
+### Approval gates
+
+Two independent gates keep deploy, spend, and delete changes in front of a human:
+- **Issue gate (`autopilot`).** Discovery skips every `needs-approval` issue without `approved` and
+  reports it as `gated: needs-approval`. It relies on the label, so an issue nobody labeled is not
+  caught.
+- **Path gate (`auto`).** Before merging, `auto` matches the PR's changed files against the
+  `approval_paths` setting (see `settings.md`) with `scripts/octo-approval-match.sh`, and holds
+  any PR that touches a match with the reason `needs human approval: <path>`. A human merges it by
+  hand. This is the backstop for sensitive files, whatever the issue's labels.
 
 ### Run ledger
 
@@ -140,8 +154,9 @@ re-review loop; leftover minors never block), that review covered the current he
 with `--match-head-commit`), and the PR is `OPEN`, not draft, with `mergeStateStatus` **`CLEAN`**
 (GitHub's "ready to merge" — no conflicts, all required checks green, not blocked by protection,
 not behind). Any other state (`DIRTY` / `BLOCKED` / `BEHIND` / `UNSTABLE` / `UNKNOWN`) → do not
-merge; report the reason. Never force-merge. The PR's `Closes #N` auto-closes the issue; move its
-board item to the mapped `done` status afterward with
+merge; report the reason. A PR that touches an `approval_paths` pattern is never merged by `auto`
+either (Approval gates above). Never force-merge. The PR's `Closes #N` auto-closes the issue; move
+its board item to the mapped `done` status afterward with
 `octo-project-status.sh ... --status "<statuses.done>"`.
 
 ## Traceability matrix

@@ -213,6 +213,36 @@ gh issue create --repo "$REPO" \
   --body "<problem/motivation, proposed change, scope, acceptance criteria, ## Evidence>"
 ```
 
+**Approval gate.** Also add `--label needs-approval` when the proposed change would do any of these
+once built:
+- **deploy** — deploy, release, or publish anything (a tag, a package, a site, a production config);
+- **spend** — incur cost or provision paid resources (cloud services, paid APIs, CI capacity);
+- **delete** — delete data, repositories, branches, or history.
+
+Judge by what the change does, not by how its text is worded; when unsure, add the label. Autopilot
+never builds a `needs-approval` issue until a human adds `approved` (see
+`${CLAUDE_PLUGIN_ROOT}/skills/autopilot/SKILL.md`, step 3a). Before the first such create, ensure
+both labels exist the same idempotent way, so the human can apply `approved` without creating it.
+Research only creates the `approved` label — it never adds it to an issue:
+
+```bash
+gh label create needs-approval --repo "$REPO" --color D93F0B \
+  --description "Deploys, spends, or deletes: needs a human to add approved"
+gh label create approved --repo "$REPO" --color 0E8A16 \
+  --description "Human-approved to build a needs-approval issue (never set by Octoperator)"
+```
+
+`approved` is a common label name. If its create reports that the label already exists, read the
+existing description:
+
+```bash
+gh api "repos/$REPO/labels/approved" --jq .description
+```
+
+If it differs from the one above, the repo may already use `approved` for something else (or let
+a bot or issue template set it). Warn about it in the report: autopilot treats the label as
+approval to build a `needs-approval` issue.
+
 Map the proposal's **category** to the single best-fit type label: `feature` → `feature`; `refactor` /
 `debt` / `dx` / `tests` → `chore`; `docs` → `docs`; an outright defect → `bug` (default `feature`).
 Always attach a priority (default `p2`) — never use `enhancement` or omit the priority. Every created issue carries the **`proposed`** label so a
@@ -220,13 +250,14 @@ human (or `autopilot` semi mode) can triage it before any build. Write a clear b
 proposed change + acceptance criteria) so the issue is implement-ready once blessed, ending with a
 `## Evidence` section that lists the re-checked entries (`<type>: <link or path> — <what it
 shows>`). Under `--dry-run`, print the issues that WOULD be created — the ones that passed the
-re-check, each with its `## Evidence` section — and create nothing, labels included.
+re-check, each with its `## Evidence` section and whether it would carry `needs-approval` — and
+create nothing, labels included.
 
 ### 6. Report
 
-Print the ranked proposals and, when `--create` ran, the URLs of the issues filed (and the count
-skipped as duplicates), plus the **Unevidenced (not filed)** and **Evidence not found** lists. When
-nothing evidenced is worth proposing, say so plainly — do not invent low-value work to fill `--count`.
+Print the ranked proposals and, when `--create` ran, the URLs of the issues filed (marking those
+labeled `needs-approval`), any `approved` label warning, and the count skipped as duplicates,
+plus the **Unevidenced (not filed)** and **Evidence not found** lists. When nothing evidenced is worth proposing, say so plainly — do not invent low-value work to fill `--count`.
 Filing nothing is a valid outcome: it is how `autopilot`'s no-progress stop learns the repo has
 nothing proven left to fix.
 
@@ -239,3 +270,5 @@ nothing proven left to fix.
 - Created issues are `proposed`, never `ready`. A human relabels them `ready` for semi-mode autopilot;
   full-mode autopilot builds `proposed` issues directly (without relabeling). Research never blesses its
   own proposals.
+- Deploy, spend, and delete proposals also carry `needs-approval`, which holds them out of autopilot
+  in both modes until a human adds `approved`. Octoperator never adds `approved`.
