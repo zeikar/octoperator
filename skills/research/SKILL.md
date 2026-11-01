@@ -29,7 +29,8 @@ Read `.claude/octoperator.local.md` for `repo` (fall back to `gh repo view --jso
 - `--count N` — how many top proposals to create with `--create` (default 3).
 - `--focus <feature|refactor|debt|tests|docs|dx|all>` — bias the ranking toward one category (default
   `all` — balance across categories, see step 3). `--focus` never *suppresses* other categories; it
-  only weights ranking, so a critical bug or blocker still surfaces regardless of focus.
+  only weights ranking, so a critical bug or blocker still surfaces regardless of focus (filed only
+  when evidenced; otherwise reported under **Unevidenced (not filed)**).
 - `--dry-run` — print proposals and what *would* be created, but create nothing (implies no writes).
 
 ### 2. Gather signal (read-only)
@@ -54,21 +55,46 @@ Build an evidence base before proposing — read, do not write:
   inconsistencies between docs and code, untested helpers.
 - **Evidence** — the only things a filed proposal may rest on. Collect them with a pointer that can be
   re-checked later (step 5):
-  - **benchmark** — a failed or held task in `bench/results/*.jsonl` (Read): cite the file, the task ID,
-    and the run ID.
-  - **eval** — a failing CI run or check:
+  - **benchmark** — a failed or held task in `bench/results/<runid>.jsonl` (Read): a line with
+    `"success": false` or a non-null `held_reason`. Cite the file (its name is the run ID; the lines
+    carry no run-ID field) and the line's `task`. `bench/results/` is gitignored, so the file exists
+    only on the machine that ran the benchmark and no one triaging the issue can open it — once #69's
+    committed baseline report lands, cite that instead.
+  - **eval** — the latest completed run of a workflow on the default branch, when it failed. Older or
+    other-branch failures don't count: a later push may already have fixed them.
     ```bash
-    gh run list --repo "$REPO" --status failure --limit 20 --json databaseId,name,headBranch,url
+    gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBranchRef.name'
+    gh workflow list --repo "$REPO" --json name --jq '.[].name'
+    # per workflow; keep it only if conclusion is "failure":
+    gh run list --repo "$REPO" --branch <default> --workflow "<name>" --status completed --limit 1 \
+      --json databaseId,conclusion,url
     gh run view <databaseId> --repo "$REPO" --log-failed
     ```
     Cite the run URL.
-  - **failure-log** — a PR `auto`/`autopilot` left held (open, with a blocking Octoperator review or a
-    stated hold reason), or a run-ledger entry: cite the PR or comment URL.
-  - **user-feedback** — an issue or comment a person wrote, not one Octoperator generated (not labeled
-    `proposed`, not an Octoperator review): cite its URL.
+  - **failure-log** — a PR `auto`/`autopilot` left held, or a ledger entry once #72's ledger issue
+    exists. `auto` reports hold reasons only in its terminal table, so on GitHub a held PR is an open
+    PR whose latest review's verdict is `request_changes` (a self-review states it in the body of a
+    COMMENT review), or a draft on an Octoperator branch:
+    ```bash
+    gh pr list --repo "$REPO" --state open --json number,url,isDraft,headRefName,reviews
+    ```
+    Cite the PR or comment URL. A held PR is in-flight work, so it supports a root-cause or tooling
+    proposal (why such PRs get held) — never a re-proposal of the held PR's own issue (step 3 dedupes
+    that away).
+  - **user-feedback** — an issue or comment a person wrote, not one Octoperator generated. The author
+    can't tell them apart (Octoperator posts as the same GitHub user), so exclude: issues labeled
+    `proposed`; issues whose body has a `## Evidence` section (research's own, even after a human
+    relabeled them `ready`); issues `plan-epic` filed (an epic with a `## Children` section, or a child
+    whose body opens with `Part of #<epic>`); descriptions of PRs on Octoperator branches (matching
+    `branch_pattern`, default `{number}-{slug}`); and Octoperator reviews. Read a candidate with:
+    ```bash
+    gh issue view <n> --repo "$REPO" --json url,body,state,stateReason,comments
+    ```
+    Cite the issue or comment URL.
 
   Code-level gaps above are leads, not evidence: a TODO or a doc/code mismatch can point at a problem,
-  but it is filed only if one of these four backs it.
+  but it is filed only if one of these four backs it — even a critical bug found only by reading code
+  is reported (step 4), not filed.
 
 For a large or unfamiliar repo, dispatch a read-only `Task` subagent to survey a subtree and report
 gaps, then synthesize — but the skill itself owns the final ranked list and any issue creation.
@@ -113,8 +139,8 @@ excluded).
   proposal with a one-line reason naming the clause it hits.
 - **Rank** what remains by roadmap fit as well as value-to-effort: work that advances the earliest
   roadmap item not yet done (skipping any marked on hold) ranks above equally valuable work that
-  doesn't. Roadmap fit never outranks a critical
-  bug or blocker.
+  doesn't. Roadmap fit never outranks a critical bug or blocker — though, like any proposal, one
+  without evidence is reported, not filed.
 
 Without the file, skip this — research behaves exactly as it does today.
 
@@ -126,16 +152,20 @@ proposals with no evidence, each with the lead it came from — and, when `VISIO
 **Dropped by VISION.md**, each with its reason. Never drop silently. This is the deliverable when not
 creating issues.
 
-### 5. Create issues (only with `--create`, and not under `--dry-run`)
+### 5. Create issues (only with `--create`; under `--dry-run`, preview only)
 
 File the top `--count` **evidenced** proposals — never fill `--count` with unevidenced ones.
 
-**Re-check the evidence first.** Right before filing a proposal, re-read every entry it cites: `gh run
-view <id> --repo "$REPO"` for an eval, `gh pr view` / `gh issue view` (or the comment's issue) for a
-failure-log or user-feedback link, Read for a benchmark file — and confirm the cited run, PR, comment,
-or task/run ID is really there and still says what the entry claims. If any entry can't be found or no
-longer holds (the run was re-run green, the PR merged, the comment is gone), drop that entry; a
-proposal left with no entry is not filed — report it under **Evidence not found**.
+**Re-check the evidence first.** Right before filing a proposal, re-read every entry it cites, using
+the step 2 command for its type: re-run the eval's `gh run list --branch <default> --workflow "<name>"
+… --limit 1` query, `gh pr view <n> --repo "$REPO" --json state,isDraft,reviews` for a failure-log PR,
+`gh issue view` (or the comment's issue) for a user-feedback link, Read for a benchmark file. Confirm
+the cited run, PR, comment, or task line is really there and still says what the entry claims. If any
+entry can't be found or no longer holds — a newer run of the workflow on the default branch is no
+longer a failure, the run was re-run green, the PR merged or closed, the issue was closed as
+completed, the comment is gone — drop that entry; a proposal left with no entry is not filed — report
+it under **Evidence not found**, and the next-ranked **evidenced** proposal takes its slot (never an
+unevidenced one). The re-check is read-only, so it runs under `--dry-run` too.
 
 File them using Octoperator's own label taxonomy (see
 `github-conventions/references/conventions.md`): exactly one **type** label (`feature` / `bug` /
@@ -162,7 +192,8 @@ Always attach a priority (default `p2`) — never use `enhancement` or omit the 
 human (or `autopilot` semi mode) can triage it before any build. Write a clear body (motivation +
 proposed change + acceptance criteria) so the issue is implement-ready once blessed, ending with a
 `## Evidence` section that lists the re-checked entries (`<type>: <link or path> — <what it
-shows>`). Under `--dry-run`, print the issues that WOULD be created and create nothing.
+shows>`). Under `--dry-run`, print the issues that WOULD be created — the ones that passed the
+re-check, each with its `## Evidence` section — and create nothing, labels included.
 
 ### 6. Report
 

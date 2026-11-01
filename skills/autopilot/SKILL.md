@@ -149,8 +149,9 @@ Run the **`research`** procedure (`${CLAUDE_PLUGIN_ROOT}/skills/research/SKILL.m
 
 Print a per-cycle summary and an overall result:
 - per cycle: issues attempted, `merged` vs `held: <reason>`, issues skipped because an open PR already
-  holds them (closes them or uses their branch; `#<issue> → PR #<pr>`), and any `research` proposals
-  filed (URLs);
+  holds them (closes them or uses their branch; `#<issue> → PR #<pr>`), any `research` proposals
+  filed (URLs), and research's **Unevidenced (not filed)** and **Evidence not found** lists — a
+  defect found only by reading code is never filed, so this is the only place it surfaces;
 - overall: total merged, total held (with reasons), proposed issues awaiting triage, cycles consumed
   vs the cap, and the **next action** (semi: "relabel proposed → ready, then re-run autopilot"; full:
   "re-run to continue, or inspect held PRs").

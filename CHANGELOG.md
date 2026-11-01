@@ -8,10 +8,10 @@ All notable changes to Octoperator are documented in this file. The format is ba
 
 ### Added
 - `research` files only evidenced proposals ("no evidence, no issue"). Each proposal carries an
-  Evidence field — `benchmark`, `eval` (failing CI), `failure-log` (a held PR or ledger entry), or
-  `user-feedback` — which `--create` re-checks right before filing and writes into the issue's
-  `## Evidence` section. Code-only leads (TODOs, doc/code drift) are still reported, as
-  "Unevidenced (not filed)".
+  Evidence field — `benchmark`, `eval` (a failing latest CI run on the default branch), `failure-log`
+  (a held PR or ledger entry), or `user-feedback` — which `--create` re-checks right before filing
+  and writes into the issue's `## Evidence` section. Code-only leads (TODOs, doc/code drift) are
+  still reported, as "Unevidenced (not filed)".
 - `VISION.md`, a product constitution: goal, target users, quality bar, immutable constraints, and
   an evidence-revised roadmap. `research` reads a target repo's `VISION.md` when present — dropping
   (and listing) proposals that break an immutable constraint or fall outside the goal, and ranking the
