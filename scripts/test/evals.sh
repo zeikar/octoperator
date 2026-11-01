@@ -10,7 +10,8 @@
 #                notice only under GitHub Actions; and the attacks on it: a symlinked eval, a
 #                check that writes into the repo (the run stops), one that leaves a process
 #                behind, one that reads the CI environment, and one that prints workflow commands;
-#                under Actions only, an evals/ that differs from the commit stops the run first
+#                under Actions only, an evals/ that differs from the commit (an ignored file
+#                there too) stops the run first
 #   - guard.sh : against throwaway git repos, a PR that adds a must-fail eval passes; one that adds
 #                an eval already passing on the base, modifies, deletes, or renames an eval, or
 #                adds a file to an existing eval fails; a model-judged eval is not run; an eval
@@ -21,8 +22,9 @@
 #                polluted base tree, a check rewriting the running guard, and an export-ignore
 #                on the base; --diff-only runs no check; --run-new and --verdict, as the
 #                workflow's three jobs run them (the base from checkout's origin/<base branch>),
-#                a forged or missing result, a base that moved between must-fail and verdict,
-#                and a base with no evals/guard.sh or no fetched base branch (each job fails)
+#                a forged or missing result, a base that moved between must-fail and verdict
+#                (fails a PR that changes evals/, passes one that doesn't, fails closed with no
+#                merge base), and a base with no evals/guard.sh or no fetched base branch (each job fails)
 #
 # Nothing here calls gh or the network. Exits 0 when every check passes, 1 when any fails.
 set -uo pipefail
@@ -104,6 +106,16 @@ check "under Actions, a check rewritten before the run: stops, runs nothing, no 
 out="$(GITHUB_ACTIONS=false bash "$r/evals/run.sh" 2>&1)"
 check "outside Actions, an eval being written runs as it is" has "$out" "pass: fail"
 git -C "$r" checkout -q -- evals && rm -rf "$r/evals/planted"
+# An eval planted where .gitignore hides it is still a difference from the commit.
+printf 'evals/hidden/\n' >"$r/.git/info/exclude"
+eval_dir "$r" hidden script 'exit 0'
+out="$(GITHUB_ACTIONS=true bash "$r/evals/run.sh" 2>&1)"; rc=$?
+check "under Actions, an ignored eval planted before the run: stops, runs nothing" \
+  test "$rc" -eq 1 -a -n "$(has "$out" \
+    "evals: aborted: evals/ differs from the commit before any check ran (git status)" \
+    && has "$out" "    !! evals/hidden/check.sh" && echo y)" \
+    -a -z "$(printf '%s\n' "$out" | grep -e '^pass: ' -e 'evals-metric')"
+rm -rf "$r/evals/hidden" && : >"$r/.git/info/exclude"
 rm -rf "$r/evals/fail" "$r/evals/badexit"
 out="$(GITHUB_ACTIONS=false bash "$r/evals/run.sh" "$r" 2>&1)"; rc=$?
 check "every script eval passes (one skipped): exits 0" \
@@ -498,6 +510,26 @@ job verdict
 check "the verdict job fails a new script eval with no result" test "$rc" -eq 1 -a -n "$(has \
   "$out" "FAIL: evals/marker/check.sh: no must-fail result: it did not run on the base" && echo y)"
 rm -rf "$tmp/rt" "$tmp/ran-marker"
+# A PR that changes nothing the guard reads gives it nothing to judge on any base: a base that
+# moved between must-fail and verdict does not hold it.
+pr appchange
+echo v2 >"$gr/app.txt"
+gcommit "a product change only"
+job must-fail
+git -C "$gr" rev-parse main~1 >"$tmp/rt/must-fail/base.txt"
+job verdict
+check "the verdict job passes a PR that changes no evals when must-fail judged another base" \
+  test "$rc" -eq 0 -a -n "$(has "$out" "::notice title=evals-guard-base::$realbase" \
+    && has "$out" "evals-guard: 0 new script eval(s) judged, 0 problem(s)" && echo y)"
+# That exemption fails closed: with no merge base, verdict can't tell what the PR changes.
+orphan="$(git -C "$gr" -c user.name=t -c user.email=t@example.invalid commit-tree -m orphan \
+  "main^{tree}")"
+git -C "$gr" checkout -q --detach "$orphan"
+job verdict
+check "the verdict job fails when must-fail judged another base and there is no merge base" \
+  test "$rc" -eq 1 -a -n "$(has "$out" "::error::no merge base of $realbase and $orphan" \
+    && echo y)" -a -z "$(printf '%s\n' "$out" | grep -e 'evals-guard-base')"
+rm -rf "$tmp/rt"
 # A must-fail check that changes its tree could make another pass on main: each gets a fresh tree,
 # and a change fails the eval.
 pr pollute

@@ -11,7 +11,8 @@
 #
 # The base is the base branch's tip as this run fetched it, not the event's base.sha, so re-running
 # all jobs from the Actions tab judges against the current tip. must-fail writes the base it used
-# into the artifact, and verdict fails when its own fetch saw another one.
+# into the artifact, and verdict fails when its own fetch saw another one and the PR changes
+# evals/ or the root .gitattributes (for any other PR the guard has nothing to judge).
 name: Evals guard
 
 on:
@@ -83,9 +84,17 @@ jobs:
           export GIT_NO_REPLACE_OBJECTS=1
           BASE_SHA="$(git rev-parse --verify "refs/remotes/origin/$GITHUB_BASE_REF^{commit}")" \
             || { echo "::error::no fetched tip for the base branch $GITHUB_BASE_REF"; exit 1; }
-          # The base branch moved between the jobs: must-fail judged an older base.
-          [ "$(cat "$RUNNER_TEMP/must-fail/base.txt" 2>/dev/null)" = "$BASE_SHA" ] \
-            || { echo "::error::must-fail judged another base: re-run all jobs"; exit 1; }
+          # The base branch moved between the jobs: must-fail judged an older base. That matters
+          # only to a PR that changes what the guard reads, evals/ or the root .gitattributes.
+          if [ "$(cat "$RUNNER_TEMP/must-fail/base.txt" 2>/dev/null)" != "$BASE_SHA" ]; then
+            MB="$(git merge-base "$BASE_SHA" "$HEAD_SHA")" \
+              || { echo "::error::no merge base of $BASE_SHA and $HEAD_SHA"; exit 1; }
+            READ="$(GIT_LITERAL_PATHSPECS=1 git diff --no-color --no-renames --no-ext-diff \
+              --no-textconv --raw "$MB" "$HEAD_SHA" -- evals .gitattributes)" \
+              || { echo "::error::git diff failed"; exit 1; }
+            [ -z "$READ" ] \
+              || { echo "::error::must-fail judged another base: re-run all jobs"; exit 1; }
+          fi
           echo "::notice title=evals-guard-base::$BASE_SHA"
           g="$(git show "$BASE_SHA:evals/guard.sh")" && [ -n "$g" ] \
             || { echo "::error::no evals/guard.sh at $BASE_SHA"; exit 1; }

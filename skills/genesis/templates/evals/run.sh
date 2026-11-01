@@ -19,7 +19,8 @@
 # differs after a check, that eval fails and the run stops there, printing `evals: aborted …`
 # instead of the summary: a check that writes into the repo could make the next one pass. Under
 # GitHub Actions, the run also stops before any check when evals/ differs from the commit
-# (`git status -- evals`): the setup before it ran the repo's code, which could rewrite a check.
+# (`git status --ignored -- evals`): the setup before it ran the repo's code, which could rewrite
+# a check, or plant one that .gitignore hides.
 #
 # It prints one line per eval, then `evals: <passed>/<total> passed (<skipped> skipped)`, where
 # total counts the script evals. Under GitHub Actions (GITHUB_ACTIONS=true) it also prints
@@ -115,7 +116,7 @@ snap >"$tmp/before" 2>"$tmp/snap.err" \
 # rewritten a check, so evals/ must match the commit. Not locally, where a new eval is untracked
 # while it is being written.
 if [ "${GITHUB_ACTIONS:-}" = true ]; then
-  dirty="$(git -C "$REPO" --no-optional-locks status --porcelain -uall -- evals)" \
+  dirty="$(git -C "$REPO" --no-optional-locks status --porcelain --ignored -uall -- evals)" \
     || { echo "run: git status failed in $REPO" >&2; exit 2; }
   if [ -n "$dirty" ]; then
     echo "evals: aborted: evals/ differs from the commit before any check ran (git status)"

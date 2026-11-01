@@ -122,8 +122,9 @@ A check that changes the repo (its HEAD, or its `git status` with ignored files)
 stops there with `evals: aborted: <id> changed the repo it judges …`, no summary, and no metric:
 the evals after it would judge a different repo, and one could pass for that reason alone. Under
 GitHub Actions the run also stops before any check, the same way, when `evals/` differs from the
-commit (`git status -- evals`): the setup before it ran the product's code. Locally it doesn't,
-since a new eval is untracked while it is being written.
+commit (`git status --ignored -- evals`, so an ignored file there counts): the setup before it
+ran the product's code. Locally it doesn't, since a new eval is untracked while it is being
+written.
 
 It ends with:
 
@@ -158,9 +159,11 @@ workflow command such as a forged `evals-metric` notice.
   - **`evals-guard must-fail`**: the stack's setup (which runs PR code: `npm install` runs the
     root `package.json`'s install scripts), then `--run-new`, which runs each new check and
     uploads its exit code, and the base it used, as an artifact.
-  - **`evals-guard verdict`**: no setup; downloads the artifact and runs `--verdict`. It fails
-    when its own fetch of the base differs from the one must-fail used (the base moved between
-    the jobs), so both judged the same base.
+  - **`evals-guard verdict`**: no setup; downloads the artifact and runs `--verdict`. When its
+    own fetch of the base differs from the one must-fail used (the base moved between the jobs),
+    it fails if the PR changes `evals/` or the root `.gitattributes` (from the merge base to the
+    head, as the guard reads them), so both judged the same base; any other PR gives the guard
+    nothing to judge on either base, so it passes rather than waiting for a re-run.
 
   The append-only and verdict jobs print the base they judged against as an
   `::notice title=evals-guard-base::<sha>` annotation, which `auto` reads.
@@ -228,9 +231,10 @@ With no flag, the guard does all of it in one process, which is how to run it lo
 - **Not closed mechanically: `evals.yml`'s setup.** On `main`, the stack's setup runs merged
   product code before `run.sh` (a `postinstall` in `package.json`, …). It could rewrite a check on
   disk, and the guard saw only a `package.json` change. Under Actions, `run.sh` stops before any
-  check when `git status -- evals` isn't clean, but code that rewrites `run.sh` itself, or hides
-  the change from git, gets past that, so the reviewer reads a change to an install-time script
-  as closely as a new check.
+  check when `git status --ignored -- evals` isn't clean, ignored files included, but code that
+  rewrites `run.sh` itself, or hides the change from git by other means (`skip-worktree`, a
+  rewritten index, a `git` on the `PATH`), gets past that, so the reviewer reads a change to an
+  install-time script as closely as a new check.
 - **Stale guard.** `pull_request` runs don't re-run when `main` moves, so an eval judged against an
   older base may already pass on today's. When the PR changes anything under `evals/` or the root
   `.gitattributes` (the only paths the guard reads), `auto` holds a guard run against an older
