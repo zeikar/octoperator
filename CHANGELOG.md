@@ -35,8 +35,9 @@ All notable changes to Octoperator are documented in this file. The format is ba
   writes a minimal skeleton for the ADR's stack (one module, one passing test, the test command's
   detection file and no earlier one, `.github/workflows/ci.yml` on `push` and `pull_request`, a
   `.gitignore` listing `.claude/octoperator.local.md` and `.octoperator/`, and a README quoting
-  the sentence), runs the test command once locally, then `git init`, commits, checks GitHub
-  (`gh auth status`, a GraphQL call that stops with the #79 reason, and the name), runs
+  the sentence), runs the test command once locally, then `git init`, commits, re-checks the
+  folder's git state, checks GitHub (`gh auth status`, a GraphQL call that stops with the #79
+  reason, and the name), runs
   `gh repo create --private` (`--public` only for `visibility: public`) with the sentence as the
   description, and runs setup with fixed answers: no board, the labels, and settings with
   `approval_paths: [".github/workflows/"]`. It ends with `genesis: scaffolded <repo>`. A failing

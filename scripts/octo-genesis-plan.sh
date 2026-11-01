@@ -6,8 +6,8 @@
 #
 # DIR is the genesis proposal folder. The helper runs `octo-genesis-check.sh --values DIR` (the
 # proposal check) first, then works out the stage from DIR's git state:
-#   scaffold  DIR is outside any git work tree: write the skeleton, test, git init, commit, then
-#             create
+#   scaffold  DIR is outside any git work tree: write the skeleton, test, git init, commit, this
+#             helper again, then create
 #   commit    DIR is a work tree's top level with nothing committed: as scaffold, without init
 #   create    a commit and no origin: preflight, name check, gh repo create --push, then setup
 #   push      origin is GENESIS.md's repo, but HEAD has no upstream there: preflight, git push,
@@ -25,7 +25,9 @@
 # origin counts as GENESIS.md's repo only when every URL git fetches from and pushes to (`git
 # remote get-url`, so a pushurl and insteadOf rewrites count) is a github.com URL of that repo.
 # With no origin yet (stages commit and create), the https and ssh URLs gh repo create may give
-# origin must stay that repo after git's insteadOf and pushInsteadOf rewrites.
+# origin must stay that repo after git's insteadOf and pushInsteadOf rewrites. Some rewrites apply
+# only once DIR is a repo (`includeIf "gitdir:…"`, `init.templateDir`), so stages scaffold and
+# commit run this helper again after the commit: going on needs exit 0 and `stage: create`.
 #
 # Read-only and offline: it reads DIR's files and git state; it never calls gh or writes.
 #
@@ -193,7 +195,8 @@ case "$STAGE" in
     step "git -C $D add -- GENESIS.md VISION.md docs/research.md docs/prd.md" \
       "docs/adr/0001-stack.md README.md .gitignore .github/workflows/ci.yml $TEST_FILE" \
       "<the skeleton's other files>"
-    step "git -C $D commit -m 'chore: scaffold from genesis'" ;;
+    step "git -C $D commit -m 'chore: scaffold from genesis'"
+    step "bash $(q "$HERE/octo-genesis-plan.sh") $D" ;;
 esac
 step "gh auth status"
 step "gh api graphql -f query='{viewer{login}}'"

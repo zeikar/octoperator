@@ -50,7 +50,7 @@ deletes nothing, and the access date is the session's current date.
 |---|---|
 | `Bash(gh:*)` | `gh api user` (the repo owner, first run); under `--approve`, the preflight, the name check, `gh repo create`, and `gh label create` |
 | `Bash(git:*)` | `--approve`: `git init`, `git add`, `git commit`, and `git push` when a push must be retried |
-| `Bash(bash:*)` | `octo-genesis-check.sh` (the preflight, the proposal check, the skeleton check), `octo-genesis-plan.sh` (the `--approve` stage and steps), and setup's `octo-setup.sh` probe |
+| `Bash(bash:*)` | `octo-genesis-check.sh` (the preflight, the proposal check, the skeleton check), `octo-genesis-plan.sh` (the `--approve` stage and steps, and its re-check after the commit), and setup's `octo-setup.sh` probe |
 | `Read` | the formats in `references/proposal.md` and `references/skeleton.md`, `docs/research.md` for stage 2, the ADR for the skeleton, and the files to summarize |
 | `Write` | the five proposal files; under `--approve`, the skeleton files and `.claude/octoperator.local.md`, each only when missing |
 | `Edit` | `--approve`: fix a skeleton file this run wrote when the skeleton check fails, and add `.github/workflows/` to an existing settings file's `approval_paths` |
@@ -243,6 +243,11 @@ with the reason given here; the next `--approve` resumes from what exists.
    build output, or a file of the human's. A failure → stop with `git init failed`,
    `git add failed`, or `git commit failed`, quoting git's output (a commit without an identity
    needs `git config --global user.name` and `user.email`).
+   - Then the plan helper again, the step after `git commit`. Git config that applies only once
+     the folder is a repo (an `includeIf "gitdir:…"`, `init.templateDir`) can rewrite where the
+     push goes, and the first plan couldn't see it. Go on only on exit 0 with `stage: create`,
+     using the first plan's remaining steps. Exit 1 → stop with `git state invalid`, quoting the
+     lines; any other exit, or another stage → stop with `plan failed`, quoting the output.
 5. **Preflight**, `gh auth status` and `gh api graphql …`. Either exits non-zero → stop with
    `GitHub GraphQL unavailable (#79, run locally)`: Claude Code cloud sessions block GitHub's
    GraphQL API, which every later `gh` step needs; when `gh auth status` failed, suggest

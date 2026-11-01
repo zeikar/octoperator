@@ -24,9 +24,10 @@
 #                            --values, and --skeleton's detection-file, CI, .gitignore, and
 #                            README checks
 #   - octo-genesis-plan.sh : each stage's ordered steps (scaffold, commit, create, push, setup),
-#                            --private unless visibility: public, approval claimed in GENESIS.md
-#                            ignored, the description's quoting and UTF-8-safe cut, git-state
-#                            failures; it writes nothing and never calls gh (stub `gh`)
+#                            the re-check after the commit, --private unless visibility: public,
+#                            approval claimed in GENESIS.md ignored, the description's quoting and
+#                            UTF-8-safe cut, git-state failures (a rewrite only a repo's config
+#                            has included); it writes nothing and never calls gh (stub `gh`)
 #   - octo-bench.sh        : the --live gate and --dry-run make no gh / claude call; preflight,
 #                            check's metrics, run's cost cap, and cleanup, against a stub `gh`
 #                            and `claude`
@@ -747,6 +748,10 @@ expect 0 "--skeleton, README without the sentence: exits 1" test "$gc_rc" -eq 1 
 
 echo "• octo-genesis-plan.sh (offline, temp dirs, stub gh)"
 PLAN="$SCRIPTS_DIR/octo-genesis-plan.sh"
+# The helper resolves URLs through git: keep the developer's own git config (an insteadOf rule)
+# out of this section's answers. Restored after the section.
+pl_saved_env="$(declare -p GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM 2>/dev/null)"
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 # A stub gh first on PATH logs any call: the helper must make none.
 pstub="$wtmp/plan-bin"
 mkdir -p "$pstub"
@@ -773,6 +778,7 @@ labels="$labels"$'\n'"$labels"$'\n'"gh label create"
 setup_tail="bash octo-setup.sh"$'\n'"write octoperator.local.md"$'\n'"$labels"
 preflight="gh auth status"$'\n'"gh api graphql"
 local_steps="write the"$'\n'"bash octo-genesis-check.sh"$'\n'"npm test"
+recheck="git commit"$'\n'"bash octo-genesis-plan.sh"
 
 genesis_fixture "$p/scaffold"
 before="$(cd "$p/scaffold" && find . | LC_ALL=C sort)"
@@ -780,9 +786,11 @@ rm -f "$wtmp/plan-gh.log"
 genesis_plan "$p/scaffold"
 expect 0 "scaffold: exits 0, stage scaffold" \
   test "$pl_rc" -eq 0 -a -n "$(printf '%s\n' "$pl_out" | grep -Fx 'stage: scaffold')"
-expect 0 "scaffold: skeleton, check, test, init, add, commit, preflight, name, create, setup" \
-  test "$pl_steps" = "$local_steps"$'\n'"git init"$'\n'"git add"$'\n'"git commit"$'\n'"$preflight\
+expect 0 "scaffold: skeleton, check, test, init, add, commit, re-check, preflight, name, create, \
+setup" test "$pl_steps" = "$local_steps"$'\n'"git init"$'\n'"git add"$'\n'"$recheck"$'\n'"$preflight\
 "$'\n'"gh repo view"$'\n'"gh repo create"$'\n'"$setup_tail"
+expect 0 "scaffold: the re-check runs this helper on the folder" \
+  test -n "$(pl_line "bash $PLAN $p/scaffold$")"
 expect 0 "scaffold: gh repo create is --private, from the folder, pushed to origin" \
   test -n "$(pl_line "gh repo create smoke/chat-pal --private --source $p/scaffold --remote \
 origin --push --description='A character-chat app: it remembers you across long conversations\.'$")"
@@ -832,7 +840,7 @@ genesis_fixture "$p/commit"
 git -C "$p/commit" -c init.defaultBranch=main init -q
 genesis_plan "$p/commit"
 expect 0 "git repo, nothing committed: stage commit, the scaffold steps without git init" \
-  test "$pl_rc" -eq 0 -a "$pl_steps" = "$local_steps"$'\n'"git add"$'\n'"git commit\
+  test "$pl_rc" -eq 0 -a "$pl_steps" = "$local_steps"$'\n'"git add"$'\n'"$recheck\
 "$'\n'"$preflight"$'\n'"gh repo view"$'\n'"gh repo create"$'\n'"$setup_tail"
 gcommit "$p/commit"
 genesis_plan "$p/commit"
@@ -847,6 +855,24 @@ expect 0 "committed, no origin, a pushInsteadOf to another host: exits 1, one FA
 https://github.com/smoke/chat-pal.git would be https://evil.example/smoke/chat-pal.git, not \
 GENESIS.md's repo smoke/chat-pal"
 git -C "$p/commit" config --unset url.https://evil.example/.pushInsteadOf
+# A rewrite that applies only once the folder is a repo (includeIf gitdir:) is invisible at stage
+# scaffold: the re-check after git commit catches it.
+genesis_fixture "$p/incl"
+# gitdir: matches the real path, and the temp dir may sit behind a symlink (macOS /var).
+printf '[includeIf "gitdir:%s/"]\n\tpath = %s\n' "$(cd "$p/incl" && pwd -P)" "$p/incl.inc" \
+  >"$p/incl.global"
+printf '[url "https://evil.example/"]\n\tpushInsteadOf = https://github.com/\n' >"$p/incl.inc"
+GIT_CONFIG_GLOBAL="$p/incl.global" genesis_plan "$p/incl"
+expect 0 "an includeIf gitdir: rewrite, folder not a repo yet: stage scaffold, with the re-check" \
+  test "$pl_rc" -eq 0 -a -n "$(printf '%s\n' "$pl_out" | grep -Fx 'stage: scaffold')" \
+    -a -n "$(printf '%s\n' "$pl_steps" | grep -Fx 'bash octo-genesis-plan.sh')"
+git -C "$p/incl" -c init.defaultBranch=main init -q
+gcommit "$p/incl"
+GIT_CONFIG_GLOBAL="$p/incl.global" genesis_plan "$p/incl"
+expect 0 "the re-check after git init and commit: exits 1, the includeIf rewrite's FAIL: git: line" \
+  test "$pl_rc" -eq 1 -a "$pl_out" = "FAIL: git: a new origin \
+https://github.com/smoke/chat-pal.git would be https://evil.example/smoke/chat-pal.git, not \
+GENESIS.md's repo smoke/chat-pal"
 git -C "$p/commit" config url.git@github.com:.insteadOf https://github.com/
 genesis_plan "$p/commit"
 expect 0 "committed, no origin, https rewritten to github.com ssh: still stage create" \
@@ -903,6 +929,8 @@ pl_out="$(PATH="$gstub:$PATH" bounded 10 bash "$PLAN" "$p/scaffold" 2>/dev/null)
 expect 0 "git fails another way: exits 3" test "$pl_rc" -eq 3 -a -z "$pl_out"
 expect 2 "no DIR exits 2"        bounded 10 bash "$PLAN"
 expect 2 "a missing DIR exits 2" bounded 10 bash "$PLAN" "$p/nosuch"
+unset GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
+eval "$pl_saved_env"
 
 echo "• octo-bench.sh (offline, stub gh and claude)"
 # Stubs first on PATH log every call to $STUB_LOG. gh answers from the fixture dir $STUB_CASE:
