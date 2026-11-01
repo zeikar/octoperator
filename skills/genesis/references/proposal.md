@@ -50,7 +50,7 @@ test_command: <npm test | make test | pytest | go test ./...>
 Review and edit these files in place; genesis never regenerates a file that exists. To start
 over, delete the files (keep `.claude/`) and run genesis again. When they are right, run
 `/octoperator:genesis --approve --dry-run` to see every command, then
-`/octoperator:genesis --approve` to create the repo. The MVP handoff (#89) is not built yet.
+`/octoperator:genesis --approve` to create the repo, plan the MVP epic, and print the handoff.
 ```
 
 Front-matter rules:

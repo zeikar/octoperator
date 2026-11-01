@@ -11,7 +11,8 @@ Write each file only when it is missing. A file that exists is the human's, or a
 The skeleton is the smallest project the ADR's stack needs, so its test command passes locally and
 in CI. It has no product code beyond one module, and it installs nothing on your machine: the
 module and test use only the language's standard library and the test runner. The MVP is built
-later, through the issues plan-epic files (#89). Scenario evals (`evals/`, their workflows) come
+later, through the MVP epic's issues, which `--approve` files by plan-epic's procedure once the
+repo exists. Scenario evals (`evals/`, their workflows) come
 with #90.
 
 ## Files

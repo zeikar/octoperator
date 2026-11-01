@@ -13,9 +13,12 @@
 #   push      origin is GENESIS.md's repo, but HEAD has no upstream there: preflight, git push,
 #             then setup
 #   setup     origin is GENESIS.md's repo and HEAD is pushed: preflight, then setup's steps
+# Every stage ends with the same tail: the MVP epic lookup (octo-genesis-epic.sh), plan-epic
+# when that finds none, and the handoff.
 #
 # It prints `dir:`, `repo:`, and `stage:` lines, then one numbered step per line, in run order.
-# A step that starts with `write ` is a file to write (skills/genesis/references/skeleton.md);
+# A step that starts with `write ` is a file to write (skills/genesis/references/skeleton.md), and
+# one that starts with `plan ` or `print ` is a procedure the skill runs (skills/genesis/SKILL.md);
 # every other step is one plain command to run as printed, except that `<the skeleton's other
 # files>` in `git add` stands for the skeleton's module, test, and any stack manifest its
 # `test_command` needs. Visibility is --private unless GENESIS.md says `visibility: public`. The
@@ -219,3 +222,7 @@ for l in 'epic 6f42c1 Large body of work' 'feature 0e8a16 New capability' 'bug d
     "--description $(q "${rest#* }") --force"
 done
 for l in p0 p1 p2 p3; do step "gh label create $l --repo $REPO --color ededed --force"; done
+step "bash $(q "$HERE/octo-genesis-epic.sh") $D"
+step "plan the MVP epic with plan-epic (skills/plan-epic/SKILL.md): only if the lookup printed" \
+  "\`epic: none\`, with the lookup again once the epic exists, before any child"
+step "print the handoff (skills/genesis/SKILL.md → Handoff)"
