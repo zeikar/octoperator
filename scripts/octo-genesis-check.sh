@@ -10,7 +10,8 @@
 #   - GENESIS.md opens with front matter holding a non-empty `sentence`, `repo` as OWNER/NAME,
 #     `visibility` as private or public, a non-empty `stack`, and a `test_command` that
 #     issue-implementer's detection order finds: npm test (package.json), make test (Makefile),
-#     pytest (pyproject.toml), or go test ./... (go.mod).
+#     pytest (pyproject.toml), or go test ./... (go.mod). A value may be quoted, or end in an
+#     unquoted value's ` # comment`.
 #   - docs/research.md has the sections ## Problem, ## Prior art, ## Build, ## Skip, and
 #     ## Sources. Prior art has a Name | Kind | URL | License | Strengths | Gaps table whose
 #     rows have a kind of service or OSS and an http(s) URL. Build and Skip have at least one
@@ -23,11 +24,13 @@
 #     ## Requirements, and ## Success metrics. Requirements holds `### R<n>: <title>` headings,
 #     each with `- ` acceptance criteria; the scope and metrics sections have `- ` items.
 #   - docs/adr/0001-stack.md has ## Context, ## Decision, ## Alternatives considered (`- `
-#     items), and ## Consequences. One Decision line names GENESIS.md's test_command in
-#     backticks and the file that command is detected by.
+#     items), and ## Consequences. Decision has a "- Test command: `<test_command>`" item, with
+#     GENESIS.md's test_command, that names the file the command is detected by, backticked,
+#     after "found by" (continuation lines included).
 #   - VISION.md has ## Goal, ## Target users, ## Quality bar, ## Immutable constraints, and
-#     ## Roadmap. Immutable constraints holds the four baseline constraints as exact `- ` lines,
-#     and Roadmap item `1.` is the MVP.
+#     ## Roadmap. Immutable constraints holds the four baseline constraints as `- ` lines, each
+#     exact up to its end or a space after it, and Roadmap item `1.` is the MVP.
+#   - When docs/research.md is ungrounded, the PRD, the ADR, and VISION.md cite no http(s) URL.
 #
 # --preflight checks DIR before genesis writes anything: it is outside any git work tree, it
 # holds nothing but a `.claude/` directory, and its name is a valid GitHub repo name (letters,
@@ -76,6 +79,14 @@ BASELINE=(
 # GENESIS.md's test_command, and the file issue-implementer detects it by; set by
 # check_genesis_md for the ADR's cross-check (empty when test_command is invalid).
 TEST_CMD="" TEST_FILE=""
+
+# 1 when docs/research.md carries the ungrounded marker; set by check_research_md, so the
+# stage-2 files are checked for made-up URLs too.
+UNGROUNDED=0
+
+# An http(s) URL: the scheme and a host's first character (`[` opens an IPv6 host), so
+# "http:// to https://" in prose, bare or backticked, is not one.
+URL_RE='https\{0,1\}://[A-Za-z0-9[]'
 
 # test_file <command> : prints the file issue-implementer's detection order (Step 3 of
 # agents/issue-implementer.md) finds the command by; exits 1 when no rule finds it.
@@ -129,11 +140,18 @@ front_matter() {
        END { exit !closed }' "$1"
 }
 
-# fm_value <front-matter> <key> : prints the key's inline value, trimmed (empty when the key is
-# missing or has no inline value).
+# fm_value <front-matter> <key> : prints the key's inline value, trimmed, as YAML reads it: one
+# pair of matching quotes, or an unquoted value's trailing ` # comment`, removed (empty when the
+# key is missing or has no inline value).
 fm_value() {
   printf '%s\n' "$1" | awk -v k="$2" 'index($0, k ":") == 1 {
-    v = substr($0, length(k) + 2); gsub(/^[ \t]+|[ \t\r]+$/, "", v); print v; exit }'
+    v = substr($0, length(k) + 2); gsub(/^[ \t]+|[ \t\r]+$/, "", v)
+    q = substr(v, 1, 1)
+    if (q == "\"" || q == "\047") {
+      end = index(substr(v, 2), q)
+      if (end && substr(v, end + 2) ~ /^([ \t]+#.*)?$/) v = substr(v, 2, end - 1)
+    } else sub(/[ \t]+#.*$/, "", v)
+    print v; exit }'
 }
 
 # fm_has_sentence <front-matter> : exits 0 when `sentence` has a non-empty value, inline or as a
@@ -200,7 +218,7 @@ report() {
 }
 
 check_research_md() {
-  local f="$ABS/docs/research.md" grounded=1 s body missing=0 n url
+  local f="$ABS/docs/research.md" grounded=1 s body missing=0 n
   local problem="" prior="" build="" skip="" sources=""
   [ -f "$f" ] || { fail "docs/research.md is missing"; return 0; }
   # The marker counts only above ## Problem; a misplaced or misspelled one is reported, and the
@@ -213,7 +231,7 @@ check_research_md() {
                index(low, "ungrounded") && (!above || index(low, "web access")) { near = 1 }
                END { if (!found && near) print "near" }' \
             "$f")" in
-    early) grounded=0 ;;
+    early) grounded=0 UNGROUNDED=1 ;;
     late) fail "docs/research.md: the line 'ungrounded: no web access' must come" \
             "before ## Problem" ;;
     near) fail "docs/research.md: write the marker exactly as the line" \
@@ -262,16 +280,13 @@ check_research_md() {
             print "FAIL: docs/research.md: ungrounded, but ## Prior art has " rows " row(s)" }')"
   report "$body"
 
-  # An http(s) URL: the scheme and a host's first character (`[` opens an IPv6 host), so
-  # "http:// to https://" in prose, bare or backticked, is not one.
-  url='https\{0,1\}://[A-Za-z0-9[]'
   # Only Build items must cite a URL; a Skip item needs its reason, and may cite one.
   for s in Build Skip; do
     if [ "$s" = Build ]; then body="$(items "$build")"; else body="$(items "$skip")"; fi
     if [ -z "$body" ]; then
       fail "docs/research.md: ## $s needs at least one '- ' item"
     elif [ "$s" = Build ] && [ "$grounded" -eq 1 ]; then
-      n="$(printf '%s\n' "$body" | grep -cv "$url" || true)"
+      n="$(printf '%s\n' "$body" | grep -cv "$URL_RE" || true)"
       [ "$n" -eq 0 ] || fail "docs/research.md: $n ## Build item(s) cite no URL"
     fi
   done
@@ -281,7 +296,7 @@ check_research_md() {
     # An ungrounded run read nothing, so any source or URL in the file was made up.
     n="$(printf '%s' "$body" | grep -c '' || true)"
     [ "$n" -eq 0 ] || fail "docs/research.md: ungrounded, but ## Sources has $n item(s)"
-    n="$(grep -c "$url" "$f" || true)"
+    n="$(grep -c "$URL_RE" "$f" || true)"
     [ "$n" -eq 0 ] || fail "docs/research.md: ungrounded, but $n line(s) cite an http(s) URL"
   elif [ -z "$body" ]; then
     fail "docs/research.md: ## Sources has no items"
@@ -316,6 +331,15 @@ requirements() {
                   "<title>\047 heading" }')"
 }
 
+# no_urls <file> <name> : FAIL when docs/research.md is ungrounded and the file cites an http(s)
+# URL: an ungrounded run read nothing, so the URL was made up.
+no_urls() {
+  local n
+  [ "$UNGROUNDED" -eq 1 ] || return 0
+  n="$(grep -c "$URL_RE" "$1" || true)"
+  [ "$n" -eq 0 ] || fail "$2: research is ungrounded, but $n line(s) cite an http(s) URL"
+}
+
 check_prd() {
   local f="$ABS/docs/prd.md" s body
   [ -f "$f" ] || { fail "docs/prd.md is missing"; return 0; }
@@ -331,6 +355,7 @@ check_prd() {
       *) [ -n "$(items "$body")" ] || fail "docs/prd.md: ## $s needs at least one '- ' item" ;;
     esac
   done
+  no_urls "$f" docs/prd.md
 }
 
 check_adr() {
@@ -347,14 +372,24 @@ check_adr() {
       *) has_text "$body" || fail "$n: ## $s is empty" ;;
     esac
     # The ADR and GENESIS.md must agree on the test command, so the skeleton (#88) builds the
-    # one the human reviewed. Skipped when test_command itself already failed.
+    # one the human reviewed. Skipped when test_command itself already failed. The template's
+    # "- Test command: `<cmd>`" item must name the file, backticked, after "found by"; the
+    # item's indented continuation lines count, so a wrapped item passes.
     if [ "$s" = Decision ] && [ -n "$TEST_CMD" ]; then
-      printf '%s\n' "$body" | awk -v c="\`$TEST_CMD\`" -v f="$TEST_FILE" \
-        'index($0, c) && index($0, f) { ok = 1 } END { exit !ok }' \
-        || fail "$n: ## Decision needs a line naming \`$TEST_CMD\` (GENESIS.md's" \
-          "test_command) and $TEST_FILE"
+      printf '%s\n' "$body" | awk -v c="- Test command: \`$TEST_CMD\`" -v f="\`$TEST_FILE\`" '
+        function check(  r, p) {
+          r = it; gsub(/[ \t]+/, " ", r); p = index(r, "found by ")
+          if (p && index(substr(r, p), f)) ok = 1 }
+        { line = $0; sub(/[ \t\r]+$/, "", line) }
+        item && line ~ /^[ \t]+[^ \t]/ { it = it " " line; next }
+        item { check(); item = 0 }
+        index(line, c) == 1 { item = 1; it = line }
+        END { if (item) check(); exit !ok }' \
+        || fail "$n: ## Decision needs the item '- Test command: \`$TEST_CMD\` — found by" \
+          "\`$TEST_FILE\`' (GENESIS.md's test_command)"
     fi
   done
+  no_urls "$f" "$n"
 }
 
 check_vision() {
@@ -369,8 +404,11 @@ check_vision() {
     case "$s" in
       'Immutable constraints')
         body="$(items "$body" | sed 's/[[:space:]]*$//')"
+        # The line may go on after a space, as Octoperator's own VISION.md explains its rules.
         for b in "${BASELINE[@]}"; do
-          printf '%s\n' "$body" | grep -Fqx -- "- $b" \
+          printf '%s\n' "$body" | awk -v b="- $b" 'index($0, b) == 1 &&
+              (length($0) == length(b) || substr($0, length(b) + 1, 1) == " ") { ok = 1 }
+              END { exit !ok }' \
             || fail "VISION.md: ## Immutable constraints needs the baseline line '- $b'"
         done ;;
       Roadmap)
@@ -378,6 +416,7 @@ check_vision() {
           || fail "VISION.md: ## Roadmap item 1. must be the MVP" ;;
     esac
   done
+  no_urls "$f" VISION.md
 }
 
 if [ "$PREFLIGHT" -eq 1 ]; then

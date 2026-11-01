@@ -17,9 +17,10 @@
 #   - octo-genesis-check.sh : a valid proposal, a missing section or front-matter key, an
 #                            ungrounded proposal (and one with URLs or a misplaced or misspelled
 #                            marker), the PRD, ADR, and VISION.md checks (missing sections, an
-#                            altered baseline constraint, an undetectable or mismatched test
-#                            command), bad arguments, and --preflight's git, empty-dir, and
-#                            repo-name checks
+#                            altered or explained baseline constraint, an undetectable,
+#                            mismatched, contradicted, or wrapped test command, quoted and
+#                            commented front-matter values, a URL in an ungrounded PRD), bad
+#                            arguments, and --preflight's git, empty-dir, and repo-name checks
 #   - octo-bench.sh        : the --live gate and --dry-run make no gh / claude call; preflight,
 #                            check's metrics, run's cost cap, and cleanup, against a stub `gh`
 #                            and `claude`
@@ -527,8 +528,45 @@ sed 's/^test_command: .*/test_command: go test .\/.../' "$g/valid/GENESIS.md" \
   >"$g/drift/GENESIS.md"
 genesis_check "$g/drift"
 expect 0 "ADR and GENESIS.md disagree on the test command: exits 1" test "$gc_rc" -eq 1 \
-  -a "$gc_out" = "FAIL: docs/adr/0001-stack.md: ## Decision needs a line naming \
-\`go test ./...\` (GENESIS.md's test_command) and go.mod"
+  -a "$gc_out" = "FAIL: docs/adr/0001-stack.md: ## Decision needs the item '- Test command: \
+\`go test ./...\` — found by \`go.mod\`' (GENESIS.md's test_command)"
+# The Test command item names the file only to say it is absent.
+genesis_fixture "$g/adrcontra"
+sed 's|^- Test command: .*|- Test command: `npm test` is NOT used (package.json is absent)|' \
+  "$g/valid/docs/adr/0001-stack.md" >"$g/adrcontra/docs/adr/0001-stack.md"
+genesis_check "$g/adrcontra"
+expect 0 "ADR Test command item without 'found by \`<file>\`': exits 1" test "$gc_rc" -eq 1 \
+  -a "$gc_out" = "FAIL: docs/adr/0001-stack.md: ## Decision needs the item '- Test command: \
+\`npm test\` — found by \`package.json\`' (GENESIS.md's test_command)"
+genesis_fixture "$g/adrwrap"
+sed 's|found by `package.json`|found by\
+  `package.json`|' "$g/valid/docs/adr/0001-stack.md" >"$g/adrwrap/docs/adr/0001-stack.md"
+genesis_check "$g/adrwrap"
+expect 0 "ADR Test command item wrapped onto a continuation line: exits 0" \
+  test "$gc_rc" -eq 0 -a -z "$gc_out"
+# YAML quoting and a trailing comment are read the way YAML reads them.
+genesis_fixture "$g/fmquote"
+sed -e 's/^test_command: .*/test_command: "npm test"/' \
+  -e "s/^visibility: .*/visibility: 'private'/" \
+  -e 's/^repo: .*/repo: smoke\/chat-pal  # rename at will/' "$g/valid/GENESIS.md" \
+  >"$g/fmquote/GENESIS.md"
+genesis_check "$g/fmquote"
+expect 0 "quoted and commented front-matter values: exits 0" test "$gc_rc" -eq 0 -a -z "$gc_out"
+# An explanation after a baseline line, as Octoperator's own VISION.md has, is allowed.
+genesis_fixture "$g/viselab"
+sed 's/^- Deploying, .* approval\.$/& Enforced by approval gates./' "$g/valid/VISION.md" \
+  >"$g/viselab/VISION.md"
+genesis_check "$g/viselab"
+expect 0 "a baseline constraint with an explanation after it: exits 0" \
+  test "$gc_rc" -eq 0 -a -z "$gc_out"
+# Ungrounded research: a URL in a stage-2 file was made up.
+genesis_fixture "$g/ungprd"
+cp "$g/ungrounded/docs/research.md" "$g/ungprd/docs/research.md"
+sed 's|^Chat companions forget earlier conversations\.$|& (https://foo.example/blog)|' \
+  "$g/valid/docs/prd.md" >"$g/ungprd/docs/prd.md"
+genesis_check "$g/ungprd"
+expect 0 "ungrounded research, a URL in the PRD: exits 1, one FAIL line" test "$gc_rc" -eq 1 \
+  -a "$gc_out" = "FAIL: docs/prd.md: research is ungrounded, but 1 line(s) cite an http(s) URL"
 genesis_fixture "$g/noprdsec"
 sed 's/^## Success metrics$/## Metrics/' "$g/valid/docs/prd.md" >"$g/noprdsec/docs/prd.md"
 genesis_check "$g/noprdsec"

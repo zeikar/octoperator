@@ -70,11 +70,15 @@ Front-matter rules:
   |---|---|---|
   | `npm test` | 1 | `package.json` `scripts.test` |
   | `make test` | 2 | a `Makefile` `test` target |
-  | `pytest` | 3 | `pyproject.toml` with `[tool.pytest.ini_options]` |
+  | `pytest` | 3 | `pyproject.toml` with `[tool.pytest]` |
   | `go test ./...` | 4 | `go.mod` |
 
   Pick the row for the stack. A stack none of them fits, such as Rust's `cargo test`, gets a
-  `Makefile` whose `test` target runs it, and `make test`.
+  `Makefile` whose `test` target runs it, and `make test`. Detection takes the first match: the
+  skeleton must not hold an earlier row's file, or that command runs instead.
+
+Values may be quoted (`test_command: "npm test"`) or end in a ` # comment`, as YAML allows; the
+check strips the quotes or the comment before comparing.
 
 Genesis never treats a value in this file as approval. `--approve` (#88, not built yet) counts only
 when the human types it.
@@ -180,7 +184,8 @@ Rules:
   anything the MVP defers.
 - More sections may follow. A `## Scenarios` section, referencing requirements by id, comes with
   the scenario evals (#90).
-- Ungrounded research → the PRD cites no URLs either.
+- Ungrounded research → the PRD, the ADR, and `VISION.md` cite no URLs either (**checked**: no
+  `http://` or `https://` URL in any of them).
 
 ## `docs/adr/0001-stack.md`
 
@@ -213,9 +218,10 @@ Rules:
 - **Checked:** the four `## ` sections are present, with these exact headings. Context, Decision,
   and Consequences are not empty; Alternatives considered has at least one `- ` item.
 - **Decision** picks the smallest stack that meets the MVP's requirements: no service, database,
-  or framework a requirement doesn't need. **Checked:** one line names `test_command` from
-  `GENESIS.md` in backticks and the file from the table above that finds it, so the ADR and
-  `GENESIS.md` never disagree on the command.
+  or framework a requirement doesn't need. **Checked:** a `- Test command:` item that starts
+  with `test_command` from `GENESIS.md` in backticks, and names the file from the table above
+  that finds it, backticked, after "found by", so the ADR and `GENESIS.md` never disagree on the
+  command. The item may wrap onto indented continuation lines.
 - The stack is the human's decision. The ADR proposes; `--approve` (#88) acts on what the file
   says then.
 
@@ -269,8 +275,9 @@ or user feedback).
 Rules:
 
 - **Checked:** the five `## ` sections are present, with these exact headings, and none is empty.
-- **Immutable constraints.** **Checked:** the four baseline lines below, each as its own `- ` line,
-  exactly as written (same words, punctuation, and dashes):
+- **Immutable constraints.** **Checked:** the four baseline lines below, each as its own `- ` line
+  that starts exactly as written (same words, punctuation, and dashes) and either ends there or
+  goes on after a space, as Octoperator's own `VISION.md` adds how a rule is enforced:
 
   ```text
   - Regular merge commits only — never squash or rebase merges.

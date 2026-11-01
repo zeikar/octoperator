@@ -124,7 +124,8 @@ once, in this order, in the formats of `references/proposal.md`:
    private`, `stack` and `test_command` as in the ADR, and a body listing the proposal files and
    the decisions the human owns.
 
-In an ungrounded run, these files cite no URLs either. Stage 2 makes no GitHub write.
+In an ungrounded run, these files cite no URLs either; the check fails any http(s) URL in them.
+Stage 2 makes no GitHub write.
 
 ## Check
 
