@@ -64,6 +64,7 @@ autonomous shipping, plus the always-on knowledge layer.
 - **`octo-subissue.sh`** — link a child issue to its epic as a native sub-issue (falls back to a task list).
 - **`octo-project-status.sh`** — add an issue/PR to the board and set its Status by name.
 - **`octo-merge-state.sh`** — print a PR's `mergeStateStatus`, waiting out GitHub's `UNKNOWN`; used by `auto`'s merge gate.
+- **`octo-evals-guard.sh`** — in a repo with genesis's evals guard, check that both guard checks passed on a PR's reviewed commit against the base branch's current tip (`pass`, `none`, or why to hold: a `[skip ci]` head has no checks); read-only; used by `auto`'s merge gate.
 - **`octo-approval-match.sh`** — normalize the `approval_paths` patterns and match a PR's changed files (renamed files' old paths too) against them; used by `auto`'s approval-path gate.
 - **`octo-genesis-check.sh`** — check that a directory is empty and outside git for `genesis` (`--preflight`), and that the proposal it wrote is complete: `GENESIS.md` front matter (including a `test_command` that `issue-implementer` detects), the `docs/research.md`, `docs/prd.md`, and `docs/adr/0001-stack.md` sections, and a `VISION.md` with the baseline immutable constraints verbatim; with `--skeleton`, that the skeleton `--approve` wrote is detectable and wired up (the test command's detection file and no earlier one, CI on `push` and `pull_request`, the `.gitignore` entries, the sentence in the README), and that its scenario evals are in place (the eval runner and guard copied verbatim, the evals workflows on their triggers, one `evals/<id>/` per PRD scenario); offline.
 - **`octo-genesis-plan.sh`** — work out where `genesis --approve` resumes from the folder's git state (`scaffold`, `commit`, `create`, `push`, or `setup`) and print its ordered commands, the `gh repo create` description made safe, through the MVP epic and the handoff; read-only and offline.
@@ -410,7 +411,11 @@ failing eval there would hold every PR, the fix included), and prints
 `main` is the `eval` evidence `research` files issues from. The `evals-guard` check holds any PR
 that modifies or deletes an eval, or adds one that already passes on `main`, so evals only grow
 and adding must-fail ones merges unattended; weakening one takes a human. Its workflow is under
-`.github/workflows/`, which the settings' `approval_paths` covers. Format and rules:
+`.github/workflows/`, which the settings' `approval_paths` covers, and `auto` merges only when its
+checks passed on the reviewed commit against the current `main` (a `[skip ci]` commit has none).
+The append-only rule runs in a job with no PR code, so it holds; whether a new eval fails on `main`
+first is checked after the PR's dependencies install, so it is advisory, and a reviewer still reads
+each new check. Confirm the first `Evals` run on `main` is red. Format and rules:
 [`skills/genesis/references/evals.md`](skills/genesis/references/evals.md). The model-judged eval
 runner, the eval metric, and the next milestone (#91–#93) are not built yet. The plan is
 [epic #85](https://github.com/zeikar/octoperator/issues/85).

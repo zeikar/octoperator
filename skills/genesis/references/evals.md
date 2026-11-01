@@ -19,7 +19,7 @@ What stage 3 writes into the new repo, each only when missing:
 | `evals/run.sh` | `${CLAUDE_PLUGIN_ROOT}/skills/genesis/templates/evals/run.sh`, verbatim |
 | `evals/guard.sh` | `${CLAUDE_PLUGIN_ROOT}/skills/genesis/templates/evals/guard.sh`, verbatim |
 | `.github/workflows/evals.yml` | its template, plus the stack's setup steps |
-| `.github/workflows/evals-guard.yml` | its template, plus the stack's setup steps |
+| `.github/workflows/evals-guard.yml` | its template, plus the stack's setup steps in its `must-fail` job |
 | `evals/<id>/scenario.md` | one per `docs/prd.md` scenario |
 | `evals/<id>/check.sh` | one per `judge: script` scenario |
 
@@ -28,13 +28,16 @@ What stage 3 writes into the new repo, each only when missing:
 - **The workflows.** Read each template and Write it with the one line
   `# genesis: the stack's setup and install steps from ci.yml` replaced by the same setup and
   install steps as `ci.yml` (`actions/setup-node` and `npm install`, …), so a check can run the
-  app. Change nothing else. **Checked:** every line of the template except comments and blank
-  lines, in order; `evals.yml` triggers on exactly `push` (with `branches: [main]`) and
+  app. Change nothing else: in `evals-guard.yml` that line is in the `must-fail` job only, and the
+  other two jobs must stay free of setup steps, since setup runs the PR's code. **Checked:**
+  every line of the template except comments and blank lines, in order; `evals.yml` triggers on exactly `push` (with `branches: [main]`) and
   `workflow_dispatch`; and `evals-guard.yml` triggers on exactly `pull_request`.
 - **One eval per scenario.** **Checked:** each `docs/prd.md` scenario has its `scenario.md`, and
   each `judge: script` scenario has its `check.sh`, which parses (`bash -n`). The check never runs
   it. An eval that fails on the bare skeleton is expected: that failure is what pushes the work
-  forward.
+  forward. These first evals never pass through the guard, so nothing has shown they fail: the
+  handoff asks the human to confirm that the first `Evals` run on `main` is red, and an eval that
+  passes there is a bug in that eval.
 
 ## In the PRD: `## Scenarios`
 
@@ -74,10 +77,14 @@ At turn 200 of a conversation with a stub model, the context still holds the tur
   per problem.
 - Check **behavior, not implementation**: run the code on the check's own inputs instead of
   matching source text, so any correct build passes.
-- Work in a `mktemp -d` directory, and leave no files in `<repo-dir>`.
-- Don't depend on the working directory or on `<repo-dir>` being a git repo.
+- Work in a `mktemp -d` directory, and leave `<repo-dir>` as you found it. **Enforced:** `run.sh`
+  and the guard compare `<repo-dir>`'s HEAD and `git status --porcelain --ignored -uall` before
+  and after each check; a change fails the eval, and `run.sh` stops there. Ignored files count, so
+  set `PYTHONDONTWRITEBYTECODE=1` (as bench says), and build into your `mktemp -d` directory.
+- Don't depend on the working directory, on `<repo-dir>` being a git repo, or on the environment:
+  a check sees only `PATH` and `HOME`.
 - Fail before the work is done. Bench's check must fail on its seed; an eval must fail on the
-  default branch when it is added (the guard below enforces it).
+  default branch when it is added (the guard below checks it, but can't fully enforce it).
 
 What differs from bench, and why:
 
@@ -99,10 +106,18 @@ and its **must-fail-first** rule, not its harness.
 ## `evals/run.sh`
 
 `bash evals/run.sh [repo-dir]` runs every `judge: script` eval against the repo (default: the
-directory above `evals/`) and skips `judge: model` ones. Each check runs as bench's validator runs
-checks: from a neutral `mktemp -d` directory, stdin from `/dev/null`, in its own process group,
-killed with every process it started after `EVALS_CHECK_TIMEOUT` seconds (default 120). A check
-passes only on exit 0; a timeout, exit 2, or a missing `check.sh` counts as failed.
+directory above `evals/`, which must be in a git work tree) and skips `judge: model` ones. Each
+check runs as bench's validator runs checks: from a neutral `mktemp -d` directory, stdin from
+`/dev/null`, in its own process group, killed with every process it started after
+`EVALS_CHECK_TIMEOUT` seconds (default 120). It also runs under `env -i PATH=… HOME=…`, and its
+process group is killed once it exits, so nothing it left running in that group can write while
+a later check runs. A check passes only on exit 0; a timeout, exit 2, or a missing `check.sh` counts as failed,
+and so does a symlink in `evals/`, which is never followed (it could count a check outside
+`evals/`, or one twice).
+
+A check that changes the repo (its HEAD, or its `git status` with ignored files) fails, and the run
+stops there with `evals: aborted: <id> changed the repo it judges …`, no summary, and no metric:
+the evals after it would judge a different repo, and one could pass for that reason alone.
 
 It ends with:
 
@@ -112,7 +127,10 @@ evals: <passed>/<total> passed (<skipped> skipped)
 ```
 
 `<total>` counts the script evals. The notice is printed only under GitHub Actions
-(`GITHUB_ACTIONS=true`). It exits 1 when any script eval fails, so the workflow run fails.
+(`GITHUB_ACTIONS=true`). It exits 1 when any script eval fails, so the workflow run fails. Under
+GitHub Actions a failed check's output is printed between `::stop-commands::<token>` and
+`::<token>::`, with a random token, so a check (or product code it runs) can't print a
+workflow command such as a forged `evals-metric` notice.
 
 ## The workflows and their triggers
 
@@ -125,35 +143,88 @@ evals: <passed>/<total> passed (<skipped> skipped)
   and files from a failing one (its `eval` evidence type). That is `evals.yml`'s run, so research
   needs no change.
 - **`evals-guard.yml`** runs on `pull_request`, never `pull_request_target`, with read-only
-  permissions. It checks out the full history and runs the **base branch's** `evals/guard.sh`
-  (`git show "$BASE_SHA:evals/guard.sh"`), so a PR can't change the guard that judges it.
+  permissions, in three jobs. Each checks out the full history and runs the **base branch's**
+  `evals/guard.sh` from git's objects (`bash -c "$(git show "$BASE_SHA:evals/guard.sh")"`, with
+  `GIT_NO_REPLACE_OBJECTS=1`), so a PR can't change the guard that judges it:
+  - **`evals-guard append-only`**: `--diff-only`. No setup step, so no PR code runs in it.
+  - **`evals-guard must-fail`**: the stack's setup (which runs PR code: `npm install` runs the
+    root `package.json`'s install scripts), then `--run-new`, which runs each new check and
+    uploads its exit code as an artifact.
+  - **`evals-guard verdict`**: no setup; downloads the artifact and runs `--verdict`.
+
+  The append-only and verdict jobs print the base they judged against as an
+  `::notice title=evals-guard-base::<sha>` annotation, which `auto` reads.
 
 ## The guard
 
-`bash evals/guard.sh <base> <head>` looks at the PR's own changes under `evals/`: `git diff
---name-status --no-renames` from the merge base of `<base>` and `<head>` to `<head>`. An eval the
-default branch gained after the PR branched is not one the PR deletes. It fails when:
+`bash evals/guard.sh [--diff-only] <base> <head>` looks at the PR's own changes: `git diff --raw
+--no-renames` from the merge base of `<base>` and `<head>` to `<head>`, under `evals/` and to the
+root `.gitattributes`. An eval the default branch gained after the PR branched is not one the PR
+deletes.
 
-- the PR modifies, deletes, or renames any file under `evals/`, `run.sh` and `guard.sh` included
-  (a rename shows as a delete);
+**The append-only rule** (`--diff-only`, the `append-only` job). It reads git objects only and
+runs nothing from the PR. It fails when:
+
+- the PR modifies (its mode included), deletes, renames, or changes the type of any file under
+  `evals/`, `run.sh` and `guard.sh` included (a rename shows as a delete);
+- the PR adds a symlink or a submodule anywhere under `evals/`, a file directly under `evals/`
+  (outside an eval directory), or a path holding a control character;
+- the PR changes the root `.gitattributes`, or adds a `.gitattributes` under `evals/`: either
+  changes how git checks the evals out (`export-subst`, `ident`, `eol`, …), so a check could read
+  differently on the guard's tree than on `main`;
 - the PR adds a file to an eval directory that already exists;
 - a new eval's `scenario.md` is missing, or its front matter lacks `id: <id>` (kebab-case),
   `judge: script` or `judge: model`, or `requirement: R<n>`;
-- a new `judge: script` eval has no `check.sh`, or one that doesn't parse;
-- a new `judge: script` eval's `check.sh` **passes** on the base, or times out there. Bench's
-  validator requires each check to fail on its seed; the guard requires each new eval to fail on
-  the default branch. It runs the head's copy of the check against a `git archive` of the base,
-  sandboxed as `run.sh` runs checks. The base copy has the runtime CI set up, but not the
-  head's installed dependencies (`node_modules/`, …). A check that needs them fails there for
-  that reason alone, so the guard can't tell whether it already passes: keep a check to the
-  runtime and the code it runs where you can.
+- a new `judge: script` eval has no `check.sh`, or one that doesn't parse.
 
-A new `judge: model` eval is format-checked only. A failing guard makes the PR `UNSTABLE`, so
-`auto` holds it. Weakening an eval, or changing the runner or the guard, then takes a human.
+**Must-fail-first** (`--run-new`, then `--verdict`). Bench's validator requires each check to fail
+on its seed; the guard requires each new `judge: script` eval to fail on the default branch. Each
+new check runs on its own fresh tree, built to look like `main` will after the merge, minus the
+PR's product code: a `git clone --shared` checkout of the base (not `git archive`, so no
+`export-*` attribute applies) with every new eval directory laid over it, committed on top of the
+base so it has a `.git` and a clean status, and the workspace's ignored directories
+(`node_modules/`, a virtualenv, …) linked in, so a check finds the dependencies setup installed.
+It runs as `run.sh` runs it. The verdict fails a new script eval whose check passes (exit 0),
+times out, or changes its tree, or that has no result. A new `judge: model` eval is
+format-checked only.
+
+The linked directories are the head's: if the stack's setup also builds the head (`dist/`), a
+check that runs that build passes on the base tree, and the guard holds the PR. Keep builds out of
+setup, or build inside the check's `mktemp -d` directory.
+
+With no flag, the guard does all of it in one process, which is how to run it locally.
+
+### What is enforced, and what isn't
+
+- **Enforced: the append-only rule.** Its job runs no PR code, so the PR can't forge its verdict;
+  `.github/workflows/` is in `approval_paths`, so the PR can't change the workflow without a human;
+  and `auto` merges only when that job and the verdict job passed on the reviewed commit, against
+  the base branch's current tip (`scripts/octo-evals-guard.sh`). A `[skip ci]` head commit runs no
+  workflow, so `auto` holds it as `evals guard did not pass`. No eval is modified, deleted, or
+  renamed, and no symlink or top-level file is added, without a human.
+- **Advisory: must-fail-first.** The `must-fail` job runs PR code before the checks (setup), and a
+  hosted runner gives that code passwordless `sudo`. It can forge the uploaded exit codes, swap
+  `git` or `bash` on the `PATH`, or plant replace refs, so a PR that sets out to can make the
+  verdict pass. Within the job, the guard closes the obvious tells: it is parsed whole before any
+  check runs (a check can't rewrite it mid-run), it ignores replace refs, and each check gets a
+  fresh tree with `.git`, its own directory, and a clean environment.
+- **Not closed mechanically.** A check can still tell the guard's tree from `main`: by timing,
+  randomness, the git history (`HEAD`'s parent, the clone's `origin`), or its path. A check can
+  also rewrite an untracked or ignored file in place (the linked dependency directories included),
+  which `git status` doesn't see, or start a daemon that leaves its process group. **The reviewer still reads each new `check.sh`**: it must
+  test the scenario, the same way on any tree.
+- **Stale guard.** `pull_request` runs don't re-run when `main` moves, so an eval judged against an
+  older base may already pass on today's. `auto` holds such a PR as `evals guard stale`; close and
+  reopen the PR to re-run the guard against the current base (a re-run from the Actions tab
+  replays the original event, so it reuses the old base).
+
+A failing guard job makes the PR `UNSTABLE`, so `auto` holds it. Weakening an eval, or changing the
+runner or the guard, then takes a human.
 
 **Append-only additions merge automatically.** `approval_paths` holds the guard workflow, not
 `evals/`: genesis's settings list `.github/workflows/`, which covers
 `.github/workflows/evals-guard.yml` and `evals.yml`, so `auto` never merges a change to either
-without a human. `evals/` stays out, so a PR that only adds must-fail evals merges like any other.
+without a human. `evals/` stays out, so a PR that only adds must-fail evals merges like any other,
+once `auto`'s evals-guard gate sees both guard checks pass.
 The new repo's `VISION.md` says the same in its quality bar: the passing count never drops, and
 evals only grow.

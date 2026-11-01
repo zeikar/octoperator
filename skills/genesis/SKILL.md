@@ -294,7 +294,8 @@ with the reason given here; the next `--approve` resumes from what exists.
 8. **Setup**, by reference with fixed answers (skeleton.md → Settings): the `octo-setup.sh` probe,
    the settings file only when missing, and the labels. Its `approval_paths` entry
    `.github/workflows/` covers `.github/workflows/evals-guard.yml`, so a change to the guard
-   needs a human; `evals/` is not in it, so a PR that only adds must-fail evals merges. A probe
+   needs a human; `evals/` is not in it, so a PR that only adds must-fail evals merges once its
+   guard checks pass. A probe
    `error`, a non-zero exit, or a failed label → stop with `setup failed`. A settings file whose
    `repo:` is not `<repo>` → stop with `settings repo mismatch`, before any label.
 
@@ -354,7 +355,12 @@ plan-epic's procedure reads them as written and files everything in `<repo>`.
     - **Evals.** The scenario evals and their ids: `evals.yml` runs `bash evals/run.sh` on each
       push to `main` and fails until their work lands, which `research` reads as `eval`
       evidence; `evals-guard` holds any PR that modifies or deletes an eval, or adds one that
-      already passes on `main`. Model-judged evals are skipped until #91.
+      already passes on `main`, and `auto` merges no PR whose guard checks didn't pass.
+      Model-judged evals are skipped until #91. These first evals never went through the guard,
+      so ask the human to confirm that the first `Evals` run on `main` (the run for the push
+      above) is red, with each script eval failing: one that passes there is a bug in that eval,
+      to fix by hand before autopilot builds on it. A new eval's `check.sh` still needs a
+      reviewer's read (`references/evals.md`).
     - **Semi mode (the default).** Review the children and relabel the ones to build `ready`: the
       human's call, never genesis's. A fresh repo has no `ready` label until autopilot's first run
       creates it, so create it once, then label each child (or use the web UI):

@@ -73,8 +73,8 @@ jobs:
 ```
 
 Workflow files are in `approval_paths` (below), so `auto` never merges a change to CI, the evals
-workflow, or the evals guard without a human. `evals.yml` and `evals-guard.yml` take the same
-setup and install steps as `ci.yml` (`references/evals.md`).
+workflow, or the evals guard without a human. `evals.yml` and `evals-guard.yml`'s `must-fail` job
+take the same setup and install steps as `ci.yml` (`references/evals.md`).
 
 ## Settings
 

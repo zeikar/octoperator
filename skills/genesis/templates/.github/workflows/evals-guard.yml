@@ -1,6 +1,13 @@
 # Written by /octoperator:genesis. Fails a PR that modifies, deletes, or renames an eval, or adds
-# one that already passes on the base branch. It runs the base branch's evals/guard.sh, so a PR
-# cannot change its own judge; this file is in approval_paths for the same reason.
+# one that already passes on the base branch. Every job runs the base branch's evals/guard.sh, so
+# a PR cannot change its own judge; this file is in approval_paths for the same reason.
+#
+# append-only runs no PR code: no setup step, and the guard read from the base's git objects. It
+# is the hard rule. must-fail installs the PR's dependencies (which runs PR code) and runs each new
+# check on the base; verdict, again with no PR code, judges what must-fail recorded. PR code in
+# must-fail can forge that record, so the must-fail verdict is advisory (skills/genesis/references/
+# evals.md). append-only and verdict record the base they judged against as an evals-guard-base
+# notice: auto merges only when both passed, against the base branch's tip.
 name: Evals guard
 
 on:
@@ -10,17 +17,60 @@ permissions:
   contents: read
 
 jobs:
-  guard:
+  append-only:
+    name: evals-guard append-only
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Evals only grow (the base branch's guard)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          export GIT_NO_REPLACE_OBJECTS=1
+          echo "::notice title=evals-guard-base::$BASE_SHA"
+          bash -c "$(git show "$BASE_SHA:evals/guard.sh")" guard --diff-only "$BASE_SHA" "$HEAD_SHA"
+
+  must-fail:
+    name: evals-guard must-fail
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       # genesis: the stack's setup and install steps from ci.yml
-      - name: Guard the evals (the base branch's guard)
+      - name: Run each new check on the base (the base branch's guard)
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          git show "$BASE_SHA:evals/guard.sh" >"$RUNNER_TEMP/guard.sh"
-          bash "$RUNNER_TEMP/guard.sh" "$BASE_SHA" "$HEAD_SHA"
+          export GIT_NO_REPLACE_OBJECTS=1
+          mkdir -p "$RUNNER_TEMP/must-fail"
+          bash -c "$(git show "$BASE_SHA:evals/guard.sh")" guard --run-new "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/must-fail/results.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evals-guard-must-fail
+          path: ${{ runner.temp }}/must-fail/results.txt
+
+  verdict:
+    name: evals-guard verdict
+    needs: must-fail
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: evals-guard-must-fail
+          path: ${{ runner.temp }}/must-fail
+      - name: New evals fail on the base (the base branch's guard)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          export GIT_NO_REPLACE_OBJECTS=1
+          echo "::notice title=evals-guard-base::$BASE_SHA"
+          bash -c "$(git show "$BASE_SHA:evals/guard.sh")" guard --verdict "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/must-fail/results.txt"

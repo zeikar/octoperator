@@ -12,6 +12,10 @@
 #   - octo-exclude.sh      : run for real against a throwaway local `git init` repo
 #   - octo-worktree.sh     : add / detach / list / remove run for real in a throwaway local repo
 #   - octo-merge-state.sh  : the UNKNOWN re-query loop and gh-error exit, against a stub `gh`
+#   - octo-evals-guard.sh  : no guard workflow, both guard checks passed, one missing (a
+#                            `[skip ci]` head), pending, skipped, or failed, a stale or unrecorded
+#                            base, another app's check of the same name, and a gh error, against
+#                            a stub `gh` that runs the helper's --jq filters with jq
 #   - octo-approval-match.sh : pattern normalization, malformed patterns, matching (renames
 #                            included, genesis's entry holding the evals guard but not evals/),
 #                            and the incomplete-file-list hold, against a stub `gh`
@@ -106,6 +110,10 @@ expect 2 "octo-merge-state.sh --pr exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-merge-state.sh" --repo o/n --pr
 expect 2 "octo-merge-state.sh non-numeric --tries exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-merge-state.sh" --repo o/n --pr 1 --tries x
+expect 2 "octo-evals-guard.sh --sha exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-evals-guard.sh" --repo o/n --pr 1 --sha
+expect 2 "octo-evals-guard.sh a short --sha exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-evals-guard.sh" --repo o/n --pr 1 --sha abc123
 expect 2 "octo-approval-match.sh --pr exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-approval-match.sh" --pattern a --repo o/n --pr
 expect 2 "octo-approval-match.sh with no --pattern exits 2" \
@@ -205,6 +213,102 @@ merge_state 0 4
 expect 0 "gh exit 4 (auth): exits 1, prints nothing" test "$ms_rc/$ms_out" = "1/"
 merge_state 0 2
 expect 0 "gh exit 2: exits 1, not the bad-arguments 2" test "$ms_rc/$ms_out" = "1/"
+
+echo "• octo-evals-guard.sh (offline, stub gh)"
+# A stub `gh` first on PATH. `pr view` prints main; `api` answers per endpoint from JSON files
+# in $EG_DIR, through the helper's own --jq filter (jq -r): git/ref → the tip, contents → a file
+# or, with $EG_NOGUARD, gh's 404, check-runs → check-runs.json, annotations → ann-<id>.json.
+# $EG_RC makes the contents call fail with that exit code.
+egstub="$wtmp/eg-bin"
+EG_DIR="$wtmp/eg"
+mkdir -p "$egstub" "$EG_DIR"
+cat >"$egstub/gh" <<'STUB'
+#!/usr/bin/env bash
+[ "$1" = pr ] && { echo main; exit 0; }
+shift; ep="" jq=""
+while [ $# -gt 0 ]; do
+  case "$1" in --paginate) shift ;; --jq) jq="$2"; shift 2 ;; *) ep="$1"; shift ;; esac
+done
+case "$ep" in
+  */git/ref/heads/main) f="$EG_DIR/ref.json" ;;
+  */contents/*)
+    [ "${EG_RC:-0}" -eq 0 ] || { echo "gh: Server Error (HTTP 500)" >&2; exit "$EG_RC"; }
+    [ -z "${EG_NOGUARD:-}" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+    echo file; exit 0 ;;
+  */commits/*/check-runs*) f="$EG_DIR/check-runs.json" ;;
+  */check-runs/*/annotations*) f="${ep%/annotations*}"; f="$EG_DIR/ann-${f##*/}.json"
+    [ -f "$f" ] || { echo '[]' | jq -r "$jq"; exit; } ;;
+  *) echo "stub: unexpected endpoint $ep" >&2; exit 9 ;;
+esac
+jq -r "$jq" "$f"
+STUB
+chmod +x "$egstub/gh"
+export EG_DIR
+TIP=1111111111111111111111111111111111111111
+OLD=2222222222222222222222222222222222222222
+HEAD_SHA_EG=3333333333333333333333333333333333333333
+printf '{"object":{"sha":"%s"}}\n' "$TIP" >"$EG_DIR/ref.json"
+# eg_runs <id name status conclusion app>... : write check-runs.json; "null" is a JSON null.
+eg_runs() {
+  local sep="" body=""
+  while [ $# -ge 5 ]; do
+    c="\"$4\""; [ "$4" = null ] && c=null
+    body="$body$sep{\"id\":$1,\"name\":\"$2\",\"status\":\"$3\",\"conclusion\":$c,"
+    body="$body\"app\":{\"slug\":\"$5\"}}"
+    sep=","; shift 5
+  done
+  printf '{"total_count":0,"check_runs":[%s]}\n' "$body" >"$EG_DIR/check-runs.json"
+}
+# eg_base <id> <sha> : the run's evals-guard-base notice, beside an unrelated annotation.
+eg_base() {
+  printf '[{"title":"other","message":"x"},{"title":"evals-guard-base","message":"%s"}]\n' "$2" \
+    >"$EG_DIR/ann-$1.json"
+}
+# eg : run the helper against the stub; sets eg_out / eg_rc.
+eg() {
+  eg_out="$(PATH="$egstub:$PATH" bounded 10 bash "$SCRIPTS_DIR/octo-evals-guard.sh" --repo o/n \
+    --pr 1 --sha "$HEAD_SHA_EG" 2>/dev/null)"
+  eg_rc=$?
+}
+EG_A="evals-guard append-only" EG_V="evals-guard verdict"
+EG_NOGUARD=1 eg
+expect 0 "no evals-guard.yml on the base branch: prints none, exits 0" \
+  test "$eg_rc/$eg_out" = "0/none"
+# An older failed append-only run, and another app's check of the same name, are not the guard's.
+eg_runs 5 "$EG_A" completed failure github-actions 10 "$EG_A" completed success github-actions \
+  11 "$EG_V" completed success github-actions 12 "$EG_V" completed failure other-app
+eg_base 10 "$TIP"; eg_base 11 "$TIP"
+eg
+expect 0 "both guard checks passed against the tip: prints pass, exits 0" \
+  test "$eg_rc/$eg_out" = "0/pass"
+eg_runs
+eg
+expect 0 "no guard check runs (a [skip ci] head): holds" \
+  test "$eg_rc/$eg_out" = "1/evals guard did not pass: $EG_A missing"
+eg_runs 10 "$EG_A" completed success github-actions 12 "$EG_V" completed failure other-app
+eg
+expect 0 "only another app's verdict check: holds, verdict missing" \
+  test "$eg_rc/$eg_out" = "1/evals guard did not pass: $EG_V missing"
+eg_runs 10 "$EG_A" completed success github-actions 11 "$EG_V" completed skipped github-actions
+eg
+expect 0 "verdict skipped (must-fail failed): holds" \
+  test "$eg_rc/$eg_out" = "1/evals guard did not pass: $EG_V skipped"
+eg_runs 10 "$EG_A" in_progress null github-actions 11 "$EG_V" queued null github-actions
+eg
+expect 0 "append-only still running: holds" \
+  test "$eg_rc/$eg_out" = "1/evals guard did not pass: $EG_A in_progress"
+eg_runs 10 "$EG_A" completed success github-actions 11 "$EG_V" completed success github-actions
+eg_base 10 "$OLD"
+eg
+expect 0 "a guard run against an older base: holds as stale" \
+  test "$eg_rc/$eg_out" = "1/evals guard stale: $EG_A ran against $OLD, main is at $TIP"
+rm -f "$EG_DIR/ann-10.json"
+eg
+expect 0 "a guard run with no recorded base: holds as stale" test "$eg_rc/$eg_out" = \
+  "1/evals guard stale: $EG_A ran against an unrecorded base, main is at $TIP"
+EG_RC=4 eg
+expect 0 "a gh error (not a 404) reading the workflow: exits 3, prints nothing" \
+  test "$eg_rc/$eg_out" = "3/"
 
 echo "• octo-approval-match.sh (offline, stub gh)"
 # A stub `gh` first on PATH logs each call to $STUB_LOG. `api` prints the file list in $STUB_FILES
@@ -848,14 +952,22 @@ expect 0 "--skeleton, evals.yml pushes from another branch too: exits 1, names t
   test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/evals.yml: needs its template's \
 line '    branches: [main]' (skills/genesis/templates/.github/workflows/evals.yml), in order"
 skeleton_case evguard
-sed -e 's/^  pull_request:$/  pull_request_target:/' -e 's/^\( *\)git show "\$BASE_SHA:.*/\1cp \
-evals\/guard.sh "$RUNNER_TEMP\/guard.sh"/' "$sk/.github/workflows/evals-guard.yml" >"$sk/x" \
+sed 's/^  pull_request:$/  pull_request_target:/' "$sk/.github/workflows/evals-guard.yml" >"$sk/x" \
   && mv "$sk/x" "$sk/.github/workflows/evals-guard.yml"
 genesis_check --skeleton "$sk"
-expect 0 "--skeleton, the guard on pull_request_target, run from the PR's copy: three FAIL lines" \
+expect 0 "--skeleton, the guard on pull_request_target: three FAIL lines" \
   test "$gc_rc" -eq 1 -a "$(printf '%s\n' "$gc_out" | grep -c '^FAIL: ')" -eq 3 \
     -a -n "$(printf '%s\n' "$gc_out" | grep -Fx "FAIL: .github/workflows/evals-guard.yml: on: \
 must not have the pull_request_target trigger (only: pull_request)")"
+skeleton_case evguardcopy
+sed 's/^\( *\)bash -c "\$(git show "\$BASE_SHA:evals\/guard.sh")" guard --diff-only /\1bash \
+evals\/guard.sh --diff-only /' "$sk/.github/workflows/evals-guard.yml" >"$sk/x" \
+  && mv "$sk/x" "$sk/.github/workflows/evals-guard.yml"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, the append-only job runs the PR's copy of the guard: names the line" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/evals-guard.yml: needs its \
+template's line '          bash -c \"\$(git show \"\$BASE_SHA:evals/guard.sh\")\" guard --diff-only \
+\"\$BASE_SHA\" \"\$HEAD_SHA\"' (skills/genesis/templates/.github/workflows/evals-guard.yml), in order"
 skeleton_case evscen
 rm -r "$sk/evals/persona-tone"
 rm "$sk/evals/recall-turn-3/check.sh"
