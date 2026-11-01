@@ -24,6 +24,8 @@
 #
 # origin counts as GENESIS.md's repo only when every URL git fetches from and pushes to (`git
 # remote get-url`, so a pushurl and insteadOf rewrites count) is a github.com URL of that repo.
+# With no origin yet (stages commit and create), the https and ssh URLs gh repo create may give
+# origin must stay that repo after git's insteadOf and pushInsteadOf rewrites.
 #
 # Read-only and offline: it reads DIR's files and git state; it never calls gh or writes.
 #
@@ -89,11 +91,33 @@ case "$RC:$OUT" in
       2:*"No such remote"*) URLS="" ;;
       *) printf 'git remote get-url failed (exit %s): %s\n' "$RC" "$OUT" >&2; exit 3 ;;
     esac
-    if [ -n "$URLS" ]; then
+    want="$(printf '%s\n' "$REPO" | tr '[:upper:]' '[:lower:]')"
+    if [ -z "$URLS" ]; then
+      # No origin yet: gh repo create --push adds one, https or ssh by its git_protocol, and
+      # pushes, so check where git would take each. `git remote get-url` ignores a remote set
+      # only by -c, but `git remote -v` lists it, insteadOf and pushInsteadOf applied, and writes
+      # nothing (`git ls-remote --get-url` would skip pushInsteadOf).
+      for u in "https://github.com/$REPO.git" "git@github.com:$REPO.git"; do
+        git_out -c "remote.genesis-probe.url=$u" remote -v
+        [ "$RC" -eq 0 ] || { printf 'git remote -v failed (exit %s): %s\n' "$RC" "$OUT" >&2
+          exit 3; }
+        seen=0
+        while IFS= read -r l; do
+          case "$l" in "genesis-probe"$'\t'*) seen=1 ;; *) continue ;; esac
+          r="${l#*$'\t'}" r="${r% (*)}"
+          [ "$(url_repo "$r")" = "$want" ] \
+            || { echo "FAIL: git: a new origin $u would be $r, not GENESIS.md's repo $REPO"
+                 exit 1; }
+        done <<EOF
+$OUT
+EOF
+        [ "$seen" -eq 1 ] || { printf 'git remote -v did not list the probe remote: %s\n' \
+          "$OUT" >&2; exit 3; }
+      done
+    else
       git_out remote get-url --push --all origin
       [ "$RC" -eq 0 ] || { printf 'git remote get-url --push failed (exit %s): %s\n' "$RC" \
         "$OUT" >&2; exit 3; }
-      want="$(printf '%s\n' "$REPO" | tr '[:upper:]' '[:lower:]')"
       while IFS= read -r u; do
         [ "$(url_repo "$u")" = "$want" ] \
           || { echo "FAIL: git: origin is $u, not GENESIS.md's repo $REPO"; exit 1; }

@@ -839,6 +839,19 @@ genesis_plan "$p/commit"
 expect 0 "committed, no origin: stage create, preflight first" \
   test "$pl_rc" -eq 0 -a "$pl_steps" = "$preflight"$'\n'"gh repo view"$'\n'"gh repo create\
 "$'\n'"$setup_tail"
+# No origin yet, but a rewrite would send gh repo create's first push elsewhere.
+git -C "$p/commit" config url.https://evil.example/.pushInsteadOf https://github.com/
+genesis_plan "$p/commit"
+expect 0 "committed, no origin, a pushInsteadOf to another host: exits 1, one FAIL: git: line" \
+  test "$pl_rc" -eq 1 -a "$pl_out" = "FAIL: git: a new origin \
+https://github.com/smoke/chat-pal.git would be https://evil.example/smoke/chat-pal.git, not \
+GENESIS.md's repo smoke/chat-pal"
+git -C "$p/commit" config --unset url.https://evil.example/.pushInsteadOf
+git -C "$p/commit" config url.git@github.com:.insteadOf https://github.com/
+genesis_plan "$p/commit"
+expect 0 "committed, no origin, https rewritten to github.com ssh: still stage create" \
+  test "$pl_rc" -eq 0 -a -n "$(printf '%s\n' "$pl_out" | grep -Fx 'stage: create')"
+git -C "$p/commit" config --unset url.git@github.com:.insteadOf
 git -C "$p/commit" remote add origin git@github.com:Smoke/Chat-Pal.git
 genesis_plan "$p/commit"
 expect 0 "origin is the repo (ssh form, other case), not pushed: stage push, no gh repo create" \
