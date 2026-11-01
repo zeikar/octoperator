@@ -13,17 +13,22 @@
 #   - octo-worktree.sh     : add / detach / list / remove run for real in a throwaway local repo
 #   - octo-merge-state.sh  : the UNKNOWN re-query loop and gh-error exit, against a stub `gh`
 #   - octo-approval-match.sh : pattern normalization, malformed patterns, matching (renames
-#                            included), and the incomplete-file-list hold, against a stub `gh`
+#                            included, genesis's entry holding the evals guard but not evals/),
+#                            and the incomplete-file-list hold, against a stub `gh`
 #   - octo-genesis-check.sh : a valid proposal, a missing section or front-matter key, an
 #                            ungrounded proposal (and one with URLs or a misplaced or misspelled
 #                            marker), the PRD, ADR, and VISION.md checks (missing sections, an
 #                            altered or explained baseline constraint, an undetectable,
 #                            mismatched, contradicted, or wrapped test command, quoted and
-#                            commented front-matter values, a URL in an ungrounded PRD), bad
-#                            arguments, --preflight's git, empty-dir, and repo-name checks,
-#                            --values, and --skeleton's detection-file, CI, .gitignore, and
-#                            README checks
-#   - octo-genesis-plan.sh : each stage's ordered steps (scaffold, commit, create, push, setup),
+#                            commented front-matter values, a URL in an ungrounded PRD), the
+#                            PRD's ## Scenarios (missing, empty, no script judge, a bad id,
+#                            requirement, or judge, a duplicate, no text), bad arguments,
+#                            --preflight's git, empty-dir, and repo-name checks, --values, and
+#                            --skeleton's detection-file, CI, .gitignore, and README checks, and
+#                            its evals checks (the runner and guard verbatim, each workflow's
+#                            template lines and triggers, one eval per scenario)
+#   - octo-genesis-plan.sh : each stage's ordered steps (scaffold, commit, create, push, setup;
+#                            git add naming the eval files),
 #                            the re-check after the commit, --private unless visibility: public,
 #                            approval claimed in GENESIS.md ignored, the description's quoting and
 #                            UTF-8-safe cut, git-state failures (a rewrite only a repo's config
@@ -36,6 +41,8 @@
 #   - octo-bench.sh        : the --live gate and --dry-run make no gh / claude call; preflight,
 #                            check's metrics, run's cost cap, and cleanup, against a stub `gh`
 #                            and `claude`
+#
+# The eval templates genesis copies (run.sh, guard.sh) have their own tests: scripts/test/evals.sh.
 #
 # It deliberately never invokes a helper in a way that reaches the real gh / the network.
 # Exits 0 when every check passes, 1 when any check fails.
@@ -261,6 +268,13 @@ matches '**/*.tf' 'main.tf modules/net/vpc.tf infra/main.tf'
 matches '.github/workflows/' '.github/workflows/ci.yml'
 matches 'modules/**/vpc.tf' 'modules/net/vpc.tf'
 matches '/infra' 'infra/main.tf'
+# Genesis's approval_paths entry holds a PR that changes the evals guard, not one adding an eval.
+printf '%s\t\n' .github/workflows/evals-guard.yml evals/recall/check.sh evals/guard.sh \
+  >"$STUB_FILES"
+matches '.github/workflows/' '.github/workflows/evals-guard.yml'
+printf '%s\t\n' README.md main.tf main.tfvars modules/net/vpc.tf infra/main.tf infra-old/x \
+  infrastructure/x deploy/infra/run.sh .github/workflows/ci.yml xgithub/workflows/ci.yml \
+  >"$STUB_FILES"
 approval 'docs/**' 'secrets/**' 'Infra'
 expect 0 "no match: exits 0, prints nothing" test "$am_rc" -eq 0 -a -z "$am_out"
 printf 'docs/ci.yml%s.github/workflows/ci.yml\n' "$tab" >"$STUB_FILES"
@@ -287,6 +301,7 @@ expect 0 "gh exit 2: exits 3, not the malformed-pattern 2" test "$am_rc" -eq 3
 
 echo "• octo-genesis-check.sh (offline, temp dirs)"
 GENESIS="$SCRIPTS_DIR/octo-genesis-check.sh"
+TEMPLATES="$SCRIPTS_DIR/../skills/genesis/templates"
 # genesis_fixture <dir> : write a valid, grounded proposal (all five files) into <dir>.
 genesis_fixture() {
   mkdir -p "$1/docs/adr"
@@ -335,7 +350,19 @@ The reply context keeps facts the user stated long ago.
 
 ## Scenarios
 
-#90 adds this section; the check allows it now.
+### recall-turn-3
+
+- requirement: R1
+- judge: script
+
+At turn 200 of a conversation with a stub model, the context still holds the turn-3 fact.
+
+### persona-tone
+
+- requirement: R1
+- judge: model
+
+Over a long conversation, the companion keeps the tone the user picked.
 MD
   cat >"$1/docs/adr/0001-stack.md" <<'MD'
 # ADR 0001: Stack
@@ -611,6 +638,40 @@ awk '/^## Alternatives considered$/ { skip = 1; next } /^## / { skip = 0 } !skip
 genesis_check "$g/noadrsec"
 expect 0 "ADR missing ## Alternatives considered: exits 1, one FAIL line" test "$gc_rc" -eq 1 \
   -a "$gc_out" = "FAIL: docs/adr/0001-stack.md: missing section ## Alternatives considered"
+# The PRD's ## Scenarios: one eval each, so the check is strict about their shape.
+# prd_case <name> <awk program> : a fresh proposal whose PRD is the valid one through <awk>.
+prd_case() {
+  genesis_fixture "$g/$1"
+  awk "$2" "$g/valid/docs/prd.md" >"$g/$1/docs/prd.md"
+  genesis_check "$g/$1"
+}
+prd_case noscen '/^## Scenarios$/ { exit } { print }'
+expect 0 "PRD without ## Scenarios: exits 1, one FAIL line" test "$gc_rc" -eq 1 \
+  -a "$gc_out" = "FAIL: docs/prd.md: missing section ## Scenarios"
+prd_case emptyscen '/^### recall-turn-3$/ { exit } { print }'
+expect 0 "PRD with an empty ## Scenarios: exits 1" test "$gc_rc" -eq 1 \
+  -a "$gc_out" = "FAIL: docs/prd.md: ## Scenarios needs at least one '### <id>' scenario"
+prd_case onlymodel '{ sub(/^- judge: script$/, "- judge: model"); print }'
+expect 0 "PRD scenarios all judge: model: exits 1" test "$gc_rc" -eq 1 \
+  -a "$gc_out" = "FAIL: docs/prd.md: ## Scenarios needs at least one '- judge: script' \
+scenario, or the evals have nothing to count"
+prd_case badscen '{ sub(/^### persona-tone$/, "### Persona Tone")
+  sub(/^- requirement: R1$/, "- requirement: R7"); print }'
+expect 0 "PRD scenario with a bad id, and one covering no requirement: two FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: docs/prd.md: scenario recall-turn-3 covers R7, \
+which is not a ### requirement"$'\n'"FAIL: docs/prd.md: \"### Persona Tone\" is not a '### <id>' \
+scenario heading (lowercase kebab-case)"
+prd_case nojudge '!/^- judge: script$/ { sub(/^- judge: model$/, "- judge: llm"); print }'
+expect 0 "PRD scenarios with no judge and an unknown judge: three FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: docs/prd.md: scenario recall-turn-3 needs a \
+'- judge: script' or '- judge: model' line"$'\n'"FAIL: docs/prd.md: scenario persona-tone: judge \
+must be script or model (got 'llm')"$'\n'"FAIL: docs/prd.md: ## Scenarios needs at least one \
+'- judge: script' scenario, or the evals have nothing to count"
+prd_case dupscen '{ sub(/^### persona-tone$/, "### recall-turn-3"); sub(/^Over a long.*/, "")
+  print }'
+expect 0 "PRD with a duplicate scenario id and no text: two FAIL lines" test "$gc_rc" -eq 1 \
+  -a "$gc_out" = "FAIL: docs/prd.md: scenario recall-turn-3 appears twice"$'\n'"FAIL: \
+docs/prd.md: scenario recall-turn-3 has no scenario text"
 expect 2 "no DIR exits 2"            bounded 10 bash "$GENESIS"
 expect 2 "two DIRs exit 2"           bounded 10 bash "$GENESIS" "$g/valid" "$g/nokey"
 expect 2 "a missing DIR exits 2"     bounded 10 bash "$GENESIS" "$g/nosuch"
@@ -688,6 +749,19 @@ jobs:
       - run: npm install
       - run: npm test
 YML
+  mkdir -p "$1/evals/recall-turn-3" "$1/evals/persona-tone"
+  cp "$TEMPLATES/evals/run.sh" "$TEMPLATES/evals/guard.sh" "$1/evals/"
+  # The workflows as genesis writes them: the stack's setup steps where the template marks them.
+  for w in evals.yml evals-guard.yml; do
+    awk '/# genesis: the stack.s setup/ { print "      - uses: actions/setup-node@v4"
+      print "      - run: npm install"; next } { print }' "$TEMPLATES/.github/workflows/$w" \
+      >"$1/.github/workflows/$w"
+  done
+  printf -- '---\nid: recall-turn-3\njudge: script\nrequirement: R1\n---\n\nAt turn 200 …\n' \
+    >"$1/evals/recall-turn-3/scenario.md"
+  printf '#!/usr/bin/env bash\necho "FAIL: not built"; exit 1\n' >"$1/evals/recall-turn-3/check.sh"
+  printf -- '---\nid: persona-tone\njudge: model\nrequirement: R1\n---\n\nThe tone holds.\n' \
+    >"$1/evals/persona-tone/scenario.md"
 }
 # skeleton_case <name> : a fresh proposal with a valid skeleton in $g/sk-<name>; sets sk.
 skeleton_case() { sk="$g/sk-$1"; genesis_fixture "$sk"; skeleton_fixture "$sk"; }
@@ -750,6 +824,56 @@ printf '# chat-pal\n' >"$sk/README.md"
 genesis_check --skeleton "$sk"
 expect 0 "--skeleton, README without the sentence: exits 1" test "$gc_rc" -eq 1 \
   -a "$gc_out" = "FAIL: README.md: needs GENESIS.md's sentence, quoted"
+# The scenario evals: the runner and guard verbatim, both workflows, one evals/<id>/ per scenario.
+skeleton_case evrun
+rm "$sk/evals/guard.sh"
+echo '# local tweak' >>"$sk/evals/run.sh"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, evals/run.sh changed and evals/guard.sh missing: two FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: evals/run.sh differs from \
+skills/genesis/templates/evals/run.sh: copy it byte for byte"$'\n'"FAIL: evals/guard.sh is \
+missing: copy it from skills/genesis/templates/evals/guard.sh"
+skeleton_case evpr
+awk '{ print } /^  workflow_dispatch:$/ { print "  pull_request:" }' \
+  "$sk/.github/workflows/evals.yml" >"$sk/x" && mv "$sk/x" "$sk/.github/workflows/evals.yml"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, evals.yml on pull_request too: exits 1, one FAIL line" test "$gc_rc" -eq 1 \
+  -a "$gc_out" = "FAIL: .github/workflows/evals.yml: on: must not have the pull_request trigger \
+(only: push workflow_dispatch)"
+skeleton_case evbranch
+sed 's/branches: \[main\]/branches: [main, dev]/' "$sk/.github/workflows/evals.yml" >"$sk/x" \
+  && mv "$sk/x" "$sk/.github/workflows/evals.yml"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, evals.yml pushes from another branch too: exits 1, names the line" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/evals.yml: needs its template's \
+line '    branches: [main]' (skills/genesis/templates/.github/workflows/evals.yml), in order"
+skeleton_case evguard
+sed -e 's/^  pull_request:$/  pull_request_target:/' -e 's/^\( *\)git show "\$BASE_SHA:.*/\1cp \
+evals\/guard.sh "$RUNNER_TEMP\/guard.sh"/' "$sk/.github/workflows/evals-guard.yml" >"$sk/x" \
+  && mv "$sk/x" "$sk/.github/workflows/evals-guard.yml"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, the guard on pull_request_target, run from the PR's copy: three FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$(printf '%s\n' "$gc_out" | grep -c '^FAIL: ')" -eq 3 \
+    -a -n "$(printf '%s\n' "$gc_out" | grep -Fx "FAIL: .github/workflows/evals-guard.yml: on: \
+must not have the pull_request_target trigger (only: pull_request)")"
+skeleton_case evscen
+rm -r "$sk/evals/persona-tone"
+rm "$sk/evals/recall-turn-3/check.sh"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, a scenario with no eval and a script eval with no check.sh: two FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: evals/recall-turn-3/check.sh is missing: the \
+scenario is judge: script"$'\n'"FAIL: evals/persona-tone/scenario.md is missing: docs/prd.md has \
+the scenario persona-tone"
+skeleton_case evfm
+printf -- '---\nid: recall-turn-3\njudge: model\n---\n' >"$sk/evals/recall-turn-3/scenario.md"
+printf 'if then\n' >"$sk/evals/recall-turn-3/check.sh"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, scenario.md off the PRD with no text, check.sh broken: four FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: evals/recall-turn-3/scenario.md: front matter needs \
+the line 'judge: script', as docs/prd.md says"$'\n'"FAIL: evals/recall-turn-3/scenario.md: front \
+matter needs the line 'requirement: R1', as docs/prd.md says"$'\n'"FAIL: \
+evals/recall-turn-3/scenario.md: needs the scenario's text"$'\n'"FAIL: \
+evals/recall-turn-3/check.sh: syntax error (bash -n)"
 
 echo "• octo-genesis-plan.sh (offline, temp dirs, stub gh)"
 PLAN="$SCRIPTS_DIR/octo-genesis-plan.sh"
@@ -803,9 +927,10 @@ expect 0 "scaffold: the epic lookup runs on the folder, before plan-epic and the
 expect 0 "scaffold: gh repo create is --private, from the folder, pushed to origin" \
   test -n "$(pl_line "gh repo create smoke/chat-pal --private --source $p/scaffold --remote \
 origin --push --description='A character-chat app: it remembers you across long conversations\.'$")"
-expect 0 "scaffold: git add names the proposal and skeleton files" \
+expect 0 "scaffold: git add names the proposal, skeleton, and eval files" \
   test -n "$(pl_line "git -C $p/scaffold add -- GENESIS\.md VISION\.md docs/research\.md \
-docs/prd\.md docs/adr/0001-stack\.md README\.md \.gitignore \.github/workflows/ci\.yml package\.json")"
+docs/prd\.md docs/adr/0001-stack\.md README\.md \.gitignore \.github/workflows/ci\.yml \
+\.github/workflows/evals\.yml \.github/workflows/evals-guard\.yml evals package\.json ")"
 expect 0 "the plan writes nothing and calls no gh" \
   test "$(cd "$p/scaffold" && find . | LC_ALL=C sort)" = "$before" -a ! -e "$wtmp/plan-gh.log"
 

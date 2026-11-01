@@ -1,0 +1,26 @@
+# Written by /octoperator:genesis. Fails a PR that modifies, deletes, or renames an eval, or adds
+# one that already passes on the base branch. It runs the base branch's evals/guard.sh, so a PR
+# cannot change its own judge; this file is in approval_paths for the same reason.
+name: Evals guard
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # genesis: the stack's setup and install steps from ci.yml
+      - name: Guard the evals (the base branch's guard)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git show "$BASE_SHA:evals/guard.sh" >"$RUNNER_TEMP/guard.sh"
+          bash "$RUNNER_TEMP/guard.sh" "$BASE_SHA" "$HEAD_SHA"

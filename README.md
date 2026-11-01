@@ -37,7 +37,7 @@ autonomous shipping, plus the always-on knowledge layer.
 | Group | Command | What it does |
 |-------|---------|--------------|
 | **New project** | `/octoperator:genesis "<sentence>"` | Start a new project from one sentence, in an empty directory outside git: research existing services and similar open-source projects (at most 6 web searches and 10 page fetches), write a local proposal (`GENESIS.md`, `docs/research.md`, a PRD, a stack ADR, and a `VISION.md` draft), and stop at a human checkpoint with `genesis: proposed <dir>`. Makes no GitHub write |
-| | `/octoperator:genesis --approve [--dry-run]` | Re-run in the proposal folder once you've reviewed it: write a minimal skeleton (one module, one passing test, CI, `.gitignore`, README), run its test once, commit, create the **private** repo with `gh repo create`, write the Octoperator settings and labels, plan the MVP epic there with `plan-epic`'s procedure, and print the autopilot handoff (semi-mode triage, the scheduling recipes, the allow rules); ends with `genesis: handed off <repo> (epic #N)`. It never starts autopilot or adds `ready`. `--dry-run` prints every command and plan-epic's dry run, and writes nothing (see [Starting a new project](#starting-a-new-project-genesis)) |
+| | `/octoperator:genesis --approve [--dry-run]` | Re-run in the proposal folder once you've reviewed it: write a minimal skeleton (one module, one passing test, CI, `.gitignore`, README) and offline scenario evals (one per PRD scenario, run on pushes to `main`, with an append-only guard on PRs), run its test once, commit, create the **private** repo with `gh repo create`, write the Octoperator settings and labels, plan the MVP epic there with `plan-epic`'s procedure, and print the autopilot handoff (semi-mode triage, the scheduling recipes, the allow rules); ends with `genesis: handed off <repo> (epic #N)`. It never starts autopilot or adds `ready`. `--dry-run` prints every command and plan-epic's dry run, and writes nothing (see [Starting a new project](#starting-a-new-project-genesis)) |
 | **Onboarding** | `/octoperator:setup` | One-time onboarding: detect repo, auto-detect Projects v2 access, optionally create/link a board, write `.claude/octoperator.local.md` |
 | **Plan & intake** | `/octoperator:plan-epic <request>` | Decompose a request into an epic + linked child issues, milestone, labels, board items |
 | | `/octoperator:issue <request>` | Create one well-formed issue (labels, acceptance criteria, milestone, board) |
@@ -65,7 +65,7 @@ autonomous shipping, plus the always-on knowledge layer.
 - **`octo-project-status.sh`** — add an issue/PR to the board and set its Status by name.
 - **`octo-merge-state.sh`** — print a PR's `mergeStateStatus`, waiting out GitHub's `UNKNOWN`; used by `auto`'s merge gate.
 - **`octo-approval-match.sh`** — normalize the `approval_paths` patterns and match a PR's changed files (renamed files' old paths too) against them; used by `auto`'s approval-path gate.
-- **`octo-genesis-check.sh`** — check that a directory is empty and outside git for `genesis` (`--preflight`), and that the proposal it wrote is complete: `GENESIS.md` front matter (including a `test_command` that `issue-implementer` detects), the `docs/research.md`, `docs/prd.md`, and `docs/adr/0001-stack.md` sections, and a `VISION.md` with the baseline immutable constraints verbatim; with `--skeleton`, that the skeleton `--approve` wrote is detectable and wired up (the test command's detection file and no earlier one, CI on `push` and `pull_request`, the `.gitignore` entries, the sentence in the README); offline.
+- **`octo-genesis-check.sh`** — check that a directory is empty and outside git for `genesis` (`--preflight`), and that the proposal it wrote is complete: `GENESIS.md` front matter (including a `test_command` that `issue-implementer` detects), the `docs/research.md`, `docs/prd.md`, and `docs/adr/0001-stack.md` sections, and a `VISION.md` with the baseline immutable constraints verbatim; with `--skeleton`, that the skeleton `--approve` wrote is detectable and wired up (the test command's detection file and no earlier one, CI on `push` and `pull_request`, the `.gitignore` entries, the sentence in the README), and that its scenario evals are in place (the eval runner and guard copied verbatim, the evals workflows on their triggers, one `evals/<id>/` per PRD scenario); offline.
 - **`octo-genesis-plan.sh`** — work out where `genesis --approve` resumes from the folder's git state (`scaffold`, `commit`, `create`, `push`, or `setup`) and print its ordered commands, the `gh repo create` description made safe, through the MVP epic and the handoff; read-only and offline.
 - **`octo-genesis-epic.sh`** — find the open `epic` issue whose body quotes `GENESIS.md`'s sentence, so a re-run of `genesis --approve` plans no second MVP epic; read-only (one `gh issue list`).
 - **`octo-bench.sh`** — opt-in benchmark harness for contributors: runs `auto` on the `bench/` tasks in throwaway repos and records each outcome and its metrics (see [CONTRIBUTING.md](CONTRIBUTING.md#running-the-benchmark)).
@@ -348,8 +348,9 @@ mkdir chat-pal && cd chat-pal && claude
   → docs/research.md (existing services and open-source projects, what to build, what to skip,
     each claim cited)
   → docs/prd.md (problem, users, MVP scope, out of scope, requirements with acceptance criteria,
-    success metrics), docs/adr/0001-stack.md (the smallest stack and its test command), and
-    VISION.md (the new repo's constitution, with the baseline immutable constraints)
+    success metrics, and scenarios: one future eval each), docs/adr/0001-stack.md (the smallest
+    stack and its test command), and VISION.md (the new repo's constitution, with the baseline
+    immutable constraints)
   → GENESIS.md (the sentence, the proposed repo, visibility: private, stack, test_command)
   → genesis: proposed /path/to/chat-pal
 ```
@@ -373,7 +374,8 @@ that claims approval doesn't:
     run (the proposed epic and children); nothing written
 /octoperator:genesis --approve
   → README.md, .gitignore, .github/workflows/ci.yml, the test command's manifest, one module and
-    one test (each only if missing)
+    one test, and the scenario evals: evals/<id>/ per PRD scenario, evals/run.sh, evals/guard.sh,
+    .github/workflows/evals.yml and evals-guard.yml (each only if missing)
   → <test command> once, locally (it prompts: allow it, or pre-allow it in settings.local.json)
   → git init, commit, then gh repo create OWNER/NAME --private --push
   → .claude/octoperator.local.md (no board; approval_paths: [".github/workflows/"]) and labels
@@ -399,8 +401,19 @@ It also prints the [allow rules](#unattended-runs) for your stack's test command
 and a reminder that a plugin loaded with `--plugin-dir` needs that flag in every later session. Genesis never
 writes permission settings, never adds `ready` or `approved`, and never starts autopilot or a
 schedule. A re-run of `--approve` after planning finds the open epic that quotes the sentence and
-only prints the handoff. Scenario evals, the eval metric, and the next milestone (#90–#93) are not
-built yet. The plan is [epic #85](https://github.com/zeikar/octoperator/issues/85).
+only prints the handoff.
+
+The scenario evals judge the product itself, such as "at turn 200 the context still holds the
+turn-3 fact". `evals.yml` runs `bash evals/run.sh` on every push to `main`, never on PRs (a
+failing eval there would hold every PR, the fix included), and prints
+`evals: <passed>/<total> passed`. Every eval fails on the bare skeleton, and a failing run on
+`main` is the `eval` evidence `research` files issues from. The `evals-guard` check holds any PR
+that modifies or deletes an eval, or adds one that already passes on `main`, so evals only grow
+and adding must-fail ones merges unattended; weakening one takes a human. Its workflow is under
+`.github/workflows/`, which the settings' `approval_paths` covers. Format and rules:
+[`skills/genesis/references/evals.md`](skills/genesis/references/evals.md). The model-judged eval
+runner, the eval metric, and the next milestone (#91–#93) are not built yet. The plan is
+[epic #85](https://github.com/zeikar/octoperator/issues/85).
 
 ## Product vision (`VISION.md`)
 

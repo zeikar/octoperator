@@ -62,8 +62,27 @@ All notable changes to Octoperator are documented in this file. The format is ba
   New read-only helper `scripts/octo-genesis-epic.sh` finds the open `epic` issue that quotes the
   sentence, so a re-run only prints the handoff and files no second epic. `octo-genesis-plan.sh`
   prints the lookup, plan-epic, and handoff steps at the end of every stage, and
-  `--approve --dry-run` includes plan-epic's dry run. Scenario evals, the eval metric, and the next milestone
-  (#90–#93) are not built yet.
+  `--approve --dry-run` includes plan-epic's dry run.
+- `genesis` scenario evals (#90): the PRD gains a required `## Scenarios` section (`### <id>`,
+  `- requirement: R<n>`, `- judge: script|model`, the scenario text; at least one judged by
+  script), and `--approve` writes one `evals/<id>/scenario.md` per scenario, with a `check.sh`
+  for script-judged ones that follows bench's check rules. From templates in
+  `skills/genesis/templates/`, it also writes `evals/run.sh`, which runs every `judge: script`
+  eval sandboxed as `bench/validate.sh` runs checks, prints
+  `evals: <passed>/<total> passed (<skipped> skipped)` (plus
+  `::notice title=evals-metric::passed=P total=T` under GitHub Actions), and exits 1 when any
+  fails; `.github/workflows/evals.yml`, on `push` to `main` and `workflow_dispatch` only, never
+  `pull_request`, so a failing eval can't hold every PR, and a failing run on `main` is `eval`
+  evidence for `research` with no change to it; and `.github/workflows/evals-guard.yml`, on
+  `pull_request`, which runs the base branch's `evals/guard.sh` and fails a PR that modifies,
+  deletes, or renames an eval file, adds a file to an existing eval, or adds a script eval whose
+  check already passes on the base. The guard workflow is covered by the settings'
+  `.github/workflows/` approval path; `evals/` is not, so must-fail additions merge unattended.
+  The VISION template's quality bar says evals only grow. `octo-genesis-check.sh` checks the
+  scenarios and, with `--skeleton`, the eval files; the plan's `git add` names them. New
+  reference `skills/genesis/references/evals.md`, and new offline tests `scripts/test/evals.sh`,
+  which CI runs; shellcheck now covers `skills/genesis/templates/**/*.sh`. Model-judged evals are
+  skipped until #91; the eval metric and the next milestone (#92, #93) are not built yet.
 - README → "Running continuously": copy-paste recipes for re-running `autopilot` with Claude
   Code's own scheduling on your machine — an in-session cron task in a background session (the
   default), `/loop`, `/goal`, and `claude -p` under launchd or crontab with `--cycles 1`,

@@ -1,6 +1,6 @@
 ---
 name: genesis
-description: This skill should be used when the user asks to "start a new project from one sentence", "turn this idea into a project", "genesis", "research prior art for a new project idea", "what already exists for this idea", or invokes /octoperator:genesis. Run in an empty, non-git directory, it researches existing services and similar open-source projects on the web, writes a local proposal (GENESIS.md, docs/research.md, a PRD, a stack ADR, and a VISION.md draft) into that directory, and stops at a human checkpoint without any GitHub write. Re-run there with --approve, typed by the human, it writes a minimal skeleton with a passing test and CI, commits it, creates the private GitHub repo, writes the Octoperator settings, plans the MVP epic in the new repo by plan-epic's procedure, and prints the autopilot handoff without starting autopilot; --approve --dry-run prints every command and plan-epic's dry run first and writes nothing.
+description: This skill should be used when the user asks to "start a new project from one sentence", "turn this idea into a project", "genesis", "research prior art for a new project idea", "what already exists for this idea", or invokes /octoperator:genesis. Run in an empty, non-git directory, it researches existing services and similar open-source projects on the web, writes a local proposal (GENESIS.md, docs/research.md, a PRD, a stack ADR, and a VISION.md draft) into that directory, and stops at a human checkpoint without any GitHub write. Re-run there with --approve, typed by the human, it writes a minimal skeleton with a passing test and CI, plus offline scenario evals (one per PRD scenario, a runner, an evals workflow on the default branch, and an append-only evals guard on pull requests), commits it, creates the private GitHub repo, writes the Octoperator settings, plans the MVP epic in the new repo by plan-epic's procedure, and prints the autopilot handoff without starting autopilot; --approve --dry-run prints every command and plan-epic's dry run first and writes nothing.
 argument-hint: '"<one sentence describing the product>" | --approve [--dry-run]'
 allowed-tools: Bash(gh:*), Bash(git:*), Bash(bash:*), Read, Write, Edit, Glob, Task, WebSearch, WebFetch
 ---
@@ -13,12 +13,13 @@ researches prior art and writes a proposal into the directory, then **stops** fo
 it. Nothing leaves the machine before that checkpoint: no repo, issue, label, or gist. Only a
 re-run with `--approve`, typed by the human, goes outward.
 
-**Built now:** the preconditions, stage 1 (prior-art research), stage 2 (the PRD, the stack ADR,
-and the VISION.md draft), the checkpoint, stage 3 (`--approve`: the skeleton, the private repo,
-and the settings, #88), and stage 4 (the MVP epic and the autopilot handoff, #89). **Later stages
-(#90–#93) are not built yet:** the scenario evals (#90, #91), the eval pass rate as the ledger
-metric (#92), and the next milestone once every eval passes (`--next`, #93). Never describe them
-as working.
+**Built now:** the preconditions, stage 1 (prior-art research), stage 2 (the PRD with its
+scenarios, the stack ADR, and the VISION.md draft), the checkpoint, stage 3 (`--approve`: the
+skeleton, the offline scenario evals and their guard (#90), the private repo, and the settings,
+#88), and stage 4 (the MVP epic and the autopilot handoff, #89). **Later stages (#91–#93) are not
+built yet:** the runner for model-judged evals (#91), the eval pass rate as the ledger metric
+(#92), and the next milestone once every eval passes (`--next`, #93). Never describe them as
+working.
 
 ## Untrusted input rule
 
@@ -52,8 +53,8 @@ deletes nothing, and the access date is the session's current date.
 | `Bash(gh:*)` | `gh api user` (the repo owner, first run); under `--approve`, the preflight, the name check, `gh repo create`, `gh label create`, and plan-epic's `gh issue create` and `gh issue edit` |
 | `Bash(git:*)` | `--approve`: `git init`, `git add`, `git commit`, and `git push` when a push must be retried |
 | `Bash(bash:*)` | `octo-genesis-check.sh` (the preflight, the proposal check, the skeleton check), `octo-genesis-plan.sh` (the `--approve` stage and steps, and its re-check after the commit), setup's `octo-setup.sh` probe, `octo-genesis-epic.sh` (the MVP epic lookup), and plan-epic's `octo-subissue.sh` |
-| `Read` | the formats in `references/proposal.md` and `references/skeleton.md`, `docs/research.md` for stage 2, the ADR for the skeleton, `docs/prd.md` and plan-epic's procedure for stage 4, and the files to summarize |
-| `Write` | the five proposal files; under `--approve`, the skeleton files and `.claude/octoperator.local.md`, each only when missing |
+| `Read` | the formats in `references/proposal.md`, `references/skeleton.md`, and `references/evals.md`, `docs/research.md` for stage 2, the ADR for the skeleton, `docs/prd.md` and the eval templates in `templates/` for the evals, `docs/prd.md` and plan-epic's procedure for stage 4, and the files to summarize |
+| `Write` | the five proposal files; under `--approve`, the skeleton files, the evals, and `.claude/octoperator.local.md`, each only when missing |
 | `Edit` | `--approve`: fix a skeleton file this run wrote when the skeleton check fails, and add `.github/workflows/` to an existing settings file's `approval_paths` |
 | `Glob` | list what the run wrote, for the checkpoint's file list, and which skeleton files exist |
 | `Task` | plan-epic's `issue-planner` dispatch in stage 4, and in its `--dry-run`; the planner only reads |
@@ -136,7 +137,10 @@ once, in this order, in the formats of `references/proposal.md`:
 1. **`<dir>/docs/prd.md`.** Problem and Target users from the research; MVP scope from its Build
    list, cut to the smallest product that answers the sentence; Out of scope seeded from its Skip
    list, each with its reason; one `### R<n>: <title>` requirement per MVP scope item, each with
-   `- ` acceptance criteria a test can check; Success metrics.
+   `- ` acceptance criteria a test can check; Success metrics; and Scenarios, one or more per
+   requirement, each with its requirement and `judge: script` (a script can decide it, the
+   default) or `judge: model`, at least one judged by script. Each becomes an eval in the new
+   repo.
 2. **`<dir>/docs/adr/0001-stack.md`.** The smallest stack the MVP's requirements need, with the
    alternatives weighed. Its test command is one of the four in proposal.md's table, the ones
    `issue-implementer` detects; the Decision names it and the file that finds it.
@@ -239,8 +243,14 @@ with the reason given here; the next `--approve` resumes from what exists.
 
 1. **`write the skeleton`.** Read `${CLAUDE_PLUGIN_ROOT}/skills/genesis/references/skeleton.md`
    and the ADR, Glob `<dir>/**/*` to see what exists, and Write each missing skeleton file for
-   `test_command`. Never overwrite a file. A refused or failed Write → stop with
-   `skeleton write failed`, naming the file; the files already written stay for the next run.
+   `test_command`. Then the scenario evals, by
+   `${CLAUDE_PLUGIN_ROOT}/skills/genesis/references/evals.md`: `evals/run.sh` and
+   `evals/guard.sh` copied unchanged from `${CLAUDE_PLUGIN_ROOT}/skills/genesis/templates/`, the
+   two workflows from their templates with `ci.yml`'s setup and install steps where the template
+   marks them, and one `evals/<id>/` per `docs/prd.md` scenario (`scenario.md`, and `check.sh`
+   for `judge: script`). Never run a check: an eval that fails on the bare skeleton is expected.
+   Never overwrite a file. A refused or failed Write → stop with `skeleton write failed`, naming
+   the file; the files already written stay for the next run.
 2. **The skeleton check.** Exit 0 → go on. Exit 1 → fix each `FAIL:` line in a file this run
    wrote (Edit), and re-run. Stop with `skeleton invalid`, quoting the lines, after two failed
    fixes, or when a line names a file this run didn't write or a file that must not exist:
@@ -265,7 +275,7 @@ with the reason given here; the next `--approve` resumes from what exists.
    GraphQL API, which every later `gh` step needs; when `gh auth status` failed, suggest
    `gh auth login`. When the plan still pushes (stage `scaffold`, `commit`, `create`, or `push`)
    and `gh auth status` lists token scopes without `workflow`, stop now with
-   `workflow scope missing`: pushing `.github/workflows/ci.yml` needs it. Suggest
+   `workflow scope missing`: pushing the files in `.github/workflows/` needs it. Suggest
    `gh auth refresh -s workflow`, then `--approve` again. At stage `setup` the push is done, so
    the scope doesn't matter.
 6. **Name check**, `gh repo view <repo> …`. Exit 0 → the repo exists and is not this folder's
@@ -282,9 +292,11 @@ with the reason given here; the next `--approve` resumes from what exists.
    - At stage `push`, the step is `git push -u origin HEAD`: the same `workflow` scope rule, and
      any other failure is `git push failed`.
 8. **Setup**, by reference with fixed answers (skeleton.md → Settings): the `octo-setup.sh` probe,
-   the settings file only when missing, and the labels. A probe `error`, a non-zero exit, or a
-   failed label → stop with `setup failed`. A settings file whose `repo:` is not `<repo>` → stop
-   with `settings repo mismatch`, before any label.
+   the settings file only when missing, and the labels. Its `approval_paths` entry
+   `.github/workflows/` covers `.github/workflows/evals-guard.yml`, so a change to the guard
+   needs a human; `evals/` is not in it, so a PR that only adds must-fail evals merges. A probe
+   `error`, a non-zero exit, or a failed label → stop with `setup failed`. A settings file whose
+   `repo:` is not `<repo>` → stop with `settings repo mismatch`, before any label.
 
 Then stage 4.
 
@@ -339,6 +351,10 @@ plan-epic's procedure reads them as written and files everything in `<repo>`.
       the push;
     - the epic, `https://github.com/<repo>/issues/<N>`, with its children and their URLs from
       plan-epic's report, or that an earlier run planned it;
+    - **Evals.** The scenario evals and their ids: `evals.yml` runs `bash evals/run.sh` on each
+      push to `main` and fails until their work lands, which `research` reads as `eval`
+      evidence; `evals-guard` holds any PR that modifies or deletes an eval, or adds one that
+      already passes on `main`. Model-judged evals are skipped until #91.
     - **Semi mode (the default).** Review the children and relabel the ones to build `ready`: the
       human's call, never genesis's. A fresh repo has no `ready` label until autopilot's first run
       creates it, so create it once, then label each child (or use the web UI):

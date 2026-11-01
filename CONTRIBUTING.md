@@ -57,6 +57,9 @@ Octoperator has no build step. Before opening a PR:
 #    on ubuntu and macOS on every push and PR.
 bash scripts/test/smoke.sh
 
+# 1b. Test the scenario-eval templates genesis copies into a new repo (offline; CI runs this).
+bash scripts/test/evals.sh
+
 # 2. Validate the benchmark tasks (offline; CI runs these too). See bench/README.md.
 bash bench/validate.sh && bash bench/test/selftest.sh
 
@@ -81,7 +84,8 @@ than Octoperator's own reviewer. Every result is one JSON line in `bench/results
 > merge) on real repos, spending real API money and time. A full run is 10+ cycles. Cap it with
 > `--max-cost-usd`, and check the plan with `--dry-run` first. With the cap set, `run` also stops
 > after a solve that reports no cost (a timeout, say), since that spend is unknown. **Never run
-> it in CI.** CI runs only the offline parts (`smoke.sh`'s stub tests and `bench/validate.sh`).
+> it in CI.** CI runs only the offline parts (`smoke.sh`'s stub tests, `evals.sh`, and
+> `bench/validate.sh`).
 > Every network step exits 2 unless you pass `--live`.
 
 Run it in a **Claude Code remote (cloud) session on Linux**, not on your machine. Prerequisites:

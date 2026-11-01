@@ -17,13 +17,14 @@
 # when that finds none, and the handoff.
 #
 # It prints `dir:`, `repo:`, and `stage:` lines, then one numbered step per line, in run order.
-# A step that starts with `write ` is a file to write (skills/genesis/references/skeleton.md), and
-# one that starts with `plan ` or `print ` is a procedure the skill runs (skills/genesis/SKILL.md);
-# every other step is one plain command to run as printed, except that `<the skeleton's other
-# files>` in `git add` stands for the skeleton's module, test, and any stack manifest its
-# `test_command` needs. Visibility is --private unless GENESIS.md says `visibility: public`. The
-# gh repo create description is the sentence on one line, its control characters made spaces,
-# cut to GitHub's 350-character limit, and single-quoted.
+# A step that starts with `write ` is a file to write (skills/genesis/references/skeleton.md and
+# evals.md), and one that starts with `plan ` or `print ` is a procedure the skill runs
+# (skills/genesis/SKILL.md); every other step is one plain command to run as printed, except that
+# `<the skeleton's other files>` in `git add` stands for the skeleton's module, test, and any
+# stack manifest its `test_command` needs; `evals` adds the evals/ directory genesis wrote.
+# Visibility is --private unless GENESIS.md says `visibility: public`. The gh repo create
+# description is the sentence on one line, its control characters made spaces, cut to GitHub's
+# 350-character limit, and single-quoted.
 #
 # origin counts as GENESIS.md's repo only when every URL git fetches from and pushes to (`git
 # remote get-url`, so a pushurl and insteadOf rewrites count) is a github.com URL of that repo.
@@ -190,13 +191,14 @@ D="$(q "$ABS")"
 printf 'dir: %s\nrepo: %s\nstage: %s\n' "$ABS" "$REPO" "$STAGE"
 case "$STAGE" in
   scaffold | commit)
-    step "write the skeleton for \`$CMD\` (skills/genesis/references/skeleton.md): only the" \
-      "files that are missing"
+    step "write the skeleton for \`$CMD\` (skills/genesis/references/skeleton.md) and the" \
+      "scenario evals (skills/genesis/references/evals.md): only the files that are missing"
     step "bash $(q "$HERE/octo-genesis-check.sh") --skeleton $D"
     step "$CMD"
     [ "$STAGE" = commit ] || step "git -C $D init -b main"
     step "git -C $D add -- GENESIS.md VISION.md docs/research.md docs/prd.md" \
-      "docs/adr/0001-stack.md README.md .gitignore .github/workflows/ci.yml $TEST_FILE" \
+      "docs/adr/0001-stack.md README.md .gitignore .github/workflows/ci.yml" \
+      ".github/workflows/evals.yml .github/workflows/evals-guard.yml evals $TEST_FILE" \
       "<the skeleton's other files>"
     step "git -C $D commit -m 'chore: scaffold from genesis'"
     step "bash $(q "$HERE/octo-genesis-plan.sh") $D" ;;

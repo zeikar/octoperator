@@ -172,20 +172,37 @@ Rules:
 ## Success metrics
 
 - <how to tell the MVP works, measurably>
+
+## Scenarios
+
+### <id>
+
+- requirement: R<n>
+- judge: script
+
+<the scenario: what a user does, and what the product must do, in one or two sentences>
 ```
 
 Rules:
 
-- **Checked:** the six `## ` sections are present, with these exact headings. Problem and Target
-  users are not empty. MVP scope, Out of scope, and Success metrics have at least one `- ` item.
+- **Checked:** the seven `## ` sections are present, with these exact headings. Problem and
+  Target users are not empty. MVP scope, Out of scope, and Success metrics have at least one `- `
+  item.
 - **Requirements.** **Checked:** at least one `### R<n>: <title>` heading, every `### ` heading in
   the section has that shape, each id is unique, and each requirement has at least one `- `
   acceptance criterion. Number them `R1`, `R2`, … in order. A requirement covers an MVP scope
   item; nothing in Out of scope gets one.
 - **Out of scope** starts from research's Skip list, each item with its reason, then adds
   anything the MVP defers.
-- More sections may follow. A `## Scenarios` section, referencing requirements by id, comes with
-  the scenario evals (#90).
+- **Scenarios.** Each one becomes an eval in the new repo, `evals/<id>/` (`references/evals.md`).
+  **Checked:** at least one `### <id>` heading, the id lowercase kebab-case and unique; under each,
+  a `- requirement: R<n>` line naming a requirement above, a `- judge: script` or
+  `- judge: model` line, and the scenario's text; and at least one scenario is `judge: script`.
+  Write one or more per requirement, each something the product must do that the MVP doesn't do
+  yet, as the user would see it: `recall-turn-3`, "at turn 200 the context still holds the turn-3
+  fact". Prefer `judge: script`, a scenario a script decides, for example by running the app with
+  a stub model; use `judge: model` only when no script can judge it.
+- More sections may follow.
 - Ungrounded research → the PRD, the ADR, and `VISION.md` cite no URLs either (**checked**: no
   `http://` or `https://` URL in any of them).
 
@@ -252,6 +269,8 @@ Not a target: <who the product is not for>
 - Every merge passes the gate: a non-blocking review of the current head, green CI, and
   `mergeStateStatus == CLEAN`.
 - `<test_command>` passes, locally and in CI.
+- Evals only grow: the number of passing evals (`bash evals/run.sh`) never drops, and no eval is
+  modified or deleted without a human; the `evals-guard` check holds any PR that tries.
 - <a product-specific bar, from the PRD's success metrics>
 
 ## Immutable constraints
@@ -277,6 +296,9 @@ or user feedback).
 Rules:
 
 - **Checked:** the five `## ` sections are present, with these exact headings, and none is empty.
+- **Quality bar.** Keep the template's first three lines, the evals line included: the scenario
+  evals (`references/evals.md`) only grow. It is a bar, not an immutable constraint, so it is not
+  checked; the `evals-guard` check enforces it.
 - **Immutable constraints.** **Checked:** the four baseline lines below, each as its own `- ` line
   that starts exactly as written (same words, punctuation, and dashes) and either ends there or
   goes on after a space, as Octoperator's own `VISION.md` adds how a rule is enforced:
