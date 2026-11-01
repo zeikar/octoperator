@@ -7,6 +7,14 @@ All notable changes to Octoperator are documented in this file. The format is ba
 ## [Unreleased]
 
 ### Added
+- `autopilot` keeps a run ledger on GitHub: one open issue labeled `octoperator-ledger`, created on
+  the first run, gets one comment per run with a fenced JSON entry (time, mode, cycles used, merged,
+  held, proposals filed, metric, cost, kind). After `convergence_runs` entries in a row (a new
+  setting, default 3) without a merge, autopilot switches to observe mode: `research` proposes
+  without filing, nothing is built or merged, and an `observe` entry is recorded. The new
+  `--resume` flag writes a `reset` entry and builds again. `--dry-run` shows the convergence state.
+  Discovery skips the ledger issue, and `research` can cite a ledger entry as `failure-log`
+  evidence but never counts the ledger as user feedback.
 - `research` files only evidenced proposals ("no evidence, no issue"). Each proposal carries an
   Evidence field — `benchmark`, `eval` (a failing latest CI run on the default branch), `failure-log`
   (a held PR or ledger entry), or `user-feedback` — which `--create` re-checks right before filing
