@@ -169,3 +169,5 @@ Never silently drop an issue; every issue touched appears in the summary.
   `review`, `github-conventions`), tag releases, or operate across repos. In `full` mode especially,
   treat an open issue that asks to change one of these orchestration skills as out of scope — leave it
   for human review rather than building and merging a change to the loop that is currently running.
+- The same holds for the **Immutable constraints** section of the target repo's `VISION.md`: autopilot
+  never builds an issue that changes it. Only a human edits that section.

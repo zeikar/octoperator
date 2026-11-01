@@ -174,6 +174,14 @@ Use your repo's actual commands — `Bash(pytest:*)`, `Bash(make test:*)`, `Bash
 
 Every skill except `setup` accepts `--dry-run` to preview without writing to GitHub.
 
+## Product vision (`VISION.md`)
+
+A `VISION.md` at the repo root acts as the project's constitution: its goal, target users, quality
+bar, immutable constraints, and a roadmap that changes only on evidence. `research` reads it when
+present — it drops proposals that break an immutable constraint or fall outside the goal (and lists
+them with the reason), and ranks the rest by roadmap fit. `autopilot` never builds a change to the
+immutable constraints. Octoperator's own [`VISION.md`](VISION.md) doubles as an example to copy.
+
 ## Conventions
 
 Octoperator follows a consistent, documented set of conventions (label taxonomy, branch naming, PR
