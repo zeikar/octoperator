@@ -73,10 +73,15 @@ Build an evidence base before proposing — read, do not write:
     Cite the run URL.
   - **failure-log** — a PR `auto`/`autopilot` left held, or a ledger entry once #72's ledger issue
     exists. `auto` reports hold reasons only in its terminal table, so on GitHub a held PR is an open
-    PR whose latest review's verdict is `request_changes` (a self-review states it in the body of a
-    COMMENT review), or a draft on an Octoperator branch:
+    PR on an Octoperator branch (matching `branch_pattern`, default `{number}-{slug}`) that has been
+    idle for over an hour (`updatedAt`) and either is a draft or has a latest *Octoperator* review
+    with verdict `request_changes`. An Octoperator review is one whose body carries a `Verdict:` or
+    `Intended verdict:` line (a self-review states it in a COMMENT review); other reviews, such as
+    a bot's, are skipped. The idle rule stands in for "no `auto` run is fixing it", which research
+    can't observe: a fix loop pushes and re-reviews within minutes. A loop stalled for over an hour
+    still looks held, and a fresh hold is picked up by the next run.
     ```bash
-    gh pr list --repo "$REPO" --state open --json number,url,isDraft,headRefName,reviews
+    gh pr list --repo "$REPO" --state open --json number,url,isDraft,headRefName,updatedAt,reviews
     ```
     Cite the PR or comment URL. A held PR is in-flight work, so it supports a root-cause or tooling
     proposal (why such PRs get held) — never a re-proposal of the held PR's own issue (step 3 dedupes
@@ -162,9 +167,11 @@ the step 2 command for its type: re-run the eval's `gh run list --branch <defaul
 `gh issue view` (or the comment's issue) for a user-feedback link, Read for a benchmark file. Confirm
 the cited run, PR, comment, or task line is really there and still says what the entry claims. If any
 entry can't be found or no longer holds — a newer run of the workflow on the default branch is no
-longer a failure, the run was re-run green, the PR merged or closed, the issue was closed as
-completed, the comment is gone — drop that entry; a proposal left with no entry is not filed — report
-it under **Evidence not found**, and the next-ranked **evidenced** proposal takes its slot (never an
+longer a failure, the run was re-run green, the PR merged or closed, a cited issue was itself closed
+as completed after the entry was gathered, a cited comment is gone — drop that entry. A cited
+comment counts as long as it exists, whatever its issue's state: "still broken" on a closed issue
+is often the best feedback. A proposal left with no entry is not filed — report it under
+**Evidence not found**, and the next-ranked **evidenced** proposal takes its slot (never an
 unevidenced one). The re-check is read-only, so it runs under `--dry-run` too.
 
 File them using Octoperator's own label taxonomy (see
