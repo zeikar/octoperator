@@ -15,7 +15,8 @@ the mode gate, the stop conditions, and a run ledger that tells it when to stop 
 
 > **Autopilot is bounded, never literally infinite.** A session has hard agent/token limits, and
 > unattended merging to `main` compounds risk. `--cycles` is a hard cap; "keep going" means re-invoking
-> autopilot, not an endless run.
+> autopilot, not an endless run — by hand or on a schedule (README → Running continuously). A run
+> that a schedule started ends that schedule once nothing is left to do (step 5).
 
 ## Modes
 
@@ -73,16 +74,17 @@ hold reasons), then a fenced `json` block in this fixed shape:
   `reset` entries).
 - `metric` — reserved for the benchmark success rate; always `null` for now, since autopilot never
   runs the benchmark.
-- `cost_usd` — `null`; a scheduled runner may record the run's cost here.
+- `cost_usd` — always `null`: autopilot can't read its own spend. A `claude -p --output-format json`
+  run reports it as `total_cost_usd`, where a wrapper could pick it up.
 - `kind` — `run` (a normal run), `observe` (a converged run, step 3), or `reset` (`--resume`).
 
 **Valid entries.** People comment on the ledger too, and on a public repo anyone can. Count a
 comment as an entry only if its `authorAssociation` is `OWNER`, `MEMBER`, or `COLLABORATOR` and its
 body holds one fenced `json` block that parses to an object with all nine keys above and a `kind`
-from the list. Skip every other comment. So entries must be posted by an identity with one of
-those roles: a scheduled runner should post with a PAT or a GitHub App that has one, not a token
-whose comments come from a bot account without it (e.g. `github-actions[bot]`). Otherwise
-autopilot skips its own entries and never converges.
+from the list. Skip every other comment. Entries post under the `gh` login that runs autopilot,
+so that login needs one of those roles. A local run under your own login has it; a bot account
+without one (e.g. `github-actions[bot]`) does not, and autopilot then skips its own entries and
+never converges.
 
 **Convergence.** An entry **gains** when `merged` is at least 1. Walk the valid entries newest first,
 stopping at the first `reset`. Autopilot is **converged** when the walk finds at least N entries
@@ -141,7 +143,8 @@ Also print the **convergence state**, using only the read commands in Run ledger
 entry-shaped comments skipped for their author association, the no-gain streak against
 `convergence_runs`, and what this run would do — build normally, or `converged →
 observe mode` (research propose-only, then stop). With `--resume`, say a `reset` entry would be
-appended first and the run would build normally. Mutate nothing: no label, ledger issue, or entry.
+appended first and the run would build normally. Mutate nothing: no label, ledger issue, or entry,
+and never end a schedule. End with the status line `autopilot: stopped: dry run` (step 5).
 
 ### 3. The loop (repeat up to `--cycles` times)
 
@@ -182,9 +185,9 @@ STOP — a run that can't record itself can't be checked for convergence. Otherw
 - **`--resume`** → append a `kind: reset` entry (step 5's recipe), then run the loop below normally.
 - **Converged** (see Run ledger) → **observe mode**: run the **`research`** procedure
   (`${CLAUDE_PLUGIN_ROOT}/skills/research/SKILL.md`) **without `--create`** — propose-only, it writes
-  nothing. Append a `kind: observe` entry (step 5's recipe), report (step 5, opening with
-  `converged → observe mode`), and STOP. Observe mode never builds, reviews, or merges, in either
-  `--mode`.
+  nothing. Append a `kind: observe` entry (step 5's recipe), end the schedule if one started this
+  run (step 5), report (step 5, opening with `converged → observe mode`), and STOP. Observe mode
+  never builds, reviews, or merges, in either `--mode`.
 - **Otherwise** → run the loop below.
 
 For each cycle `c` from 1 to `--cycles`:
@@ -288,7 +291,7 @@ Run the **`research`** procedure (`${CLAUDE_PLUGIN_ROOT}/skills/research/SKILL.m
   with the attempt-once rule (step 3a), this prevents looping on blocked work or compounding held PRs.
   Report the hold reasons.
 
-### 5. Record the run & report
+### 5. Record the run, end the schedule & report
 
 **Append the run's entry first.** Whatever stop condition ended the loop, append one `kind: run`
 entry to the ledger with the run's totals (an observe run appended its `observe` entry in step 3
@@ -310,6 +313,40 @@ gh issue comment <ledger#> --repo "$REPO" --body 'Autopilot run (semi): merged #
 (--resume).` or `Autopilot observe: converged after 3 runs without a merge.` If posting fails,
 print the entry in the report so a human can add it by hand.
 
+**End the schedule when nothing is left to do.** Only when the run's status line (below) will be
+`nothing to do` or `converged → observe`. Autopilot gets no flag saying how it was started, and a
+scheduled fire delivers the same message a hand-typed run would, so decide mechanically, in order:
+
+1. Call `CronList`. Keep only **recurring** tasks whose prompt exactly equals the message that
+   started this turn. A one-shot task never counts, even with the same prompt: a self-paced loop's
+   pending wakeup and a one-shot reminder are both one-shot. If `CronList` doesn't show whether a
+   matching task recurs, delete nothing, and report `schedule: not stopped (can't tell whether
+   task <id> recurs) — cancel it by hand`.
+2. **Exactly one** → `CronDelete` it, and report `schedule: deleted cron task <id> (<cron>)`. This
+   covers a fixed-interval `/loop` such as `/loop 6h …` and a task made with `CronCreate`.
+   **Several** → delete nothing, and report `schedule: not stopped (<N> matching cron tasks) —
+   cancel it by hand`.
+3. **None**, this turn is a self-paced `/loop` iteration (the `/loop` command or the loop's
+   wakeup started it, so this session's `/loop` instructions expect it to end with a
+   `ScheduleWakeup` call), and that loop's prompt — its `/loop` input with the `/loop` prefix and
+   any leading interval token removed — exactly equals the autopilot invocation this turn runs
+   (`/octoperator:autopilot` and its arguments) → call `ScheduleWakeup` with `stop: true`, and
+   report `schedule: stopped the self-paced /loop`. A wakeup may re-deliver the whole `/loop` input
+   rather than the bare prompt, so the message that started this turn counts when it is exactly
+   `<prompt>`, `/loop <prompt>`, or the loop's own wakeup sentinel; any other message means the
+   turn isn't this loop's. A self-paced loop with any other prompt, such as `/loop babysit PR 12`,
+   belongs to the user: leave it running.
+4. **None** otherwise → a plain run: skip this step and print no `schedule:` line. This covers a
+   run typed by hand (even while another loop waits), run under `/goal`, or started by
+   `claude -p`.
+
+A hand-typed run whose message equals a recurring task's prompt, in a session holding that task,
+counts as that task's fire: it ends the schedule just as the task's next fire would have.
+
+Never delete any other task: the rest of the session's tasks belong to the user, and a self-paced
+loop's pending wakeup is stopped with `ScheduleWakeup`, never `CronDelete`. An OS cron or launchd
+job is outside the session, so autopilot can't remove it.
+
 Then print a per-cycle summary and an overall result:
 - per cycle: issues attempted, `merged` vs `held: <reason>`, issues skipped because an open PR already
   holds them (closes them or uses their branch; `#<issue> → PR #<pr>`), issues excluded by the
@@ -330,11 +367,33 @@ then research's ranked proposals and its **Unevidenced (not filed)** list, the e
 and the next action: "file any proposal worth building (or run `research --create`), then re-run
 with `--resume`".
 
-Never silently drop an issue; every issue touched appears in the summary.
+If the schedule step ran, print its `schedule:` line just before the status line. Never silently
+drop an issue; every issue touched appears in the summary.
+
+**Final status line.** Every run ends with exactly one status line, printed last: nothing else in
+autopilot's report follows it. A self-paced `/loop`'s own `ScheduleWakeup` call (and its delay
+note) may still come after. This includes a dry run and a run that stops early (a rejected flag, a
+ledger it can't use). A `/goal` condition or a log reader matches on it (README → Running
+continuously):
+
+```text
+autopilot: merged <N>
+autopilot: converged → observe
+autopilot: nothing to do
+autopilot: stopped: <reason>
+```
+
+- `merged <N>` — the run merged N ≥ 1 issues, whatever ended the loop.
+- `converged → observe` — an observe run (step 3).
+- `nothing to do` — nothing merged, and the loop ended on step 4's no-progress stop or semi mode's
+  refill stop: autopilot can't build anything more until a human acts.
+- `stopped: <reason>` — any other end, with a short reason on the same line: `all held`, `cycle
+  cap`, `dry run`, `invalid flag <flag>`, or `ledger unavailable`.
 
 ## Notes
 
 - Bounded by design: `--cycles` caps the run; re-invoke to continue. There is no unbounded mode.
+  A schedule only re-invokes it, and ends once a run has nothing left to do (step 5).
 - `semi` is the default and never merges self-proposed work; `full` is opt-in and merges unattended —
   every merge still passes `auto`'s review + `CLEAN` gate, and nothing is force-merged.
 - Held PRs (conflicts, failing/pending checks, drafts, reviews still blocking after `auto`'s fix
