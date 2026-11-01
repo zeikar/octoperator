@@ -73,4 +73,8 @@ failure, a failure log, or user feedback). The current plan is epic
    there (#79). A local run also posts ledger entries under the owner's own `gh` login, so it needs
    no stored token.
 5. **Self-improvement** — control-loop changes only on a separate branch, gated by the benchmark (#74).
-6. **Genesis** — one sentence → a new project (#75, to be planned as its own epic).
+6. **Genesis** — one sentence → a new project, planned as epic
+   [#85](https://github.com/zeikar/octoperator/issues/85) (in place of #75): prior-art research and
+   a local proposal, stopped at a human checkpoint (#86, #87); with `--approve`, a private repo, an
+   MVP epic, and a handoff to autopilot (#88, #89); then scenario evals that give `research` `eval`
+   evidence and the ledger a metric, and next-milestone planning once they all pass (#90–#93).

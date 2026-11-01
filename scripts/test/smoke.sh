@@ -14,6 +14,8 @@
 #   - octo-merge-state.sh  : the UNKNOWN re-query loop and gh-error exit, against a stub `gh`
 #   - octo-approval-match.sh : pattern normalization, malformed patterns, matching (renames
 #                            included), and the incomplete-file-list hold, against a stub `gh`
+#   - octo-genesis-check.sh : a valid proposal, a missing section or front-matter key, an
+#                            ungrounded proposal, bad arguments, and --preflight's empty-dir check
 #   - octo-bench.sh        : the --live gate and --dry-run make no gh / claude call; preflight,
 #                            check's metrics, run's cost cap, and cleanup, against a stub `gh`
 #                            and `claude`
@@ -265,6 +267,97 @@ STUB_COUNT=3000 approval 'nothing'
 expect 0 "3000 changed files (the API limit): exits 3" test "$am_rc" -eq 3
 STUB_GH_RC=2 approval 'nothing'
 expect 0 "gh exit 2: exits 3, not the malformed-pattern 2" test "$am_rc" -eq 3
+
+echo "• octo-genesis-check.sh (offline, temp dirs)"
+GENESIS="$SCRIPTS_DIR/octo-genesis-check.sh"
+# genesis_fixture <dir> : write a valid, grounded proposal into <dir>.
+genesis_fixture() {
+  mkdir -p "$1/docs"
+  cat >"$1/GENESIS.md" <<'MD'
+---
+sentence: |-
+  A character-chat app: it remembers you across long conversations.
+repo: smoke/chat-pal
+visibility: private
+---
+
+# Genesis proposal
+MD
+  cat >"$1/docs/research.md" <<'MD'
+# Research: chat-pal
+
+## Problem
+
+Chat companions forget earlier conversations (https://foo.example/blog).
+
+## Prior art
+
+| Name | Kind | URL | License | Strengths | Gaps |
+|------|------|-----|---------|-----------|------|
+| Foo | service | https://foo.example | proprietary | polish | forgets |
+| Bar | OSS | https://github.com/x/bar | MIT | self-hosted | no memory |
+
+## Build
+
+- Long-term memory per user (https://foo.example/blog)
+
+## Skip
+
+- Voice calls — costly, and neither project's users ask for them (https://github.com/x/bar)
+
+## Sources
+
+- https://foo.example/blog — Foo's blog, accessed 2026-11-01
+- <https://github.com/x/bar> — accessed 2026-11-01
+MD
+}
+# genesis_check <args...> : run the helper; sets gc_out (stdout) and gc_rc.
+genesis_check() { gc_out="$(bounded 10 bash "$GENESIS" "$@" 2>/dev/null)"; gc_rc=$?; }
+g="$wtmp/genesis"
+genesis_fixture "$g/valid"
+genesis_check "$g/valid"
+expect 0 "valid proposal: exits 0, prints nothing" test "$gc_rc" -eq 0 -a -z "$gc_out"
+genesis_fixture "$g/nosection"
+sed 's/^## Skip$/## Avoid/' "$g/valid/docs/research.md" >"$g/nosection/docs/research.md"
+genesis_check "$g/nosection"
+expect 0 "missing ## Skip: exits 1 with a FAIL line" test "$gc_rc" -eq 1 \
+  -a "$gc_out" = "FAIL: docs/research.md: missing section ## Skip"
+genesis_fixture "$g/nokey"
+grep -v '^visibility:' "$g/valid/GENESIS.md" >"$g/nokey/GENESIS.md"
+genesis_check "$g/nokey"
+expect 0 "missing visibility key: exits 1 with a FAIL line" test "$gc_rc" -eq 1 \
+  -a -n "$(printf '%s\n' "$gc_out" | grep -Fx \
+    "FAIL: GENESIS.md: front matter needs visibility: private or public (got '')")"
+genesis_fixture "$g/nourl"
+sed 's|^- Long-term memory per user .*|- Long-term memory per user|' \
+  "$g/valid/docs/research.md" >"$g/nourl/docs/research.md"
+genesis_check "$g/nourl"
+expect 0 "grounded Build item with no URL: exits 1" test "$gc_rc" -eq 1 \
+  -a "$gc_out" = "FAIL: docs/research.md: 1 ## Build item(s) cite no URL"
+# Ungrounded: no rows, no sources, and items without URLs all pass.
+genesis_fixture "$g/ungrounded"
+awk '/^## Problem$/ { print "ungrounded: no web access"; print "" } /^\| (Foo|Bar) / { next }
+     /^## Sources$/ { print; exit } { gsub(/ \(https:[^)]*\)/, ""); print }' \
+  "$g/valid/docs/research.md" >"$g/ungrounded/docs/research.md"
+genesis_check "$g/ungrounded"
+expect 0 "ungrounded proposal with no sources: exits 0" test "$gc_rc" -eq 0 -a -z "$gc_out"
+expect 2 "no DIR exits 2"            bounded 10 bash "$GENESIS"
+expect 2 "two DIRs exit 2"           bounded 10 bash "$GENESIS" "$g/valid" "$g/nokey"
+expect 2 "a missing DIR exits 2"     bounded 10 bash "$GENESIS" "$g/nosuch"
+expect 2 "--preflight with no DIR exits 2" bounded 10 bash "$GENESIS" --preflight
+mkdir -p "$g/empty-1/.claude"
+genesis_check --preflight "$g/empty-1"
+expect 0 "--preflight, only .claude/: exits 0, prints the path" \
+  test "$gc_rc" -eq 0 -a "$gc_out" = "$(cd "$g/empty-1" && pwd)"
+genesis_check --preflight "$g/valid"
+# Glob order depends on the locale, so compare sorted.
+expect 0 "--preflight, non-empty: exits 1, names each entry" test "$gc_rc" -eq 1 \
+  -a "$(printf '%s\n' "$gc_out" | LC_ALL=C sort)" \
+    = "FAIL: directory not empty: GENESIS.md"$'\n'"FAIL: directory not empty: docs"
+mkdir -p "$g/bad name" && touch "$g/bad name/.hidden"
+genesis_check --preflight "$g/bad name"
+expect 0 "--preflight, a dotfile and an invalid repo name: exits 1, two FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$(printf '%s\n' "$gc_out" | grep -c '^FAIL: ')" -eq 2
 
 echo "• octo-bench.sh (offline, stub gh and claude)"
 # Stubs first on PATH log every call to $STUB_LOG. gh answers from the fixture dir $STUB_CASE:
