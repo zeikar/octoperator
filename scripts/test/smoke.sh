@@ -552,6 +552,13 @@ sed -e 's/^test_command: .*/test_command: "npm test"/' \
   >"$g/fmquote/GENESIS.md"
 genesis_check "$g/fmquote"
 expect 0 "quoted and commented front-matter values: exits 0" test "$gc_rc" -eq 0 -a -z "$gc_out"
+# A value that is only a comment is null in YAML, so stack is empty.
+genesis_fixture "$g/fmcomment"
+sed 's/^stack: .*/stack: # TODO pick one/' "$g/valid/GENESIS.md" >"$g/fmcomment/GENESIS.md"
+genesis_check "$g/fmcomment"
+expect 0 "stack that is only a comment: exits 1 with a FAIL line" test "$gc_rc" -eq 1 \
+  -a -n "$(printf '%s\n' "$gc_out" | grep -Fx \
+    "FAIL: GENESIS.md: front matter needs a non-empty stack")"
 # An explanation after a baseline line, as Octoperator's own VISION.md has, is allowed.
 genesis_fixture "$g/viselab"
 sed 's/^- Deploying, .* approval\.$/& Enforced by approval gates./' "$g/valid/VISION.md" \

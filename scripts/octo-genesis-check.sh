@@ -141,8 +141,8 @@ front_matter() {
 }
 
 # fm_value <front-matter> <key> : prints the key's inline value, trimmed, as YAML reads it: one
-# pair of matching quotes, or an unquoted value's trailing ` # comment`, removed (empty when the
-# key is missing or has no inline value).
+# pair of matching quotes, or an unquoted value's ` # comment` (one that starts the value or
+# follows whitespace), removed (empty when the key is missing or has no inline value).
 fm_value() {
   printf '%s\n' "$1" | awk -v k="$2" 'index($0, k ":") == 1 {
     v = substr($0, length(k) + 2); gsub(/^[ \t]+|[ \t\r]+$/, "", v)
@@ -150,7 +150,7 @@ fm_value() {
     if (q == "\"" || q == "\047") {
       end = index(substr(v, 2), q)
       if (end && substr(v, end + 2) ~ /^([ \t]+#.*)?$/) v = substr(v, 2, end - 1)
-    } else sub(/[ \t]+#.*$/, "", v)
+    } else sub(/(^|[ \t]+)#.*$/, "", v)
     print v; exit }'
 }
 
