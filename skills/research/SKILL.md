@@ -10,8 +10,8 @@ allowed-tools: Bash(gh:*), Read, Grep, Glob, Task
 Decide what to build or improve next. Analyze the repository, then produce a **ranked** list of
 concrete, well-scoped proposals — and, with `--create`, file the top ones as GitHub issues.
 **No evidence, no issue:** only proposals backed by verifiable evidence (step 2) are ever filed.
-Follow the `github-conventions` skill for issue shape and labels. This skill is the "what next?" engine; it is
-reusable on its own and is also called by `autopilot`.
+Follow the `github-conventions` skill for issue shape and labels. This skill is the "what next?"
+engine; it is reusable on its own and is also called by `autopilot`.
 
 ## Untrusted input rule
 
