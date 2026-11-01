@@ -16,10 +16,14 @@
 #
 # It prints `dir:`, `repo:`, and `stage:` lines, then one numbered step per line, in run order.
 # A step that starts with `write ` is a file to write (skills/genesis/references/skeleton.md);
-# every other step is one plain command to run as printed, except that `<module and test files>`
-# in `git add` stands for the skeleton's own files. Visibility is --private unless GENESIS.md
-# says `visibility: public`. The gh repo create description is the sentence on one line, its
-# control characters made spaces, cut to GitHub's 350-character limit, and single-quoted.
+# every other step is one plain command to run as printed, except that `<the skeleton's other
+# files>` in `git add` stands for the skeleton's module, test, and any stack manifest its
+# `test_command` needs. Visibility is --private unless GENESIS.md says `visibility: public`. The
+# gh repo create description is the sentence on one line, its control characters made spaces,
+# cut to GitHub's 350-character limit, and single-quoted.
+#
+# origin counts as GENESIS.md's repo only when every URL git fetches from and pushes to (`git
+# remote get-url`, so a pushurl and insteadOf rewrites count) is a github.com URL of that repo.
 #
 # Read-only and offline: it reads DIR's files and git state; it never calls gh or writes.
 #
@@ -61,14 +65,13 @@ PHYS="$(cd "$DIR" && pwd -P)"
 # git_out <args...> : runs `git -C DIR <args>`; sets OUT (stdout and stderr) and RC.
 git_out() { RC=0; OUT="$(git -C "$ABS" "$@" 2>&1)" || RC=$?; }
 
-# url_repo <url> : prints the owner/name a GitHub remote URL points to, lowercased (https,
-# ssh://, and scp-like git@host:owner/name forms; `.git` and a trailing `/` dropped).
+# url_repo <url> : prints the owner/name a github.com remote URL points to, lowercased, or
+# nothing for any other URL. Only the exact https://, ssh://git@, and git@github.com: forms
+# count, with an optional `.git` and trailing `/`: another host or path is another repo.
 url_repo() {
-  local u="${1%/}" name
-  u="${u%.git}"
-  name="${u##*/}"
-  u="${u%/*}"
-  printf '%s/%s\n' "${u##*[/:]}" "$name" | tr '[:upper:]' '[:lower:]'
+  local re='^(https://github\.com/|ssh://git@github\.com/|git@github\.com:)([^/]+)/([^/]+)/?$'
+  [[ "$1" =~ $re ]] || return 0
+  printf '%s/%s\n' "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]%.git}" | tr '[:upper:]' '[:lower:]'
 }
 
 git_out rev-parse --show-toplevel
@@ -80,12 +83,27 @@ case "$RC:$OUT" in
     fi
     git_out rev-parse --verify --quiet 'HEAD^{commit}'
     COMMITTED=$(( RC == 0 ))
-    git_out config --get remote.origin.url
-    if [ "$RC" -ne 0 ]; then
+    git_out remote get-url --all origin
+    case "$RC:$OUT" in
+      0:*) URLS="$OUT" ;;
+      2:*"No such remote"*) URLS="" ;;
+      *) printf 'git remote get-url failed (exit %s): %s\n' "$RC" "$OUT" >&2; exit 3 ;;
+    esac
+    if [ -n "$URLS" ]; then
+      git_out remote get-url --push --all origin
+      [ "$RC" -eq 0 ] || { printf 'git remote get-url --push failed (exit %s): %s\n' "$RC" \
+        "$OUT" >&2; exit 3; }
+      want="$(printf '%s\n' "$REPO" | tr '[:upper:]' '[:lower:]')"
+      while IFS= read -r u; do
+        [ "$(url_repo "$u")" = "$want" ] \
+          || { echo "FAIL: git: origin is $u, not GENESIS.md's repo $REPO"; exit 1; }
+      done <<EOF
+$URLS
+$OUT
+EOF
+    fi
+    if [ -z "$URLS" ]; then
       if [ "$COMMITTED" -eq 1 ]; then STAGE=create; else STAGE=commit; fi
-    elif [ "$(url_repo "$OUT")" != "$(printf '%s\n' "$REPO" | tr '[:upper:]' '[:lower:]')" ]; then
-      echo "FAIL: git: origin is $OUT, not GENESIS.md's repo $REPO"
-      exit 1
     elif [ "$COMMITTED" -eq 0 ]; then
       echo "FAIL: git: origin is set, but nothing is committed; commit, or remove origin"
       exit 1
@@ -150,7 +168,7 @@ case "$STAGE" in
     [ "$STAGE" = commit ] || step "git -C $D init -b main"
     step "git -C $D add -- GENESIS.md VISION.md docs/research.md docs/prd.md" \
       "docs/adr/0001-stack.md README.md .gitignore .github/workflows/ci.yml $TEST_FILE" \
-      "<module and test files>"
+      "<the skeleton's other files>"
     step "git -C $D commit -m 'chore: scaffold from genesis'" ;;
 esac
 step "gh auth status"

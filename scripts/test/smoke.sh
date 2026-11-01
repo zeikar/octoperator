@@ -716,6 +716,23 @@ genesis_check --skeleton "$sk"
 expect 0 "--skeleton, CI without pull_request or the test step: exits 1, two FAIL lines" \
   test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/ci.yml: on: needs the \
 pull_request trigger"$'\n'"FAIL: .github/workflows/ci.yml: needs a step 'run: npm test'"
+skeleton_case elsewhere
+cat >"$sk/.github/workflows/ci.yml" <<'YML'
+on: workflow_dispatch
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/build-push-action@v5
+        with:
+          push: true
+          pull_request: x
+      - run: npm test
+YML
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, push: and pull_request: keys only outside the on: block: two FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/ci.yml: on: needs the push \
+trigger"$'\n'"FAIL: .github/workflows/ci.yml: on: needs the pull_request trigger"
 skeleton_case noignore
 printf 'node_modules/\n.claude/\n' >"$sk/.gitignore"
 genesis_check --skeleton "$sk"
@@ -838,6 +855,23 @@ genesis_plan "$p/commit"
 expect 0 "origin is another repo: exits 1, one FAIL: git: line" test "$pl_rc" -eq 1 \
   -a "$pl_out" = "FAIL: git: origin is https://github.com/someone/else.git, not GENESIS.md's \
 repo smoke/chat-pal"
+# Only a github.com URL of the repo counts: git would push the approved code anywhere else.
+for u in https://gitlab.com/smoke/chat-pal.git https://evil.example/x/smoke/chat-pal; do
+  git -C "$p/commit" remote set-url origin "$u"
+  genesis_plan "$p/commit"
+  expect 0 "origin $u (same owner/name): exits 1, one FAIL: git: line" test "$pl_rc" -eq 1 \
+    -a "$pl_out" = "FAIL: git: origin is $u, not GENESIS.md's repo smoke/chat-pal"
+done
+git -C "$p/commit" remote set-url origin https://github.com/smoke/chat-pal.git
+git -C "$p/commit" config remote.origin.pushurl https://github.com/someone/else.git
+genesis_plan "$p/commit"
+expect 0 "origin's url is the repo but its pushurl is another: exits 1, names the pushurl" \
+  test "$pl_rc" -eq 1 -a "$pl_out" = "FAIL: git: origin is https://github.com/someone/else.git, \
+not GENESIS.md's repo smoke/chat-pal"
+git -C "$p/commit" config --unset remote.origin.pushurl
+genesis_plan "$p/commit"
+expect 0 "origin https://github.com/…/chat-pal.git, no pushurl: stage setup" \
+  test "$pl_rc" -eq 0 -a -n "$(printf '%s\n' "$pl_out" | grep -Fx 'stage: setup')"
 genesis_fixture "$p/noco"
 git -C "$p/noco" init -q
 git -C "$p/noco" remote add origin https://github.com/smoke/chat-pal

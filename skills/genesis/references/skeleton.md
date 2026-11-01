@@ -34,7 +34,7 @@ with #90.
 | `test_command` | Detection file holds | Must not exist | CI setup and install |
 |---|---|---|---|
 | `npm test` | `package.json`: `"scripts": {"test": …}`, e.g. `node --test` | — | `actions/setup-node`, `npm install` |
-| `make test` | `Makefile`: a `test:` target that runs the stack's runner | `package.json` | the toolchain's setup, its install if any |
+| `make test` | `Makefile`: a `test:` target that runs the stack's runner, beside the stack's manifest (`Cargo.toml`, …), which is committed too | `package.json` | the toolchain's setup, its install if any |
 | `pytest` | `pyproject.toml`: a `[tool.pytest.ini_options]` table | `package.json`, `Makefile` | `actions/setup-python`, `pip install pytest` |
 | `go test ./...` | `go.mod`: `module github.com/<repo>` | `package.json`, `Makefile`, `pyproject.toml` | `actions/setup-go` with `go-version-file: go.mod` |
 
@@ -78,9 +78,12 @@ After `gh repo create`, genesis runs setup's procedure
 questions:
 
 - **Probe** — `octo-setup.sh --repo <repo>`, as setup's step 1. An `error` stops the run.
-- **Existing settings** — when `.claude/octoperator.local.md` exists, keep it. If its
-  `approval_paths` lacks `.github/workflows/`, add that one entry with Edit and change nothing
-  else.
+- **Existing settings** — when `.claude/octoperator.local.md` exists and its `repo:` is
+  `GENESIS.md`'s `repo` (case aside), keep it. If its `approval_paths` lacks
+  `.github/workflows/`, add that one entry with Edit and change nothing else. Any other `repo:`,
+  or none, is a file from another project: stop with `settings repo mismatch` before any label,
+  so plan-epic never files issues in that repo. Genesis doesn't edit or delete it; the human
+  does, then runs `--approve` again.
 - **Board** — none, whatever the probe says. The human can run `/octoperator:setup` later to add
   one.
 - **Write** — otherwise, write the file below (schema:

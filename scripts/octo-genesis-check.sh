@@ -453,7 +453,7 @@ check_vision() {
 }
 
 check_skeleton() {
-  local f n=0 marker what want w
+  local f n=0 marker what want w triggers
   # Without a detectable test_command, check_genesis_md already said so; nothing to compare.
   [ -n "$TEST_CMD" ] || return 0
   # Detection takes the first match, so a file of an earlier rule would run another command.
@@ -479,9 +479,22 @@ check_skeleton() {
   if [ ! -f "$f" ]; then
     fail ".github/workflows/ci.yml is missing"
   else
-    # A trigger is a key of the `on:` block (`  push:`) or a word on the `on:` line itself.
+    # The triggers: the words on a top-level `on:` line itself (`on: [push, pull_request]`), or
+    # the keys (or `- items`) at the first indent level of its block, up to the next unindented
+    # line. A `push:` anywhere else, such as a step's `with:`, is not a trigger.
+    triggers="$(awk -v sq="'" '
+      BEGIN { q = "[\"" sq "]" }
+      $0 ~ "^" q "?on" q "?:" { in_on = 1; depth = 0; rest = $0; sub(/^[^:]*:/, "", rest)
+        sub(/#.*/, "", rest); gsub("[][{},:\"" sq "]", " ", rest)
+        n = split(rest, w, /[ \t]+/); for (i = 1; i <= n; i++) if (w[i] != "") print w[i]
+        next }
+      !in_on || /^[ \t]*(#.*)?\r?$/ { next }
+      /^[^ \t]/ { in_on = 0; next }
+      { match($0, /^[ \t]+/); if (!depth) depth = RLENGTH
+        if (RLENGTH == depth) { k = substr($0, depth + 1); sub(/^-[ \t]+/, "", k)
+          gsub("[\"" sq "]", "", k); sub(/[: \t#\r].*/, "", k); print k } }' "$f")"
     for want in push pull_request; do
-      grep -Eq "^[[:space:]]+$want:|^[\"']?on[\"']?:.*(^|[^a-z_])$want([^a-z_]|\$)" "$f" \
+      printf '%s\n' "$triggers" | grep -Fxq "$want" \
         || fail ".github/workflows/ci.yml: on: needs the $want trigger"
     done
     awk -v c="$TEST_CMD" '{ line = $0; sub(/^[ \t]*(-[ \t]+)?/, "", line)

@@ -227,7 +227,8 @@ with the reason given here; the next `--approve` resumes from what exists.
 
 1. **`write the skeleton`.** Read `${CLAUDE_PLUGIN_ROOT}/skills/genesis/references/skeleton.md`
    and the ADR, Glob `<dir>/**/*` to see what exists, and Write each missing skeleton file for
-   `test_command`. Never overwrite a file.
+   `test_command`. Never overwrite a file. A refused or failed Write → stop with
+   `skeleton write failed`, naming the file; the files already written stay for the next run.
 2. **The skeleton check.** Exit 0 → go on. Exit 1 → fix each `FAIL:` line in a file this run
    wrote (Edit), and re-run. Stop with `skeleton invalid`, quoting the lines, after two failed
    fixes, or when a line names a file this run didn't write or a file that must not exist:
@@ -236,17 +237,20 @@ with the reason given here; the next `--approve` resumes from what exists.
    denied prompt → stop with `test command failed`, quoting the last 20 lines at most. Nothing is
    in git or on GitHub yet; the human fixes the skeleton, or installs the runner, and re-runs
    `--approve`, which keeps the files.
-4. **`git init`, `git add`, `git commit`.** In `git add`, replace `<module and test files>` with
-   the skeleton's module and test files: the ones this run wrote, or found. Add nothing else:
-   never `.claude/`, build output, or a file of the human's. A failure → stop with `git init failed`,
+4. **`git init`, `git add`, `git commit`.** In `git add`, replace `<the skeleton's other files>`
+   with the skeleton's module, its test, and, for `make test`, the stack's manifest
+   (skeleton.md's table): the ones this run wrote, or found. Add nothing else: never `.claude/`,
+   build output, or a file of the human's. A failure → stop with `git init failed`,
    `git add failed`, or `git commit failed`, quoting git's output (a commit without an identity
    needs `git config --global user.name` and `user.email`).
 5. **Preflight**, `gh auth status` and `gh api graphql …`. Either exits non-zero → stop with
    `GitHub GraphQL unavailable (#79, run locally)`: Claude Code cloud sessions block GitHub's
    GraphQL API, which every later `gh` step needs; when `gh auth status` failed, suggest
-   `gh auth login`. When `gh auth status` lists token scopes without `workflow`, stop now with
+   `gh auth login`. When the plan still pushes (stage `scaffold`, `commit`, `create`, or `push`)
+   and `gh auth status` lists token scopes without `workflow`, stop now with
    `workflow scope missing`: pushing `.github/workflows/ci.yml` needs it. Suggest
-   `gh auth refresh -s workflow`, then `--approve` again.
+   `gh auth refresh -s workflow`, then `--approve` again. At stage `setup` the push is done, so
+   the scope doesn't matter.
 6. **Name check**, `gh repo view <repo> …`. Exit 0 → the repo exists and is not this folder's
    `origin`: stop with `repo name taken`, and ask the human to edit `repo` in `GENESIS.md` and
    re-run. If it is the repo an earlier run created and only the remote is missing, they can
@@ -262,7 +266,8 @@ with the reason given here; the next `--approve` resumes from what exists.
      any other failure is `git push failed`.
 8. **Setup**, by reference with fixed answers (skeleton.md → Settings): the `octo-setup.sh` probe,
    the settings file only when missing, and the labels. A probe `error`, a non-zero exit, or a
-   failed label → stop with `setup failed`.
+   failed label → stop with `setup failed`. A settings file whose `repo:` is not `<repo>` → stop
+   with `settings repo mismatch`, before any label.
 
 Then report: the repo's URL (`https://github.com/<repo>`) and visibility, the stage the run started
 from, the files committed, the test command and its result, the settings file's path, and that
@@ -287,10 +292,11 @@ genesis: stopped: <reason>
   `--next not built yet`, `--approve takes no sentence`, `--dry-run needs --approve`,
   `inside a git work tree`, `directory not empty`, `invalid directory name`, `preflight failed`,
   `gh api user failed`, `proposal invalid`, or `check failed`. `--approve`: `dry run`,
-  `proposal invalid`, `git state invalid`, `plan failed`, `skeleton invalid`, `check failed`,
-  `test command failed`, `git init failed`, `git add failed`, `git commit failed`,
-  `GitHub GraphQL unavailable (#79, run locally)`, `workflow scope missing`, `repo name taken`,
-  `name check failed`, `gh repo create failed`, `git push failed`, or `setup failed`.
+  `proposal invalid`, `git state invalid`, `plan failed`, `skeleton write failed`,
+  `skeleton invalid`, `check failed`, `test command failed`, `git init failed`, `git add failed`,
+  `git commit failed`, `GitHub GraphQL unavailable (#79, run locally)`, `workflow scope missing`,
+  `repo name taken`, `name check failed`, `gh repo create failed`, `git push failed`,
+  `setup failed`, or `settings repo mismatch`.
 
 ## Notes
 
