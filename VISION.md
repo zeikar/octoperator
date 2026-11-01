@@ -65,7 +65,12 @@ failure, a failure log, or user feedback). The current plan is epic
    baseline run #69 is on hold).
 2. **Constitution** — this file, read by `research` (#70).
 3. **Evidence-gated research** — no evidence, no issue (#71).
-4. **Continuous operation** — a run ledger, convergence detection, and approval gates (#72), then a
-   scheduled, budget-capped runner (#73).
+4. **Continuous operation** — a run ledger, convergence detection, and approval gates (#72), then
+   re-running autopilot locally with Claude Code's own scheduling (in-session cron, `/loop`,
+   `/goal`, or `claude -p` with `--max-budget-usd` under an OS scheduler), with each scheduled run
+   ending its schedule once nothing is left to do (#73). This replaced a cloud or GitHub Actions
+   runner because Claude Code cloud sessions block GitHub's GraphQL API, so Octoperator can't run
+   there (#79). A local run also posts ledger entries under the owner's own `gh` login, so it needs
+   no stored token.
 5. **Self-improvement** — control-loop changes only on a separate branch, gated by the benchmark (#74).
 6. **Genesis** — one sentence → a new project (#75, to be planned as its own epic).

@@ -41,7 +41,7 @@ always-on knowledge layer.
 | | `/octoperator:issue <request>` | Create one well-formed issue (labels, acceptance criteria, milestone, board) |
 | **Autonomous lifecycle** | `/octoperator:implement <issue#...> [--max N] [--draft] [--dry-run]` | Implement one or more issues end-to-end: branch, code, test, and PR. Single issue runs in-tree; multiple issues run in parallel worktrees (up to `--max`, default 3) |
 | | `/octoperator:auto <issue#...> [--max N] [--dry-run]` | End-to-end lifecycle: implement → review → merge for one or more issues. Blocker/major/minor review findings trigger up to 6 fix → re-review rounds; merges (regular merge) only on a non-blocking review of the current head + CI green + mergeable. A PR that touches an `approval_paths` glob is held for a human (`needs human approval: <path>`) |
-| | `/octoperator:autopilot [--mode semi\|full] [--cycles N] [--max M] [--resume] [--dry-run]` | Bounded loop: discover work → `auto` (implement→review→merge) → when empty, `research` refills. `semi` builds only `ready` issues then proposes; `full` runs unattended to the cycle cap. In both modes a `needs-approval` issue is skipped (reported as gated) until a human adds `approved`. Each run appends an entry to an `octoperator-ledger` issue; after `convergence_runs` runs (default 3) without a merge it switches to observe mode (propose only, no builds) until `--resume` |
+| | `/octoperator:autopilot [--mode semi\|full] [--cycles N] [--max M] [--resume] [--dry-run]` | Bounded loop: discover work → `auto` (implement→review→merge) → when empty, `research` refills. `semi` builds only `ready` issues then proposes; `full` runs unattended to the cycle cap. In both modes a `needs-approval` issue is skipped (reported as gated) until a human adds `approved`. Each run appends an entry to an `octoperator-ledger` issue; after `convergence_runs` runs (default 3) without a merge it switches to observe mode (propose only, no builds) until `--resume`. Every run ends with an `autopilot: …` status line, and a run started by an in-session cron task or `/loop` ends that schedule once there is nothing left to do (see [Running continuously](#running-continuously)) |
 | **Review & status** | `/octoperator:review <pr#>` | Run a structured review and post the verdict + findings to the PR |
 | | `/octoperator:sync` | Standup-style status report; auto-reconciles board drift |
 | **What's next** | `/octoperator:research [--create] [--count N] [--focus <feature\|refactor\|debt\|tests\|docs\|dx\|all>] [--dry-run]` | Analyze the repo and produce a ranked list of proposals balanced across features, refactoring, tech debt, tests, docs, and DX; with `--create`, file the top ones as `proposed` issues — only proposals backed by verifiable evidence (a benchmark result, failing CI, a held PR or autopilot ledger entry, or user feedback). Proposals that would deploy, spend money, or delete data also get `needs-approval` |
@@ -137,8 +137,9 @@ Two things the skills can't pre-allow for you:
   doesn't document a skill's pre-allowed tools reaching a subagent; settings-file rules apply to the
   whole session, subagents included.
 
-So for a run that never stops on a permission prompt (e.g. `autopilot --mode full`), allow these in
-the target repo's `.claude/settings.json` (or `settings.local.json` to keep it personal):
+So for a run that never stops on a permission prompt (e.g. `autopilot --mode full`, or a
+[scheduled run](#running-continuously)), allow these in the target repo's `.claude/settings.json`
+(or `settings.local.json` to keep it personal):
 
 ```json
 {
@@ -150,6 +151,113 @@ the target repo's `.claude/settings.json` (or `settings.local.json` to keep it p
 
 Use your repo's actual commands — `Bash(pytest:*)`, `Bash(make test:*)`, `Bash(go test:*)`,
 `Bash(npm ci:*)`, `Bash(npm run lint:*)`, …
+
+## Running continuously
+
+Autopilot is bounded, so running it continuously means re-invoking it on a schedule. Use Claude
+Code's own scheduling, on your machine. A local session uses your `gh` login, so the ledger entries
+come from you and convergence works, with no PAT or secret to store. `/schedule` cloud routines are
+not supported: cloud sessions block GitHub's GraphQL API, which `gh` relies on
+([#79](https://github.com/zeikar/octoperator/issues/79)).
+
+Every run ends with one status line: `autopilot: merged N`, `autopilot: converged → observe`,
+`autopilot: nothing to do`, or `autopilot: stopped: <reason>`. On `nothing to do` or `converged →
+observe`, a run started by an in-session cron task or a `/loop` ends that schedule. It deletes only
+its own task, says which one, and deletes nothing when it can't tell. In semi mode that happens
+once a run finds no `ready` issue to build, so start the schedule again after you triage.
+
+**Permissions.** Nobody is there to answer a prompt, so first add the allow rules from
+[Unattended runs](#unattended-runs). That applies to every mode below.
+
+| Mode | Runs | Stops when | Cost bound |
+|---|---|---|---|
+| In-session cron (default) | in a background session | autopilot ends it; 7-day expiry; the session exits | `--cycles` per run; no $ cap |
+| `/loop` | in your session | autopilot ends it; you cancel it | `--cycles` per run; no $ cap |
+| `/goal` | back to back, in your session | the condition is met; the turn clause | the turn clause; no $ cap |
+| `claude -p` + launchd/cron | a fresh process per run | you remove the job | `--max-budget-usd` per run |
+
+**In-session cron (default).** Start a background session that runs autopilot every 6 hours:
+
+```bash
+claude --bg "Create a recurring cron task: schedule '17 */6 * * *', prompt '/octoperator:autopilot --mode full'"
+```
+
+The task lives in that session. It stops when autopilot ends it, when you ask Claude to cancel it,
+after 7 days (recurring tasks expire), or when the session exits — a reboot included.
+`claude --resume` brings back a stopped session's unexpired tasks. Each run adds to the session's
+context, so for runs over many days prefer `claude -p`. `CLAUDE_CODE_DISABLE_CRON=1` turns all
+session scheduling off.
+
+**`/loop`.** For a short stretch you're watching, in your current session:
+
+```text
+/loop 2h /octoperator:autopilot --mode semi
+/loop /octoperator:autopilot --mode semi
+```
+
+The first form runs on a fixed interval and is a cron task like the one above. The second is
+self-paced: Claude picks a wait of 1 minute to 1 hour after each run. You stop a self-paced loop
+with `Esc` while it waits. It isn't restored by `claude --resume`. Run `/bg` to move the session
+to the background.
+
+**`/goal`.** To drain the backlog now, run after run, without waiting on a timer:
+
+```text
+/goal Run /octoperator:autopilot --mode full each turn until its last line is "autopilot: nothing to do" or "autopilot: converged → observe" or starts with "autopilot: stopped:", or stop after 10 turns
+```
+
+A small model judges the condition after each turn, from the transcript only, which is why it
+names the status line. The turn clause is also a model judgment, not a hard cap. `/goal clear`
+ends it early. `/goal` doesn't change the permission mode.
+
+**`claude -p` + an OS scheduler.** For long unattended runs, each in a fresh process:
+
+```bash
+cd /path/to/repo && claude -p "/octoperator:autopilot --mode full" \
+  --max-budget-usd 10 --permission-prompts none --output-format json
+```
+
+`--max-budget-usd` stops the run at that estimated spend; leave some headroom, since spend can
+pass the cap slightly. `--permission-prompts none` denies anything your allow rules don't cover
+instead of waiting. Don't add `--bare`: it skips plugins and skills, Octoperator included. Each
+run starts with a fresh context, and the state it needs lives in the ledger. The JSON output's
+`total_cost_usd` is the run's cost; autopilot leaves the ledger's `cost_usd` `null`, so a wrapper
+of your own could record it there.
+
+Autopilot can't remove an OS job. Once the ledger converges, each run is an observe run (research
+only, nothing built) until you pass `--resume`. Unload the job when the log's last status line
+reads `nothing to do` or `converged → observe`.
+
+On macOS, use a launchd agent. Save this as
+`~/Library/LaunchAgents/dev.octoperator.autopilot.plist`, then run
+`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.octoperator.autopilot.plist`.
+To stop it, run `launchctl bootout gui/$(id -u)/dev.octoperator.autopilot`.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>dev.octoperator.autopilot</string>
+  <key>WorkingDirectory</key><string>/path/to/repo</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string><string>-lc</string>
+    <string>claude -p "/octoperator:autopilot --mode full" --max-budget-usd 10 --permission-prompts none --output-format json</string>
+  </array>
+  <key>StartInterval</key><integer>21600</integer>
+  <key>StandardOutPath</key><string>/path/to/octoperator-autopilot.log</string>
+  <key>StandardErrorPath</key><string>/path/to/octoperator-autopilot.log</string>
+</dict>
+</plist>
+```
+
+`zsh -lc` loads your login shell's `PATH`, so launchd can find `claude` and `gh`. On Linux, use a
+crontab line instead (`crontab -e`). Set `PATH` at the top of the crontab so cron can find them:
+
+```text
+17 */6 * * * cd /path/to/repo && claude -p "/octoperator:autopilot --mode full" --max-budget-usd 10 --permission-prompts none --output-format json >> "$HOME/octoperator-autopilot.log" 2>&1
+```
 
 ## Usage example
 

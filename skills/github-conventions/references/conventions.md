@@ -66,8 +66,9 @@ cost, and kind (`run`, `observe`, or `reset`). Autopilot reads the newest entrie
 convergence: after `convergence_runs` entries in a row without a merge (see `settings.md`), it
 switches to observe mode — `research` proposes, nothing is built — until a human runs
 `autopilot --resume`. Only comments from an `OWNER`, `MEMBER`, or `COLLABORATOR` count as entries,
-so a scheduled runner must post with a PAT or GitHub App that has one of those roles — a bot token
-without one (e.g. `github-actions[bot]`) gets its entries skipped, and autopilot never converges.
+so autopilot must run under a `gh` login with one of those roles — a local run under your own login
+has it, while a bot account without one (e.g. `github-actions[bot]`) gets its entries skipped, and
+autopilot never converges.
 `research` may cite an entry as `failure-log` evidence, but only for a proposal about the held
 issues it names or about why runs stopped merging. The ledger is not work, so it carries no type or
 priority label. Keep it open; the entry format is defined in

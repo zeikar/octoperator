@@ -7,6 +7,19 @@ All notable changes to Octoperator are documented in this file. The format is ba
 ## [Unreleased]
 
 ### Added
+- README → "Running continuously": copy-paste recipes for re-running `autopilot` with Claude
+  Code's own scheduling on your machine — an in-session cron task in a background session (the
+  default), `/loop`, `/goal`, and `claude -p` under launchd or crontab with `--max-budget-usd` and
+  `--permission-prompts none`. For each mode it covers where it runs, what stops it, how cost is
+  bounded, and the permissions it needs. `/schedule` cloud routines are not supported, because cloud
+  sessions block GitHub's GraphQL API (#79). Every `autopilot` run now ends with one status line —
+  `autopilot: merged N`, `converged → observe`, `nothing to do`, or `stopped: <reason>` — that a
+  `/goal` condition can match. On `nothing to do` or `converged → observe`, a run started by a
+  self-paced `/loop` stops it (`ScheduleWakeup` with `stop: true`), and a run started by an
+  in-session cron task deletes that one task (`CronList`, then `CronDelete`); it never deletes
+  another task, and reports what it stopped. The ledger's `cost_usd` stays `null`; a
+  `claude -p --output-format json` run reports its cost as `total_cost_usd`. `VISION.md`'s roadmap
+  item 4 now names this local design in place of a scheduled cloud runner.
 - Approval gates for deploy, spend, and delete work. `research --create` labels such proposals
   `needs-approval` (creating that label and `approved` if missing). `autopilot` never builds a
   `needs-approval` issue, in either mode, until a human adds `approved` — Octoperator never adds
