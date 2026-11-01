@@ -99,5 +99,6 @@ Rules:
 - **Ungrounded.** Write the `ungrounded: no web access` line only when the run read no source at
   all, because WebSearch and WebFetch were denied or failed; omit it otherwise. An ungrounded file
   fills Problem, Build, and Skip from the sentence alone, keeps the Prior art table to its header,
-  leaves `## Sources` empty, and cites no URLs. The check then skips the row, citation, and source
-  minimums. Never invent a URL to look grounded.
+  leaves `## Sources` empty, and cites no URLs. **Checked:** the line comes before `## Problem`,
+  and the file then has no Prior art row, no Sources item, and no `http://` or `https://` URL, in
+  place of the row, citation, and source minimums. Never invent a URL to look grounded.

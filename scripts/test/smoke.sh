@@ -15,7 +15,8 @@
 #   - octo-approval-match.sh : pattern normalization, malformed patterns, matching (renames
 #                            included), and the incomplete-file-list hold, against a stub `gh`
 #   - octo-genesis-check.sh : a valid proposal, a missing section or front-matter key, an
-#                            ungrounded proposal, bad arguments, and --preflight's empty-dir check
+#                            ungrounded proposal (and one with URLs or a misplaced marker), bad
+#                            arguments, and --preflight's empty-dir and repo-name checks
 #   - octo-bench.sh        : the --live gate and --dry-run make no gh / claude call; preflight,
 #                            check's metrics, run's cost cap, and cleanup, against a stub `gh`
 #                            and `claude`
@@ -341,6 +342,24 @@ awk '/^## Problem$/ { print "ungrounded: no web access"; print "" } /^\| (Foo|Ba
   "$g/valid/docs/research.md" >"$g/ungrounded/docs/research.md"
 genesis_check "$g/ungrounded"
 expect 0 "ungrounded proposal with no sources: exits 0" test "$gc_rc" -eq 0 -a -z "$gc_out"
+# The marker on a grounded file: its rows, sources, and URLs are all reported.
+genesis_fixture "$g/ungurl"
+awk '/^## Problem$/ { print "ungrounded: no web access"; print "" } { print }' \
+  "$g/valid/docs/research.md" >"$g/ungurl/docs/research.md"
+genesis_check "$g/ungurl"
+expect 0 "ungrounded marker with rows, sources, and URLs: exits 1, three FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$gc_out" \
+    = "FAIL: docs/research.md: ungrounded, but ## Prior art has 2 row(s)"$'\n'"FAIL: \
+docs/research.md: ungrounded, but ## Sources has 2 item(s)"$'\n'"FAIL: docs/research.md: \
+ungrounded, but 7 line(s) cite an http(s) URL"
+genesis_fixture "$g/unglate"
+# The ungrounded proposal, its marker moved under ## Problem.
+awk '/^ungrounded:/ { next } { print } /^## Problem$/ { print "ungrounded: no web access" }' \
+  "$g/ungrounded/docs/research.md" >"$g/unglate/docs/research.md"
+genesis_check "$g/unglate"
+expect 0 "ungrounded marker under ## Problem: exits 1, names the placement" test "$gc_rc" -eq 1 \
+  -a -n "$(printf '%s\n' "$gc_out" | grep -Fx "FAIL: docs/research.md: the line \
+'ungrounded: no web access' must come before ## Problem")"
 expect 2 "no DIR exits 2"            bounded 10 bash "$GENESIS"
 expect 2 "two DIRs exit 2"           bounded 10 bash "$GENESIS" "$g/valid" "$g/nokey"
 expect 2 "a missing DIR exits 2"     bounded 10 bash "$GENESIS" "$g/nosuch"
@@ -358,6 +377,12 @@ mkdir -p "$g/bad name" && touch "$g/bad name/.hidden"
 genesis_check --preflight "$g/bad name"
 expect 0 "--preflight, a dotfile and an invalid repo name: exits 1, two FAIL lines" \
   test "$gc_rc" -eq 1 -a "$(printf '%s\n' "$gc_out" | grep -c '^FAIL: ')" -eq 2
+# A UTF-8 locale must not let a non-ASCII letter pass as a repo-name letter.
+mkdir -p "$g/caf"$'\xc3\xa9'
+gc_out="$(LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bounded 10 bash "$GENESIS" --preflight \
+  "$g/caf"$'\xc3\xa9' 2>/dev/null)"; gc_rc=$?
+expect 0 "--preflight, a non-ASCII letter under a UTF-8 locale: exits 1" test "$gc_rc" -eq 1 \
+  -a -n "$(printf '%s\n' "$gc_out" | grep '^FAIL: directory name ')"
 
 echo "• octo-bench.sh (offline, stub gh and claude)"
 # Stubs first on PATH log every call to $STUB_LOG. gh answers from the fixture dir $STUB_CASE:

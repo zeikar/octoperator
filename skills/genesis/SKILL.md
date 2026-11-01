@@ -70,13 +70,16 @@ The directory must be empty and outside git, or genesis writes nothing. Run, in 
    git rev-parse --is-inside-work-tree
    ```
    Exit 0 (whatever it prints) means the directory is inside a git repository → stop with
-   `inside a git work tree`. A non-zero exit ("not a git repository") is the pass.
+   `inside a git work tree`. A non-zero exit whose output contains `not a git repository` is the
+   pass. Any other non-zero exit (git missing, a "dubious ownership" refusal, …) → stop with
+   `git check failed`, quoting the output.
 2. ```bash
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-genesis-check.sh" --preflight .
    ```
    Exit 0 prints the directory's absolute path: that is `<dir>` from here on. Exit 1 prints a
    `FAIL:` line per problem → stop with `directory not empty` or `invalid directory name`, quoting
-   the lines. The directory may hold only `.claude/`; genesis never writes there.
+   the lines. Any other exit → stop with `preflight failed`, quoting the output. The directory may
+   hold only `.claude/`; genesis never writes there.
 3. ```bash
    gh api user --jq .login
    ```
@@ -140,8 +143,8 @@ genesis: stopped: <reason>
 
 - `proposed <dir>` — the proposal passed the check; `<dir>` is the absolute path.
 - `stopped: <reason>` — any other end: `no sentence`, `invalid flag <flag>`, `<flag> not built
-  yet`, `inside a git work tree`, `directory not empty`, `invalid directory name`, `gh api user
-  failed`, `proposal invalid`, or `check failed`.
+  yet`, `inside a git work tree`, `git check failed`, `directory not empty`, `invalid directory
+  name`, `preflight failed`, `gh api user failed`, `proposal invalid`, or `check failed`.
 
 ## Notes
 
