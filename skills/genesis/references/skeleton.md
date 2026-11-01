@@ -77,8 +77,9 @@ jobs:
 Workflow files are in `approval_paths` (below), so `auto` never merges a change to CI, the evals
 workflows, or the evals guard without a human. `evals.yml`, `evals-guard.yml`'s `must-fail` job,
 and `evals-model.yml`'s `evidence` job take the same setup and install steps as `ci.yml`
-(`references/evals.md`), so those steps never hold the word `secrets` or a backslash: none of the
-table's rows needs one, and a long command goes on one line, not across a `\` continuation.
+(`references/evals.md`), so those steps never hold the word `secrets`, a backslash, or a
+non-ASCII character: none of the table's rows needs one, and a long command goes on one line, not
+across a `\` continuation.
 
 ## Settings
 

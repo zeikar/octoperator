@@ -22,10 +22,10 @@
 #               DIR/<id>.txt as data, and evals/judge.sh asks the model whether the scenario.md
 #               text holds for it, PASS or FAIL. A missing, empty, symlinked, or non-regular
 #               file fails that eval uncalled, and so does a prompt (the scenario.md text and the
-#               evidence) over EVALS_MAX_PROMPT_BYTES (default 200000); any other file in DIR is
-#               ignored. It needs EVALS_MAX_CALLS, a positive integer, and makes at most that many
-#               model calls: once they are used, each eval left fails as `call cap reached`,
-#               uncalled.
+#               evidence) over EVALS_MAX_PROMPT_BYTES (default 200000) or not valid UTF-8; any
+#               other file in DIR is ignored. It needs EVALS_MAX_CALLS, a positive integer, and
+#               makes at most that many model calls: once they are used, each eval left fails as
+#               `call cap reached`, uncalled.
 #
 # REPO_DIR defaults to the directory above this script's, and must be in a git work tree. Each
 # check runs from a neutral `mktemp -d` directory, under `env -i PATH=… HOME=…`, with stdin from
@@ -232,6 +232,11 @@ for d in "$EVALS"/*/; do
   size="$(wc -c <"$tmp/$id.prompt" | tr -d ' ')"
   if [ "$size" -gt "$MAX_BYTES" ]; then
     failed_eval "$id" "prompt over EVALS_MAX_PROMPT_BYTES=$MAX_BYTES bytes"; continue
+  fi
+  # judge.sh's jq turns each byte that isn't valid UTF-8 into U+FFFD, three bytes: the cap holds
+  # only for a prompt jq sends as it is.
+  if ! jq -nj --rawfile p "$tmp/$id.prompt" '$p' 2>/dev/null | cmp -s - "$tmp/$id.prompt"; then
+    failed_eval "$id" "prompt is not valid UTF-8 (the scenario.md text or the evidence)"; continue
   fi
   if [ "$calls" -ge "$MAX_CALLS" ]; then
     failed_eval "$id" "call cap reached: EVALS_MAX_CALLS=$MAX_CALLS"; continue

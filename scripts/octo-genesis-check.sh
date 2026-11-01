@@ -550,11 +550,12 @@ triggers() {
 # comments and blank lines aside, except where the template has the line `# genesis: the stack's
 # setup …`: the stack's setup steps go there, and only there, as lines indented six spaces or more
 # (steps, not a job, a job key such as permissions:, or a top-level key). No line there, comment
-# lines included, holds `secrets` in any case (expressions ignore case) or a backslash (a YAML
-# escape such as \x73, or a line joined to the next, could spell it). Setup runs the repo's code,
-# so in evals-guard.yml only the must-fail job may have it, and in evals-model.yml only the
-# evidence job, never the judge job that holds the model key; and a setup step has no use for a
-# secret. It triggers on exactly the given events.
+# lines included, holds `secrets` in any case (expressions ignore case), a backslash (a YAML
+# escape such as \x73, or a line joined to the next, could spell it), or a byte other than
+# printable ASCII or a tab (a lookalike letter could). No comment line anywhere holds `${{`. Setup
+# runs the repo's code, so in evals-guard.yml only the must-fail job may have it, and in
+# evals-model.yml only the evidence job, never the judge job that holds the model key; and a setup
+# step has no use for a secret. It triggers on exactly the given events.
 check_eval_workflow() {
   local name="$1" f="$ABS/.github/workflows/$1" t w kind want have src; shift
   src="(skills/genesis/templates/.github/workflows/$name)"
@@ -588,7 +589,13 @@ $(awk -v ph="# genesis: the stack's setup and install steps from ci.yml" '
       lo = gap ? at[gap] + 1 : 1; hi = tail ? at[m - tail + 1] - 1 : last
       for (i = lo; i <= hi; i++) {
         if (index(tolower(raw[i]), "secrets")) diff("secret", want[gap], raw[i])
-        if (index(raw[i], "\\")) diff("backslash", want[gap], raw[i]) }
+        if (index(raw[i], "\\")) diff("backslash", want[gap], raw[i])
+        # tolower folds ASCII only: a lookalike letter (U+017F for s) would slip past it.
+        if (raw[i] ~ /[^\t -~]/) diff("ascii", want[gap], raw[i]) }
+      # The line-for-line match skips comment lines, but inside a run: block one is script text,
+      # where GitHub expands an expression.
+      for (i = 1; i <= last; i++)
+        if (skip(raw[i]) && index(raw[i], "${{")) diff("comment", raw[i], raw[i])
     }' "$TEMPLATES/.github/workflows/$name" "$f")
 EOF
   case "$kind" in
@@ -600,6 +607,10 @@ EOF
       "names no secret $src" ;;
     backslash) fail ".github/workflows/$name: has '$have' in the setup steps: a setup step" \
       "has no backslash $src" ;;
+    ascii) fail ".github/workflows/$name: has '$have' in the setup steps: a setup step is" \
+      "plain ASCII $src" ;;
+    comment) fail ".github/workflows/$name: has the comment line '$have': no comment line holds" \
+      "\${{, which GitHub expands inside a run: block $src" ;;
   esac
   t="$(triggers "$f" | sort -u)"
   for w in "$@"; do

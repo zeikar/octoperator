@@ -424,6 +424,17 @@ check "--judge: a prompt at EVALS_MAX_PROMPT_BYTES is sent, one byte over fails 
   test "$(jq -j '.messages[0].content' "$tmp/curl.body" | wc -c | tr -d ' ')" -eq 86 \
     -a "$rc" -eq 1 -a "$(calls)" -eq 1 -a -n "$(has "$out" "pass: a-good" \
     && has "$out" "fail: b-bad (prompt over EVALS_MAX_PROMPT_BYTES=86 bytes)" && echo y)"
+# jq would send each byte that isn't valid UTF-8 as U+FFFD, three bytes, past the cap: such a
+# prompt fails uncalled, under the cap too. Valid UTF-8 (ü, two bytes) is sent as it is.
+printf 'say-pass \303\274' >"$cap/a-good.txt"
+printf 'say-pass \377' >"$cap/b-bad.txt"
+rm -f "$tmp/curl.args"
+EVALS_MAX_CALLS=10 EVALS_MAX_PROMPT_BYTES=86 ANTHROPIC_API_KEY="$KEY" model_run --judge "$cap"
+check "--judge: a prompt that isn't valid UTF-8 fails uncalled, valid UTF-8 is sent unchanged" \
+  test "$(jq -j '.messages[0].content' "$tmp/curl.body" | tail -c 2 | od -An -tx1 \
+    | tr -d ' \n')" = c3bc -a "$rc" -eq 1 -a "$(calls)" -eq 1 -a -n "$(has "$out" "pass: a-good" \
+    && has "$out" "fail: b-bad (prompt is not valid UTF-8 (the scenario.md text or the evidence))" \
+    && echo y)"
 head -c 200001 /dev/zero | tr '\0' x >"$cap/a-good.txt"
 rm -f "$tmp/curl.args" "$cap/b-bad.txt"
 EVALS_MAX_CALLS=10 ANTHROPIC_API_KEY="$KEY" model_run --judge "$cap"

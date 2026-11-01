@@ -41,10 +41,13 @@ What stage 3 writes into the new repo, each only when missing:
   lines indented as steps (six spaces or more), so no setup step, job key (`permissions:`,
   `env:`), or job lands anywhere else. No line there, comment lines included (inside a `run: |`
   block a `#` line is text), holds `secrets` in any case, since expressions ignore case
-  (`SECRETS.X`, `toJSON(Secrets)`), or a backslash, since a YAML escape (`\x73ecrets`) or a
-  double-quoted line joined to the next could spell it, so no secret lands in a setup step. The
-  setup steps genesis copies from `ci.yml` (skeleton.md's table) have neither: write a long
-  command as one line or as two steps, never with a `\` line continuation; `evals.yml`
+  (`SECRETS.X`, `toJSON(Secrets)`), a backslash, since a YAML escape (`\x73ecrets`) or a
+  double-quoted line joined to the next could spell it, or anything but printable ASCII and
+  tabs, since a lookalike letter (`ſecrets`, with U+017F) isn't folded, so no secret lands in a
+  setup step. And no comment line anywhere in the file holds `${{`: the line-for-line match skips
+  comments, but in a `run: |` block GitHub expands it. The setup steps genesis copies from
+  `ci.yml` (skeleton.md's table) have none of these: write a long command as one line or as two
+  steps, never with a `\` line continuation; `evals.yml`
   triggers on exactly `push` (with `branches: [main]`) and `workflow_dispatch`;
   `evals-guard.yml` triggers on exactly `pull_request`; and `evals-model.yml` on exactly
   `workflow_dispatch`, so a copy with a `schedule:` or `push:` trigger, or without its
@@ -203,7 +206,7 @@ The workflow has two jobs, so the model key and the repo's code never share a ma
   `postinstall`, …), then `bash evals/run.sh --evidence "$RUNNER_TEMP/evidence"`, and uploads that
   directory as the `evals-model-evidence` artifact (`actions/upload-artifact`). No secret: no step
   in it names one, and `--skeleton` rejects a setup line that holds `secrets` in any case, or a
-  backslash, which could spell it. `--evidence` skips the script
+  backslash or a non-ASCII byte, which could spell it. `--evidence` skips the script
   evals and runs each model eval's `check.sh` as the offline run runs a check (`env -i`, its own
   process group, the repo unchanged after). Exit 0 with evidence on stdout → `<id>.txt` in the
   directory; a check that fails or prints nothing gets no file. It calls nothing and needs no key,
@@ -214,7 +217,8 @@ The workflow has two jobs, so the model key and the repo's code never share a ma
   from its own checkout and its step's `env:`, never from the artifact, which is only data: for
   each model eval it reads `<id>.txt`, and a file that is missing, empty, a symlink, or not a
   regular file fails that eval without a call, and so does a prompt (the `scenario.md` text and
-  the evidence) over `EVALS_MAX_PROMPT_BYTES`; any other file is ignored. The evidence is read
+  the evidence) over `EVALS_MAX_PROMPT_BYTES` or not valid UTF-8 (`judge.sh`'s jq would send
+  each invalid byte as three); any other file is ignored. The evidence is read
   only up to the cap, never whole. `judge.sh` then sends the prompt to the Anthropic
   Messages API (`EVALS_MODEL`, `claude-sonnet-5-5` in the template), in a request header that
   holds the key, never on a command line or in the log, asking for one word. The eval passes only
@@ -250,8 +254,9 @@ closes is the key and the spend.
   per eval): `run.sh --judge` refuses to start without it, counts each call, and fails every eval
   left once the cap is used, as `call cap reached`, without calling. Each call's prompt, the
   `scenario.md` text and the evidence together, is at most `EVALS_MAX_PROMPT_BYTES` (200000 in
-  the template, about 200 KB), or the eval fails without a call: a new model eval merges after a
-  format check alone, so its `scenario.md` is capped as its evidence is. With `judge.sh`'s fixed
+  the template, about 200 KB), and valid UTF-8, which `judge.sh` sends byte for byte, or the eval
+  fails without a call: a new model eval merges after a format check alone, so its `scenario.md`
+  is capped as its evidence is. With `judge.sh`'s fixed
   system prompt and 16 output tokens, a dispatch's spend is bounded by
   `EVALS_MAX_CALLS × (EVALS_MAX_PROMPT_BYTES + the system prompt)` input and
   `EVALS_MAX_CALLS × 16` output tokens, pinned values all: 20 × (200000 + 293) bytes, about 4

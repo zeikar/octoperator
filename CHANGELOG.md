@@ -111,7 +111,7 @@ All notable changes to Octoperator are documented in this file. The format is ba
   `EVALS_MAX_PROMPT_BYTES: 200000`, and `EVALS_MODEL: claude-sonnet-5-5`. It takes the model
   evals, their scenario text, and the caps from its own checkout, reads the artifact only as
   data (a missing, empty, or symlinked file, or a prompt of scenario text and evidence over the
-  byte cap, fails that eval without a call; an extra file is ignored), and asks new template
+  byte cap or not valid UTF-8, fails that eval without a call; an extra file is ignored), and asks new template
   `evals/judge.sh` (one Anthropic Messages API call with curl, the key in a header file) for
   exactly `PASS` or `FAIL`; any other reply fails the eval.
   `run.sh --judge` refuses to start without the cap or the key, and once the cap is used fails
@@ -120,7 +120,8 @@ All notable changes to Octoperator are documented in this file. The format is ba
   the guard. `octo-genesis-check.sh --skeleton` holds `evals-model.yml` to its template line for
   line (a `schedule:` or `push:` trigger, a removed or changed cap, byte cap, model, or timeout,
   or setup steps in the judge job fail), rejects a setup line, comment lines included, that
-  holds `secrets` in any case or a backslash (which could spell it) in any eval workflow, and
+  holds `secrets` in any case, a backslash, or a non-ASCII byte (which could spell it) in any
+  eval workflow, and a comment line anywhere in one that holds `${{`, and
   fails `evals-model.yml` when the PRD has no model scenario; `--values` prints
   `model_scenarios`, `model_call_cap`, and `model_timeout_minutes`, which the checkpoint, the
   plan, and the handoff show. Genesis never sets a secret or dispatches a workflow, and
