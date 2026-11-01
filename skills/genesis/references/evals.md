@@ -7,8 +7,9 @@ repo an evidence source after the MVP. A failing run on the default branch is `e
 
 `/octoperator:genesis --approve` writes them at stage 3, with the skeleton, before the first
 commit. `${CLAUDE_PLUGIN_ROOT}/scripts/octo-genesis-check.sh --skeleton <dir>` checks them; the
-rules it enforces are marked **checked**. Nothing here runs a model: `judge: model` scenarios exist
-in the format, and a later stage (#91) adds the runner a human dispatches for them.
+rules it enforces are marked **checked**. Nothing genesis runs calls a model, and neither does
+Octoperator's own CI: `judge: model` evals run only in the new repo, only when a human dispatches
+[their workflow](#model-judged-evals), and the offline runner skips them.
 
 ## Files
 
@@ -17,28 +18,45 @@ What stage 3 writes into the new repo, each only when missing:
 | Path | From |
 |---|---|
 | `evals/run.sh` | `${CLAUDE_PLUGIN_ROOT}/skills/genesis/templates/evals/run.sh`, verbatim |
+| `evals/judge.sh` | `${CLAUDE_PLUGIN_ROOT}/skills/genesis/templates/evals/judge.sh`, verbatim |
 | `evals/guard.sh` | `${CLAUDE_PLUGIN_ROOT}/skills/genesis/templates/evals/guard.sh`, verbatim |
 | `.github/workflows/evals.yml` | its template, plus the stack's setup steps |
 | `.github/workflows/evals-guard.yml` | its template, plus the stack's setup steps in its `must-fail` job |
+| `.github/workflows/evals-model.yml` | its template, plus the stack's setup steps in its `evidence` job; **only** when `docs/prd.md` has a `judge: model` scenario |
 | `evals/<id>/scenario.md` | one per `docs/prd.md` scenario |
-| `evals/<id>/check.sh` | one per `judge: script` scenario |
+| `evals/<id>/check.sh` | one per `docs/prd.md` scenario |
 
-- **`run.sh` and `guard.sh`.** Read each template and Write it unchanged. **Checked:** byte for
-  byte the template.
+- **`run.sh`, `judge.sh`, and `guard.sh`.** Read each template and Write it unchanged. `judge.sh`
+  is written even without a model scenario: it calls nothing until `evals-model.yml` runs it, and
+  a later model eval then needs only the workflow, not a file directly under `evals/`, which the
+  guard rejects. **Checked:** byte for byte the template.
 - **The workflows.** Read each template and Write it with the one line
   `# genesis: the stack's setup and install steps from ci.yml` replaced by the same setup and
   install steps as `ci.yml` (`actions/setup-node` and `npm install`, …), so a check can run the
   app. Change nothing else: in `evals-guard.yml` that line is in the `must-fail` job only, and the
-  other two jobs must stay free of setup steps, since setup runs the PR's code. **Checked:** the
-  file is its template line for line, comments and blank lines aside, except where the template
-  has that line: only there may lines go, and only lines indented as steps (six spaces or more),
-  so no setup step, job key (`permissions:`, `env:`), or job lands anywhere else; `evals.yml`
-  triggers on exactly `push` (with `branches: [main]`) and `workflow_dispatch`; and
-  `evals-guard.yml` triggers on exactly `pull_request`.
-- **One eval per scenario.** **Checked:** each `docs/prd.md` scenario has its `scenario.md`, and
-  each `judge: script` scenario has its `check.sh`, which parses (`bash -n`). The check never runs
-  it. An eval that fails on the bare skeleton is expected: that failure is what pushes the work
-  forward. These first evals never pass through the guard, so nothing has shown they fail: the
+  other two jobs must stay free of setup steps, since setup runs the PR's code; in
+  `evals-model.yml` it is in the `evidence` job only, and the `judge` job, which holds the model
+  key, must stay free of them. **Checked:** the file is its template line for line, comments and
+  blank lines aside, except where the template has that line: only there may lines go, and only
+  lines indented as steps (six spaces or more), so no setup step, job key (`permissions:`,
+  `env:`), or job lands anywhere else. No line there, comment lines included (inside a `run: |`
+  block a `#` line is text), holds `secrets` in any case, since expressions ignore case
+  (`SECRETS.X`, `toJSON(Secrets)`), a backslash, since a YAML escape (`\x73ecrets`) or a
+  double-quoted line joined to the next could spell it, or anything but printable ASCII and
+  tabs, since a lookalike letter (`ſecrets`, with U+017F) isn't folded, so no secret lands in a
+  setup step. And no comment line anywhere in the file holds `${{`: the line-for-line match skips
+  comments, but in a `run: |` block GitHub expands it. The setup steps genesis copies from
+  `ci.yml` (skeleton.md's table) have none of these: write a long command as one line or as two
+  steps, never with a `\` line continuation; `evals.yml`
+  triggers on exactly `push` (with `branches: [main]`) and `workflow_dispatch`;
+  `evals-guard.yml` triggers on exactly `pull_request`; and `evals-model.yml` on exactly
+  `workflow_dispatch`, so a copy with a `schedule:` or `push:` trigger, or without its
+  `timeout-minutes`, `EVALS_MAX_CALLS`, `EVALS_MAX_PROMPT_BYTES`, or `EVALS_MODEL` line, or with
+  another value in any, fails. Without a
+  `judge: model` scenario, **checked:** `evals-model.yml` does not exist.
+- **One eval per scenario.** **Checked:** each `docs/prd.md` scenario has its `scenario.md` and
+  its `check.sh`, which parses (`bash -n`). The check never runs it. An eval that fails on the
+  bare skeleton is expected: that failure is what pushes the work forward. These first evals never pass through the guard, so nothing has shown they fail: the
   handoff asks the human to confirm that the first `Evals` run on `main` is red, and an eval that
   passes there is a bug in that eval.
 
@@ -52,7 +70,8 @@ nothing to count.
 
 Prefer `judge: script`: write a scenario a script can decide, such as one that runs the app with a
 stub model and checks what it built. Use `judge: model` only when no script can judge it, such as
-whether the replies keep a tone.
+whether the replies keep a tone, and then [split it](#the-deterministic-part-and-the-judgment):
+a script scenario for what a script can decide, and a model scenario for the judgment alone.
 
 ## `evals/<id>/scenario.md`
 
@@ -73,11 +92,14 @@ At turn 200 of a conversation with a stub model, the context still holds the tur
 
 ## `evals/<id>/check.sh`
 
-`bash evals/<id>/check.sh <repo-dir>` judges a checkout of the repo. These rules are
+`bash evals/<id>/check.sh <repo-dir>` judges a checkout of the repo. A `judge: model` eval's check
+judges nothing itself: it builds the evidence (a transcript, …) the same way every time and prints
+it on stdout, and the model decides ([Model-judged evals](#model-judged-evals)). Both follow
 [bench's check rules](../../../bench/README.md#checksh), reused as they are:
 
-- Exit 0 only when the scenario holds, 1 when it fails, 2 on bad arguments. Print one `FAIL:` line
-  per problem.
+- Exit 0 only when the scenario holds (a model eval's check: when it printed the evidence), 1 when
+  it fails, 2 on bad arguments. Print one `FAIL:` line per problem (a model eval's check, on
+  stderr).
 - Check **behavior, not implementation**: run the code on the check's own inputs instead of
   matching source text, so any correct build passes.
 - Work in a `mktemp -d` directory, and leave `<repo-dir>` as you found it. **Enforced:** `run.sh`
@@ -109,7 +131,8 @@ and its **must-fail-first** rule, not its harness.
 ## `evals/run.sh`
 
 `bash evals/run.sh [repo-dir]` runs every `judge: script` eval against the repo (default: the
-directory above `evals/`, which must be in a git work tree) and skips `judge: model` ones. Each
+directory above `evals/`, which must be in a git work tree) and skips `judge: model` ones
+(`--evidence` and `--judge` run those instead: [Model-judged evals](#model-judged-evals)). Each
 check runs as bench's validator runs checks: from a neutral `mktemp -d` directory, stdin from
 `/dev/null`, in its own process group, killed with every process it started after
 `EVALS_CHECK_TIMEOUT` seconds (default 120). It also runs under `env -i PATH=… HOME=…`, and its
@@ -134,7 +157,9 @@ evals: <passed>/<total> passed (<skipped> skipped)
 ```
 
 `<total>` counts the script evals. The notice is printed only under GitHub Actions
-(`GITHUB_ACTIONS=true`). It exits 1 when any script eval fails, so the workflow run fails. Under
+(`GITHUB_ACTIONS=true`), and never with `--evidence` or `--judge`. Skipped evals never change the
+exit code: it
+exits 1 when any script eval fails, so the workflow run fails, and 0 otherwise. Under
 GitHub Actions a failed check's output is printed between `::stop-commands::<token>` and
 `::<token>::`, with a random token, so a check (or product code it runs) can't print a
 workflow command such as a forged `evals-metric` notice.
@@ -148,7 +173,7 @@ workflow command such as a forged `evals-metric` notice.
   merge, on the default branch, as a failing run.
 - **Evidence.** `research` reads the latest completed run of each workflow on the default branch
   and files from a failing one (its `eval` evidence type). That is `evals.yml`'s run, so research
-  needs no change.
+  needs no change. The same holds for [`evals-model.yml`](#model-judged-evals).
 - **`evals-guard.yml`** runs on `pull_request`, never `pull_request_target`, with read-only
   permissions, in three jobs. Each checks out the full history and runs the **base branch's**
   `evals/guard.sh` from git's objects (`git show "$BASE_SHA:evals/guard.sh"`, run with `bash -c`,
@@ -167,6 +192,122 @@ workflow command such as a forged `evals-metric` notice.
 
   The append-only and verdict jobs print the base they judged against as an
   `::notice title=evals-guard-base::<sha>` annotation, which `auto` reads.
+
+## Model-judged evals
+
+A `judge: model` eval spends model tokens, so only a human starts one, by dispatching
+`.github/workflows/evals-model.yml` (Actions tab → **Evals (model)** → **Run workflow**, or
+`gh workflow run evals-model.yml`) from the default branch. Genesis writes the workflow only for a
+PRD with a `judge: model` scenario, and never adds the secret or dispatches it.
+
+The workflow has two jobs, so the model key and the repo's code never share a machine:
+
+- **`evidence`** checks out the repo, runs the stack's setup (which runs the repo's code: a
+  `postinstall`, …), then `bash evals/run.sh --evidence "$RUNNER_TEMP/evidence"`, and uploads that
+  directory as the `evals-model-evidence` artifact (`actions/upload-artifact`). No secret: no step
+  in it names one, and `--skeleton` rejects a setup line that holds `secrets` in any case, or a
+  backslash or a non-ASCII byte, which could spell it. `--evidence` skips the script
+  evals and runs each model eval's `check.sh` as the offline run runs a check (`env -i`, its own
+  process group, the repo unchanged after). Exit 0 with evidence on stdout → `<id>.txt` in the
+  directory; a check that fails or prints nothing gets no file. It calls nothing and needs no key,
+  and it exits 1 when no eval has evidence, so the judge job never starts.
+- **`judge`** (`needs: evidence`) runs no setup and no repo code: a fresh checkout, then
+  `actions/download-artifact`, then `bash evals/run.sh --judge "$RUNNER_TEMP/evidence"`, the one
+  step that gets the key. Which evals are model-judged, their `scenario.md` text, and the caps come
+  from its own checkout and its step's `env:`, never from the artifact, which is only data: for
+  each model eval it reads `<id>.txt`, and a file that is missing, empty, a symlink, or not a
+  regular file fails that eval without a call, and so does a prompt (the `scenario.md` text and
+  the evidence) over `EVALS_MAX_PROMPT_BYTES` or not valid UTF-8 (`judge.sh`'s jq would send
+  each invalid byte as three); any other file is ignored. The evidence is read
+  only up to the cap, never whole. `judge.sh` then sends the prompt to the Anthropic
+  Messages API (`EVALS_MODEL`, `claude-sonnet-5-5` in the template), in a request header that
+  holds the key, never on a command line or in the log, asking for one word. The eval passes only
+  when the reply is exactly `PASS`, whitespace around it aside: `FAIL`, any other reply, or an
+  HTTP error fails it. It prints `evals: model calls: <calls>/<cap>` after the summary, and no
+  `evals-metric` notice: the metric is the offline evals'.
+
+Evidence that setup code forged can still make a model eval pass: like the must-fail verdict, a
+model eval's result is only as honest as the code that ran before its check. What the split
+closes is the key and the spend.
+
+- **The key.** A human adds the model key as `ANTHROPIC_API_KEY`; genesis never does. Only the
+  `judge` job's last step gets it, and nothing of the repo's runs in that job, so no setup step or
+  check can read it from `/proc`, a header file, or the environment, or inject code into the step
+  (`GITHUB_ENV`, `GITHUB_PATH`, and `BASH_ENV` don't cross jobs).
+- **Where the key lives.** `approval_paths` holds only the **merge**: a workflow file pushed on a
+  branch runs with the repo's secrets before any PR or review, so anyone who can push a branch can
+  read a repo secret. Prefer a GitHub Environment restricted to the default branch:
+  1. Settings → Environments → **New environment** `evals-model`; under **Deployment branches
+     and tags**, **Selected branches and tags**, add the default branch (`main`).
+  2. Add the key there, not as a repo secret: `gh secret set ANTHROPIC_API_KEY --env evals-model`.
+  3. Add `environment: evals-model` to the `judge` job (a change to `.github/workflows/`, so a
+     human merges it).
+
+  A job on another branch that names the environment is then refused, and one that doesn't never
+  sees its secret. Environments on a private repo need GitHub Pro, Team, or Enterprise; on GitHub
+  Free, or until a human sets one up, the fallback is a repo secret
+  (`gh secret set ANTHROPIC_API_KEY`), with the exposure above. The template names no
+  environment: GitHub would create a missing one with no protection rules, which protects nothing
+  (a repo secret would still reach the job), and a genesis repo is private by default, where
+  GitHub Free can't configure one.
+- **The caps.** Each dispatch makes at most `EVALS_MAX_CALLS` model calls (20 in the template, one
+  per eval): `run.sh --judge` refuses to start without it, counts each call, and fails every eval
+  left once the cap is used, as `call cap reached`, without calling. Each call's prompt, the
+  `scenario.md` text and the evidence together, is at most `EVALS_MAX_PROMPT_BYTES` (200000 in
+  the template, about 200 KB), and valid UTF-8, which `judge.sh` sends byte for byte, or the eval
+  fails without a call: a new model eval merges after a format check alone, so its `scenario.md`
+  is capped as its evidence is. With `judge.sh`'s fixed
+  system prompt and 16 output tokens, a dispatch's spend is bounded by
+  `EVALS_MAX_CALLS × (EVALS_MAX_PROMPT_BYTES + the system prompt)` input and
+  `EVALS_MAX_CALLS × 16` output tokens, pinned values all: 20 × (200000 + 293) bytes, about 4
+  million input tokens counting one token per byte (text tokenizes to far fewer), and 320 output
+  tokens.
+  Both caps and the model are pinned in the judge step's `env:`, and the system prompt in
+  `judge.sh`, which the guard fails a PR for changing. `timeout-minutes: 30` stops each job, and
+  `EVALS_CHECK_TIMEOUT` each check, as in the offline run. The checkpoint and the handoff print
+  the call cap and the judge job's timeout.
+- **Gates already in place.** A `schedule:` or `push:` trigger would be unattended spend, and so
+  would a higher cap or a longer timeout. `.github/workflows/` is in the settings'
+  `approval_paths`, so `auto` merges no change to `evals-model.yml` without a human (the merge
+  only: a branch's own copy runs before any merge, as above), and `research`
+  labels a proposal that spends money (a paid API) `needs-approval`, which autopilot doesn't build
+  until a human adds `approved`. `--skeleton` holds genesis's own copy to the template.
+- **Not closed mechanically.** Two jobs are two machines only on GitHub-hosted runners, which give
+  each job a fresh VM: a self-hosted runner that reuses one machine across jobs lets the evidence
+  job's setup leave something behind for the judge job, key included. And a human who dispatches
+  from a branch runs that branch's copy of the workflow, which no merge gate has seen: read the
+  branch's `evals-model.yml` first, or dispatch from the default branch only. A check is still the
+  repo's own code, so the reviewer reads a model eval's `check.sh` as closely as a script eval's:
+  it builds evidence and calls nothing.
+
+### Evidence, and the stale latest run
+
+`research`'s `eval` evidence is the latest completed run of a workflow on the default branch, when
+it failed (`gh run list --branch <default> --workflow <name> --status completed --limit 1`). A
+dispatch from the default branch is a run on that branch, so a failing `Evals (model)` run is
+`eval` evidence with no change to `research`. A dispatch from another branch isn't, and is
+ignored.
+
+**Caveat: the failing run stays the latest.** Nothing but a dispatch starts this workflow, so after
+the fix merges, the failing run is still the latest one, and `research` keeps citing it, re-check
+included, until someone dispatches again. **Dispatch again once a fix merges.**
+
+### The deterministic part and the judgment
+
+Split each scenario that needs a model, so that only the judgment spends tokens. In the
+character-chat app, "over 200 turns, the companion keeps the persona the user picked" has two
+parts:
+
+- **Deterministic** (`judge: script`, offline, on every push): drive 200 turns with a stub model
+  and check what a script can, such as that the persona text is in the context built at every
+  turn and that each turn's reply is stored. This runs in `evals.yml`, counts toward the metric,
+  and catches most regressions for free.
+- **The judgment** (`judge: model`, on a dispatch): the same 200 turns, replayed from replies
+  recorded in the eval's own directory so the transcript is the same every run; the check prints
+  the transcript, and the model answers whether the replies keep the persona's tone.
+
+A model eval's check builds its evidence deterministically and judges nothing; when the product
+fails to build the transcript, the check exits non-zero and no call is made.
 
 ## The guard
 
@@ -188,7 +329,7 @@ runs nothing from the PR. It fails when:
 - the PR adds a file to an eval directory that already exists;
 - a new eval's `scenario.md` is missing, or its front matter lacks `id: <id>` (kebab-case),
   `judge: script` or `judge: model`, or `requirement: R<n>`;
-- a new `judge: script` eval has no `check.sh`, or one that doesn't parse.
+- a new eval has no `check.sh`, or one that doesn't parse.
 
 **Must-fail-first** (`--run-new`, then `--verdict`). Bench's validator requires each check to fail
 on its seed; the guard requires each new `judge: script` eval to fail on the default branch. Each
@@ -199,7 +340,7 @@ base so it has a `.git` and a clean status, and the workspace's ignored director
 (`node_modules/`, a virtualenv, …) linked in, so a check finds the dependencies setup installed.
 It runs as `run.sh` runs it. The verdict fails a new script eval whose check passes (exit 0),
 times out, or changes its tree, or that has no result. A new `judge: model` eval is
-format-checked only.
+format-checked only: its check would only print evidence, and the guard calls no model.
 
 The linked directories are the head's: if the stack's setup also builds the head (`dist/`), a
 check that runs that build passes on the base tree, and the guard holds the PR. Keep builds out of
@@ -249,8 +390,8 @@ runner or the guard, then takes a human.
 
 **Append-only additions merge automatically.** `approval_paths` holds the guard workflow, not
 `evals/`: genesis's settings list `.github/workflows/`, which covers
-`.github/workflows/evals-guard.yml` and `evals.yml`, so `auto` never merges a change to either
-without a human. `evals/` stays out, so a PR that only adds must-fail evals merges like any other,
-once `auto`'s evals-guard gate sees both guard checks pass.
+`.github/workflows/evals-guard.yml`, `evals.yml`, and `evals-model.yml`, so `auto` never merges a
+change to any of them without a human. `evals/` stays out, so a PR that only adds must-fail evals
+merges like any other, once `auto`'s evals-guard gate sees both guard checks pass.
 The new repo's `VISION.md` says the same in its quality bar: the passing count never drops, and
 evals only grow.

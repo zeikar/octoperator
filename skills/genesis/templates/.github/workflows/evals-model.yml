@@ -1,0 +1,55 @@
+# Written by /octoperator:genesis, only for a PRD with a judge: model scenario. Runs the
+# model-judged evals, which spend model tokens, so its one trigger is workflow_dispatch: each run
+# is a human approving the spend. Dispatch it from the default branch.
+#
+# Two jobs, so the model key never shares a machine with the repo's code. evidence runs the
+# stack's setup and each model eval's check.sh, which print the evidence, and uploads it as an
+# artifact; it gets no secret. judge runs no setup and no repo code: from its own checkout it
+# reads which evals are model-judged and their scenario.md, reads the artifact only as data (one
+# file per eval id; a missing or empty file, or a prompt over the byte cap, fails that eval
+# uncalled, and an extra file is ignored), and only its last step gets the key. That step pins
+# EVALS_MAX_CALLS (the most model calls a run makes), EVALS_MAX_PROMPT_BYTES (the most bytes of
+# scenario.md text and evidence one call sends), and EVALS_MODEL, and each job stops after
+# timeout-minutes. This file is in approval_paths, so a new trigger (a schedule: is unattended
+# spend), a higher cap, or a longer timeout needs a human.
+#
+# A failing run stays the latest run of this workflow until the next dispatch: dispatch it again
+# once a fix merges.
+name: Evals (model)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      # genesis: the stack's setup and install steps from ci.yml
+      - run: bash evals/run.sh --evidence "$RUNNER_TEMP/evidence"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evals-model-evidence
+          path: ${{ runner.temp }}/evidence/
+          if-no-files-found: error
+
+  judge:
+    needs: evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: evals-model-evidence
+          path: ${{ runner.temp }}/evidence
+      - run: bash evals/run.sh --judge "$RUNNER_TEMP/evidence"
+        env:
+          EVALS_MAX_CALLS: 20
+          EVALS_MAX_PROMPT_BYTES: 200000
+          EVALS_MODEL: claude-sonnet-5-5
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

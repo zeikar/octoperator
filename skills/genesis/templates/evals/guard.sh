@@ -22,14 +22,14 @@
 #   - a file is added to an eval directory that already exists on BASE or the merge base;
 #   - a new eval directory evals/<id>/ has no scenario.md, or its front matter lacks `id: <id>`
 #     (lowercase kebab-case), `judge: script` or `judge: model`, or `requirement: R<n>`;
-#   - a new `judge: script` eval has no check.sh, or a check.sh with a syntax error.
+#   - a new eval has no check.sh, or a check.sh with a syntax error.
 #
 # Must-fail-first. --run-new runs each new `judge: script` eval's check.sh and writes one
 # `<id> <exit code>` line per check to RESULTS, or `<id> modified` when the check changed the tree
 # it judged. --verdict reads RESULTS and fails each new script eval with no line there, or whose
 # check passed (exit 0), timed out (142), or changed the tree. With no flag, the guard does all
-# three in one process. A new `judge: model` eval is format-checked only: nothing here runs a
-# model.
+# three in one process. A new `judge: model` eval is format-checked only: its check.sh only
+# prints evidence for a model to judge, and nothing here runs a model.
 #
 # Each check gets a fresh tree: a `git clone --shared` of BASE with every new eval directory from
 # HEAD laid over it, committed on top of BASE (so it has a .git and a clean status), and the
@@ -144,17 +144,20 @@ formats() {
       || fail "evals/$id/scenario.md: front matter needs requirement: R<n> (got '$v')"
     j="$(fm_value "$s" judge)"
     case "$j" in
-      model) echo "ok: evals/$id/ (judge: model: format checked, not run)"; continue ;;
-      script) ;;
+      script | model) ;;
       *) fail "evals/$id/scenario.md: front matter needs judge: script or model (got '$j')"
          continue ;;
     esac
     if ! head_file "evals/$id/check.sh" "$c"; then
-      fail "evals/$id/: a judge: script eval needs check.sh"
+      fail "evals/$id/: a judge: $j eval needs check.sh"
       continue
     fi
     if ! bash -n "$c" 2>"$tmp/syntax"; then
       fail "evals/$id/check.sh: syntax error: $(head -n 1 "$tmp/syntax")"
+      continue
+    fi
+    if [ "$j" = model ]; then
+      echo "ok: evals/$id/ (judge: model: format checked, not run)"
       continue
     fi
     # Only a kebab-case id goes into RESULTS, whose lines are `<id> <exit code>`.
