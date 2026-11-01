@@ -314,25 +314,30 @@ gh issue comment <ledger#> --repo "$REPO" --body 'Autopilot run (semi): merged #
 print the entry in the report so a human can add it by hand.
 
 **End the schedule when nothing is left to do.** Only when the run's status line (below) will be
-`nothing to do` or `converged → observe`, and only when a schedule started this run. Autopilot gets
-no flag saying how it was started; it judges from the turn it runs in. A cron task or `/loop` fire
-delivers the scheduled prompt as the turn's message, and a self-paced `/loop` iteration is one the
-`/loop` instructions expect to end with a `ScheduleWakeup` call. Then:
-- **Self-paced `/loop`** → call `ScheduleWakeup` with `stop: true`, and report `schedule: stopped
-  the self-paced /loop`.
-- **Cron task** (a fixed-interval `/loop` such as `/loop 6h …`, or a task made with `CronCreate`) →
-  call `CronList` and pick the tasks whose prompt invokes `/octoperator:autopilot` and is the same
-  prompt that started this turn. Exactly one → `CronDelete` it, and report `schedule: deleted cron
-  task <id> (<cron>)`. None or several → delete nothing, and report `schedule: not stopped (<N>
-  matching cron tasks) — cancel it by hand`.
-- **Unsure** whether or how a schedule started it → delete and stop nothing, and report
-  `schedule: not stopped (could not tell what started this run)`.
+`nothing to do` or `converged → observe`. Autopilot gets no flag saying how it was started, and a
+scheduled fire delivers the same message a hand-typed run would, so decide mechanically, in order:
+
+1. Call `CronList`. Keep only **recurring** tasks whose prompt exactly equals the message that
+   started this turn. A one-shot task never counts, even with the same prompt: a self-paced loop's
+   pending wakeup and a one-shot reminder are both one-shot. If `CronList` doesn't show whether a
+   matching task recurs, delete nothing, and report `schedule: not stopped (can't tell whether
+   task <id> recurs) — cancel it by hand`.
+2. **Exactly one** → `CronDelete` it, and report `schedule: deleted cron task <id> (<cron>)`. This
+   covers a fixed-interval `/loop` such as `/loop 6h …` and a task made with `CronCreate`.
+   **Several** → delete nothing, and report `schedule: not stopped (<N> matching cron tasks) —
+   cancel it by hand`.
+3. **None**, and this session's `/loop` instructions expect this turn to end with a
+   `ScheduleWakeup` call (a self-paced `/loop` iteration) → call `ScheduleWakeup` with
+   `stop: true`, and report `schedule: stopped the self-paced /loop`.
+4. **None** otherwise → a plain run: skip this step and print no `schedule:` line. This covers a
+   run typed by hand, run under `/goal`, or started by `claude -p`.
+
+A hand-typed run whose message equals a recurring task's prompt, in a session holding that task,
+counts as that task's fire: it ends the schedule just as the task's next fire would have.
 
 Never delete any other task: the rest of the session's tasks belong to the user, and a self-paced
-loop's pending wakeup, which also shows in `CronList`, is stopped with `ScheduleWakeup`, never
-`CronDelete`. A run typed by hand, run under `/goal`, or started by `claude -p` has no session
-schedule to end: skip this step and print no `schedule:` line. An OS cron or launchd job is
-outside the session, so autopilot can't remove it.
+loop's pending wakeup is stopped with `ScheduleWakeup`, never `CronDelete`. An OS cron or launchd
+job is outside the session, so autopilot can't remove it.
 
 Then print a per-cycle summary and an overall result:
 - per cycle: issues attempted, `merged` vs `held: <reason>`, issues skipped because an open PR already
@@ -357,9 +362,11 @@ with `--resume`".
 If the schedule step ran, print its `schedule:` line just before the status line. Never silently
 drop an issue; every issue touched appears in the summary.
 
-**Final status line.** Every run ends with exactly one status line, printed last with nothing
-after it. This includes a dry run and a run that stops early (a rejected flag, a ledger it can't
-use). A `/goal` condition or a log reader matches on it (README → Running continuously):
+**Final status line.** Every run ends with exactly one status line, printed last: nothing else in
+autopilot's report follows it. A self-paced `/loop`'s own `ScheduleWakeup` call (and its delay
+note) may still come after. This includes a dry run and a run that stops early (a rejected flag, a
+ledger it can't use). A `/goal` condition or a log reader matches on it (README → Running
+continuously):
 
 ```text
 autopilot: merged <N>

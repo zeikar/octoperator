@@ -133,9 +133,9 @@ Two things the skills can't pre-allow for you:
 - **Your repo's own commands** — the test command they run to verify each change, plus any lint,
   install, or build command the work runs.
 - **Subagents.** Implementation (parallel path), `auto`'s fixes, and reviews run inside
-  `issue-implementer` / `pr-reviewer` subagents, which call `gh`, `git`, and your tests. Claude Code
-  doesn't document a skill's pre-allowed tools reaching a subagent; settings-file rules apply to the
-  whole session, subagents included.
+  `issue-implementer` / `pr-reviewer` subagents, which call `gh`, `git`, and your tests, and edit
+  files with Edit/Write. Claude Code doesn't document a skill's pre-allowed tools reaching a
+  subagent; settings-file rules apply to the whole session, subagents included.
 
 So for a run that never stops on a permission prompt (e.g. `autopilot --mode full`, or a
 [scheduled run](#running-continuously)), allow these in the target repo's `.claude/settings.json`
@@ -144,7 +144,7 @@ So for a run that never stops on a permission prompt (e.g. `autopilot --mode ful
 ```json
 {
   "permissions": {
-    "allow": ["Bash(npm test:*)", "Bash(gh:*)", "Bash(git:*)"]
+    "allow": ["Bash(npm test:*)", "Bash(gh:*)", "Bash(git:*)", "Edit", "Write"]
   }
 }
 ```
@@ -163,8 +163,10 @@ not supported: cloud sessions block GitHub's GraphQL API, which `gh` relies on
 Every run ends with one status line: `autopilot: merged N`, `autopilot: converged → observe`,
 `autopilot: nothing to do`, or `autopilot: stopped: <reason>`. On `nothing to do` or `converged →
 observe`, a run started by an in-session cron task or a `/loop` ends that schedule. It deletes only
-its own task, says which one, and deletes nothing when it can't tell. In semi mode that happens
-once a run finds no `ready` issue to build, so start the schedule again after you triage.
+the one recurring task whose prompt exactly matches the run's, says which one, and deletes nothing
+when it can't tell. A run you type by hand with that same prompt, in that session, ends it too. In
+semi mode that happens once a run finds no `ready` issue to build, so start the schedule again
+after you triage.
 
 **Permissions.** Nobody is there to answer a prompt, so first add the allow rules from
 [Unattended runs](#unattended-runs). That applies to every mode below.
@@ -213,20 +215,38 @@ ends it early. `/goal` doesn't change the permission mode.
 **`claude -p` + an OS scheduler.** For long unattended runs, each in a fresh process:
 
 ```bash
-cd /path/to/repo && claude -p "/octoperator:autopilot --mode full" \
-  --max-budget-usd 10 --permission-prompts none --output-format json
+cd /path/to/repo && claude -p "/octoperator:autopilot --mode full --cycles 1" \
+  --max-budget-usd 10 --permission-mode acceptEdits --permission-prompts none \
+  --output-format json
 ```
 
 `--max-budget-usd` stops the run at that estimated spend; leave some headroom, since spend can
-pass the cap slightly. `--permission-prompts none` denies anything your allow rules don't cover
-instead of waiting. Don't add `--bare`: it skips plugins and skills, Octoperator included. Each
-run starts with a fresh context, and the state it needs lives in the ledger. The JSON output's
-`total_cost_usd` is the run's cost; autopilot leaves the ledger's `cost_usd` `null`, so a wrapper
-of your own could record it there.
+pass the cap slightly. `--cycles 1` keeps a run small enough to finish under the cap. A run the cap
+stops ends with no final text: the log shows `"subtype": "error_max_budget_usd"`, the ledger gets
+no entry, and there's no status line, so convergence never builds. If you see it, raise the cap or
+lower `--max`. `--permission-mode acceptEdits` approves file edits, and `--permission-prompts none`
+denies anything else your allow rules don't cover instead of waiting. Don't add `--bare`: it skips
+plugins and skills, Octoperator included. Each run starts with a fresh context, and the state it
+needs lives in the ledger. The JSON output's `total_cost_usd` is the run's cost; autopilot leaves
+the ledger's `cost_usd` `null`, so a wrapper of your own could record it there.
 
 Autopilot can't remove an OS job. Once the ledger converges, each run is an observe run (research
-only, nothing built) until you pass `--resume`. Unload the job when the log's last status line
-reads `nothing to do` or `converged → observe`.
+only, nothing built) until you pass `--resume`. Each run appends one JSON object to the log, and
+the status line is the last line of its `result`. To read it (with `jq`):
+
+```bash
+tail -n 1 /path/to/octoperator-autopilot.log | jq -r '.result // .subtype' | tail -n 1
+```
+
+Without `jq`, use `python3`:
+
+```bash
+tail -n 1 /path/to/octoperator-autopilot.log \
+  | python3 -c 'import json,sys; r=json.load(sys.stdin); print((r.get("result") or r["subtype"]).splitlines()[-1])'
+```
+
+Unload the job when it prints `autopilot: nothing to do` or `autopilot: converged → observe`.
+`error_max_budget_usd` means the cap stopped the run (see above).
 
 On macOS, use a launchd agent. Save this as
 `~/Library/LaunchAgents/dev.octoperator.autopilot.plist`, then run
@@ -240,24 +260,44 @@ To stop it, run `launchctl bootout gui/$(id -u)/dev.octoperator.autopilot`.
 <dict>
   <key>Label</key><string>dev.octoperator.autopilot</string>
   <key>WorkingDirectory</key><string>/path/to/repo</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/zsh</string><string>-lc</string>
-    <string>claude -p "/octoperator:autopilot --mode full" --max-budget-usd 10 --permission-prompts none --output-format json</string>
+    <string>/opt/homebrew/bin/claude</string>
+    <string>-p</string><string>/octoperator:autopilot --mode full --cycles 1</string>
+    <string>--max-budget-usd</string><string>10</string>
+    <string>--permission-mode</string><string>acceptEdits</string>
+    <string>--permission-prompts</string><string>none</string>
+    <string>--output-format</string><string>json</string>
   </array>
   <key>StartInterval</key><integer>21600</integer>
   <key>StandardOutPath</key><string>/path/to/octoperator-autopilot.log</string>
-  <key>StandardErrorPath</key><string>/path/to/octoperator-autopilot.log</string>
+  <key>StandardErrorPath</key><string>/path/to/octoperator-autopilot.err.log</string>
 </dict>
 </plist>
 ```
 
-`zsh -lc` loads your login shell's `PATH`, so launchd can find `claude` and `gh`. On Linux, use a
-crontab line instead (`crontab -e`). Set `PATH` at the top of the crontab so cron can find them:
+launchd runs no shell and doesn't read your shell's startup files, so it needs absolute paths.
+Replace `/opt/homebrew/bin/claude` with the output of `command -v claude`, and set `PATH` to the
+output of `echo $PATH` from your terminal, so the run finds `gh`, `git`, `node`, and your test
+tools. Wrapping the command in `zsh -lc` isn't enough: a login shell reads `.zprofile`, not
+`.zshrc`, where nvm and many `PATH` lines live.
+
+On Linux, use a crontab line instead (`crontab -e`). Cron doesn't expand `$HOME` or `~` in a
+variable line, so set `PATH` at the top of the crontab with absolute paths, including the
+directories of `claude`, `gh`, and your test tools:
 
 ```text
-17 */6 * * * cd /path/to/repo && claude -p "/octoperator:autopilot --mode full" --max-budget-usd 10 --permission-prompts none --output-format json >> "$HOME/octoperator-autopilot.log" 2>&1
+PATH=/usr/local/bin:/usr/bin:/bin:/home/you/.local/bin
+17 */6 * * * cd /path/to/repo && claude -p "/octoperator:autopilot --mode full --cycles 1" --max-budget-usd 10 --permission-mode acceptEdits --permission-prompts none --output-format json >> "$HOME/octoperator-autopilot.log" 2>> "$HOME/octoperator-autopilot.err.log"
 ```
+
+If the log shows GitHub auth errors, run `gh auth status` first. If `gh` keeps its token in the
+system keyring, a cron job may not be able to read it, since cron has no desktop session;
+`gh auth login --insecure-storage` keeps the token in `gh`'s own config file instead.
 
 ## Usage example
 
