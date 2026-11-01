@@ -419,9 +419,14 @@ each new check. Confirm the first `Evals` run on `main` is red.
 
 A `judge: model` scenario, such as whether replies keep a persona's tone, spends model tokens, so
 the offline run skips it. When the PRD has one, genesis also writes `evals-model.yml`, which runs
-those evals only when you dispatch it, with at most `EVALS_MAX_CALLS` model calls (20) and a
-30-minute timeout per run, once you add the `ANTHROPIC_API_KEY` repo secret. Genesis never sets a
-secret or dispatches a workflow, and Octoperator's own CI never calls a model. A failing dispatch
+those evals only when you dispatch it, with at most `EVALS_MAX_CALLS` model calls (20), each
+with at most `EVALS_MAX_EVIDENCE_BYTES` of evidence (200000), and a 30-minute timeout per job,
+once you add the `ANTHROPIC_API_KEY` secret. One job runs the repo's setup and checks to build the
+evidence, with no secret; a second, with no repo code, sends it to the model, and only that job
+gets the key. `approval_paths` holds only the merge, and a workflow pushed on a branch runs with
+repo secrets, so keep the key in a GitHub Environment restricted to `main` where your plan allows
+(the evals reference has the steps). Genesis never sets a secret or dispatches a workflow, and
+Octoperator's own CI never calls a model. A failing dispatch
 run stays the latest `eval` evidence until the next dispatch, so dispatch again after a fix
 merges. Format and rules:
 [`skills/genesis/references/evals.md`](skills/genesis/references/evals.md). The eval metric and

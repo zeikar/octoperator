@@ -3,20 +3,28 @@
 #
 # Usage:
 #   bash evals/run.sh [REPO_DIR]
-#   bash evals/run.sh --model [REPO_DIR]
+#   bash evals/run.sh --evidence DIR [REPO_DIR]
+#   bash evals/run.sh --judge DIR [REPO_DIR]
 #
 # Each directory evals/<id>/ is one eval. Its scenario.md front matter says how it is judged:
 #   judge: script  run `bash evals/<id>/check.sh REPO_DIR`; the eval passes only on exit 0
-#   judge: model   skipped, except with --model, which skips the script evals instead
+#   judge: model   skipped, except with --evidence or --judge, which skip the script evals instead
 # An eval with no scenario.md, another judge, or no check.sh counts as failed, and so does a
 # symlink in evals/: it is never followed.
 #
-# --model runs each `judge: model` eval: its check.sh prints the evidence (a transcript the
-# product built offline, …) and must exit 0, then evals/judge.sh asks the model whether the
-# scenario.md text holds for that evidence, PASS or FAIL. Only the Evals (model) workflow runs it,
-# when a human dispatches it. It needs EVALS_MAX_CALLS, a positive integer, and makes at most that
-# many model calls: once they are used, each eval left fails as `call cap reached`, uncalled. The
-# check runs as a script eval's does, without the model key; only judge.sh gets the key.
+# The model evals run in two steps, the two jobs of the Evals (model) workflow, which a human
+# dispatches, so the model key never meets the repo's code:
+#   --evidence  runs each `judge: model` eval's check.sh, which prints the evidence (a transcript
+#               the product built offline, …) and must exit 0, and writes that evidence to
+#               DIR/<id>.txt (DIR is created, and must be empty). No model call, no key. Writes
+#               nothing when the run stops.
+#   --judge     runs no check: for each `judge: model` eval in this script's own evals/, it reads
+#               DIR/<id>.txt as data, and evals/judge.sh asks the model whether the scenario.md
+#               text holds for it, PASS or FAIL. A missing, empty, symlinked, or non-regular
+#               file, or one over EVALS_MAX_EVIDENCE_BYTES (default 200000), fails that eval
+#               uncalled; any other file in DIR is ignored. It needs EVALS_MAX_CALLS, a positive integer, and
+#               makes at most that many model calls: once they are used, each eval left fails as
+#               `call cap reached`, uncalled.
 #
 # REPO_DIR defaults to the directory above this script's, and must be in a git work tree. Each
 # check runs from a neutral `mktemp -d` directory, under `env -i PATH=… HOME=…`, with stdin from
@@ -31,27 +39,32 @@
 # a check, or plant one that .gitignore hides.
 #
 # It prints one line per eval, then `evals: <passed>/<total> passed (<skipped> skipped)`, where
-# total counts the script evals (the model evals with --model, which also prints
-# `evals: model calls: <calls>/<EVALS_MAX_CALLS>`). Under GitHub Actions (GITHUB_ACTIONS=true) it
-# also prints `::notice title=evals-metric::passed=<passed> total=<total>`, without --model, and
-# prints a failed check's output
-# between `::stop-commands::<random token>` and `::<token>::`, so it cannot issue workflow
-# commands.
+# total counts the script evals (the model evals with --judge, which also prints
+# `evals: model calls: <calls>/<EVALS_MAX_CALLS>`; --evidence prints
+# `evals: evidence for <n>/<total> model evals (<skipped> skipped)` instead). Under GitHub Actions
+# (GITHUB_ACTIONS=true) the offline run also prints
+# `::notice title=evals-metric::passed=<passed> total=<total>`, and every run prints a failed
+# check's output between `::stop-commands::<random token>` and `::<token>::`, so it cannot issue
+# workflow commands.
 #
 # Written by /octoperator:genesis, and guarded like the evals: evals/guard.sh fails a PR that
 # changes it.
 #
-# Exit codes: 0 every eval it ran passed, 1 any failed (or the run stopped), 2 bad arguments (or,
-# with --model, no EVALS_MAX_CALLS or model key).
+# Exit codes: 0 every eval it ran passed (with --evidence: it wrote evidence for at least one), 1
+# any failed (with --evidence: none had evidence) or the run stopped, 2 bad arguments (or, with
+# --judge, no EVALS_MAX_CALLS or model key, or a bad EVALS_MAX_EVIDENCE_BYTES).
 set -uo pipefail
 
-RUN=script SKIP=model
+USAGE="Usage: bash evals/run.sh [--evidence DIR | --judge DIR] [REPO_DIR]"
+MODE=script RUN=script SKIP=model OUT=""
 case "${1:-}" in
   -h|--help) sed -n '2,/^[^#]/s/^# \{0,1\}//p' "$0"; exit 0 ;;
-  --model) RUN=model SKIP=script; shift ;;
+  --evidence|--judge)
+    [ -n "${2:-}" ] || { echo "$USAGE" >&2; exit 2; }
+    MODE="${1#--}" RUN=model SKIP=script OUT="$2"; shift 2 ;;
 esac
 case "${1:-}" in -*) echo "Unknown argument: $1" >&2; exit 2 ;; esac
-[ $# -le 1 ] || { echo "Usage: bash evals/run.sh [--model] [REPO_DIR]" >&2; exit 2; }
+[ $# -le 1 ] || { echo "$USAGE" >&2; exit 2; }
 
 EVALS="$(cd "$(dirname "$0")" && pwd)"
 REPO="${1:-$EVALS/..}"
@@ -62,13 +75,25 @@ git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
 TIMEOUT="${EVALS_CHECK_TIMEOUT:-120}"
 case "$TIMEOUT" in ''|*[!0-9]*) TIMEOUT=0 ;; esac
 [ "$TIMEOUT" -ge 1 ] || { echo "EVALS_CHECK_TIMEOUT must be a positive integer" >&2; exit 2; }
-if [ "$RUN" = model ]; then
-  # Every model call spends money: no cap, no run.
+if [ "$MODE" = evidence ]; then
+  # A leftover file would be uploaded as evidence for an eval that printed none this run.
+  mkdir -p "$OUT" && [ -z "$(ls -A "$OUT")" ] \
+    || { echo "Not an empty directory: $OUT (--evidence writes into it)" >&2; exit 2; }
+  OUT="$(cd "$OUT" && pwd)"
+elif [ "$MODE" = judge ]; then
+  [ -d "$OUT" ] \
+    || { echo "Not a directory: $OUT (--judge reads the evidence from it)" >&2; exit 2; }
+  # Every model call spends money: no cap, no run. The evidence is sent whole, so it is capped too.
   MAX_CALLS="${EVALS_MAX_CALLS:-}"
   case "$MAX_CALLS" in ''|*[!0-9]*) MAX_CALLS=0 ;; esac
   [ "$MAX_CALLS" -ge 1 ] || { echo "EVALS_MAX_CALLS must be a positive integer" >&2; exit 2; }
+  MAX_BYTES="${EVALS_MAX_EVIDENCE_BYTES:-200000}"
+  case "$MAX_BYTES" in ''|*[!0-9]*) MAX_BYTES=0 ;; esac
+  [ "$MAX_BYTES" -ge 1 ] \
+    || { echo "EVALS_MAX_EVIDENCE_BYTES must be a positive integer" >&2; exit 2; }
   [ -n "${ANTHROPIC_API_KEY:-}" ] \
-    || { echo "ANTHROPIC_API_KEY is not set: add it as a repo secret" >&2; exit 2; }
+    || { echo "ANTHROPIC_API_KEY is not set: add it as a secret (references/evals.md)" >&2
+         exit 2; }
   [ -f "$EVALS/judge.sh" ] || { echo "No $EVALS/judge.sh" >&2; exit 2; }
 fi
 
@@ -158,26 +183,47 @@ for d in "$EVALS"/*/; do
     "$RUN") ;;
     *) failed_eval "$id" "judge must be script or model, got '$j'"; continue ;;
   esac
-  if [ ! -f "$d/check.sh" ]; then failed_eval "$id" "no check.sh"; continue; fi
   log="$tmp/$id.log"
-  # A model eval's check prints the evidence on stdout, kept apart from its log.
-  if [ "$RUN" = model ]; then
-    bounded bash "$d/check.sh" "$REPO" </dev/null >"$tmp/$id.out" 2>"$log"
-  else
-    bounded bash "$d/check.sh" "$REPO" </dev/null >"$log" 2>&1
+  if [ "$MODE" != judge ]; then
+    if [ ! -f "$d/check.sh" ]; then failed_eval "$id" "no check.sh"; continue; fi
+    # A model eval's check prints the evidence on stdout, kept apart from its log.
+    if [ "$RUN" = model ]; then
+      bounded bash "$d/check.sh" "$REPO" </dev/null >"$tmp/$id.out" 2>"$log"
+    else
+      bounded bash "$d/check.sh" "$REPO" </dev/null >"$log" 2>&1
+    fi
+    rc=$?
+    if ! { snap >"$tmp/after" 2>/dev/null && cmp -s "$tmp/before" "$tmp/after"; }; then
+      failed_eval "$id" "changed the repo it judges" "$log"
+      # The evals after it would judge a different repo, so they don't run, and no metric prints.
+      echo "evals: aborted: $id changed the repo it judges (its HEAD or git status)"
+      diff "$tmp/before" "$tmp/after" | head -n 20 | sed 's/^/    /'
+      exit 1
+    fi
+    if [ "$rc" -eq 142 ]; then failed_eval "$id" "timed out after ${TIMEOUT}s" "$log"; continue
+    fi
+    if [ "$rc" -ne 0 ]; then failed_eval "$id" "exit $rc" "$log"; continue; fi
+    if [ "$RUN" = script ]; then passed=$((passed + 1)); echo "pass: $id"; continue; fi
+    if [ ! -s "$tmp/$id.out" ]; then
+      failed_eval "$id" "check.sh printed no evidence" "$log"; continue
+    fi
+    # Copied to DIR only once every check ran: DIR may be inside the repo a check must not change.
+    mkdir -p "$tmp/evidence" && cp "$tmp/$id.out" "$tmp/evidence/$id.txt" \
+      || { echo "run: could not keep the evidence of $id" >&2; exit 2; }
+    passed=$((passed + 1)); echo "evidence: $id"; continue
   fi
-  rc=$?
-  if ! { snap >"$tmp/after" 2>/dev/null && cmp -s "$tmp/before" "$tmp/after"; }; then
-    failed_eval "$id" "changed the repo it judges" "$log"
-    # The evals after it would judge a different repo, so they don't run, and no metric prints.
-    echo "evals: aborted: $id changed the repo it judges (its HEAD or git status)"
-    diff "$tmp/before" "$tmp/after" | head -n 20 | sed 's/^/    /'
-    exit 1
+  # --judge: this checkout chose the eval; the artifact is only data, read up to the byte cap.
+  ev="$OUT/$id.txt"
+  if [ -L "$ev" ] || [ ! -f "$ev" ]; then
+    failed_eval "$id" "no evidence file $id.txt: the evidence job's log says why"; continue
   fi
-  if [ "$rc" -eq 142 ]; then failed_eval "$id" "timed out after ${TIMEOUT}s" "$log"; continue; fi
-  if [ "$rc" -ne 0 ]; then failed_eval "$id" "exit $rc" "$log"; continue; fi
-  if [ "$RUN" = script ]; then passed=$((passed + 1)); echo "pass: $id"; continue; fi
-  if [ ! -s "$tmp/$id.out" ]; then failed_eval "$id" "check.sh printed no evidence" "$log"; continue
+  if ! head -c "$((MAX_BYTES + 1))" "$ev" >"$tmp/$id.out" 2>/dev/null; then
+    failed_eval "$id" "evidence file $id.txt unreadable"; continue
+  fi
+  size="$(wc -c <"$tmp/$id.out" | tr -d ' ')"
+  if [ "$size" -eq 0 ]; then failed_eval "$id" "evidence file $id.txt is empty"; continue; fi
+  if [ "$size" -gt "$MAX_BYTES" ]; then
+    failed_eval "$id" "evidence over EVALS_MAX_EVIDENCE_BYTES=$MAX_BYTES bytes"; continue
   fi
   if [ "$calls" -ge "$MAX_CALLS" ]; then
     failed_eval "$id" "call cap reached: EVALS_MAX_CALLS=$MAX_CALLS"; continue
@@ -197,6 +243,14 @@ for d in "$EVALS"/*/; do
 done
 
 total=$((passed + failed))
+if [ "$MODE" = evidence ]; then
+  echo "evals: evidence for $passed/$total model evals ($skipped skipped)"
+  # Nothing to judge is a failed run: the judge job would only fail every eval.
+  [ "$passed" -gt 0 ] || exit 1
+  cp -- "$tmp/evidence/"* "$OUT/" \
+    || { echo "run: could not write the evidence to $OUT" >&2; exit 2; }
+  exit 0
+fi
 echo "evals: $passed/$total passed ($skipped skipped)"
 [ "$RUN" = script ] || echo "evals: model calls: $calls/$MAX_CALLS"
 [ "$RUN" = model ] || [ "${GITHUB_ACTIONS:-}" != true ] \

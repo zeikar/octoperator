@@ -160,12 +160,13 @@ http(s) URL in them. Stage 2 makes no GitHub write.
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-genesis-check.sh" --values "<dir>"
 ```
 
-Exit 0 → the checkpoint; the helper printed the proposal's values, `model_scenarios` and
-`model_call_cap` among them. Exit 1 → fix each `FAIL:` line by rewriting that file with Write (a
-file this run wrote), and re-run. In an ungrounded run, never add a URL, row, or source to clear a
-`FAIL:` line; fix the marker instead, and when a stage-2 file cites a URL, remove the URL, never
-the marker. After two failed rewrites, stop with `proposal invalid`, quoting the lines, and leave
-the files for the human. Exit 2 → stop with `check failed`.
+Exit 0 → the checkpoint; the helper printed the proposal's values, `model_scenarios`,
+`model_call_cap`, and `model_timeout_minutes` among them. Exit 1 → fix each `FAIL:` line by
+rewriting that file with Write (a file this run wrote), and re-run. In an ungrounded run, never
+add a URL, row, or source to clear a `FAIL:` line; fix the marker instead, and when a stage-2 file
+cites a URL, remove the URL, never the marker. After two failed rewrites, stop with
+`proposal invalid`, quoting the lines, and leave the files for the human. Exit 2 → stop with
+`check failed`.
 
 ## Checkpoint
 
@@ -178,10 +179,12 @@ Print, in this order:
 - the MVP scope and its requirement ids, and the proposed stack with its test command;
 - the scenarios: how many are judged by script and by model. When `model_scenarios` is above 0,
   say that `--approve` writes `.github/workflows/evals-model.yml`, which runs them only when a
-  human dispatches it, with at most `model_call_cap` model calls per dispatch (and a 30-minute
-  timeout), and only once a human adds the `ANTHROPIC_API_KEY` repo secret: genesis never sets a
-  secret or dispatches a workflow. Splitting a model scenario so a script judges what it can
-  (`references/evals.md`) saves those calls;
+  human dispatches it, with at most `model_call_cap` model calls per dispatch (and a
+  `model_timeout_minutes`-minute timeout on the job that calls the model), and only once a human
+  adds the `ANTHROPIC_API_KEY` secret, best in a GitHub Environment restricted to `main`
+  (`references/evals.md` → Model-judged evals): genesis never sets a secret or dispatches a
+  workflow. Splitting a model scenario so a script judges what it can (`references/evals.md`)
+  saves those calls;
 - the files written (Glob `<dir>/**/*`, leaving out `.claude/`), as absolute paths;
 - the decisions the human owns, from `GENESIS.md`:
   - the stack, in `docs/adr/0001-stack.md` (keep `stack` and `test_command` in `GENESIS.md` in
@@ -367,9 +370,16 @@ plan-epic's procedure reads them as written and files everything in `<repo>`.
       already passes on `main`, and `auto` merges no PR whose guard checks didn't pass.
       Model-judged evals: when the plan printed `model_scenarios:`, `evals.yml` skips them, and
       `evals-model.yml` runs them only on a human's dispatch from `main`, with at most
-      `model_call_cap` model calls per dispatch and a 30-minute timeout. Give the human both
-      commands, to run when they choose: `gh secret set ANTHROPIC_API_KEY --repo <repo>`, then
-      `gh workflow run evals-model.yml --repo <repo>`. Genesis ran neither. A failing dispatch run
+      `model_call_cap` model calls per dispatch and a `model_timeout_minutes`-minute timeout on
+      its judge job, the only job that gets the key. `approval_paths` holds only the merge: a
+      workflow pushed on a branch runs with the repo's secrets before any review, so recommend
+      a GitHub Environment restricted to `main` (on a private repo, it needs GitHub Pro, Team,
+      or Enterprise): create the environment `evals-model` in Settings → Environments, with
+      `main` as its only deployment branch, and add `environment: evals-model` to the `judge`
+      job in a PR the human merges. Give the human the commands, to run when they choose:
+      `gh secret set ANTHROPIC_API_KEY --env evals-model --repo <repo>`, or, without an
+      environment, the fallback `gh secret set ANTHROPIC_API_KEY --repo <repo>`; then
+      `gh workflow run evals-model.yml --repo <repo>`. Genesis ran none. A failing dispatch run
       is `eval` evidence until the next dispatch, so dispatch again once a fix merges. These first
       evals never went through the guard,
       so ask the human to confirm that the first `Evals` run on `main` (the run for the push

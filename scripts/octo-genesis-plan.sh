@@ -17,8 +17,9 @@
 # when that finds none, and the handoff.
 #
 # It prints `dir:`, `repo:`, and `stage:` lines, then, when the PRD has `judge: model` scenarios,
-# `model_scenarios: <n>` and `model_call_cap: <calls>` (the most model calls one dispatch of
-# .github/workflows/evals-model.yml makes), then one numbered step per line, in run order.
+# `model_scenarios: <n>`, `model_call_cap: <calls>` (the most model calls one dispatch of
+# .github/workflows/evals-model.yml makes), and `model_timeout_minutes: <minutes>` (its judge
+# job's timeout), then one numbered step per line, in run order.
 # A step that starts with `write ` is a file to write (skills/genesis/references/skeleton.md and
 # evals.md), and one that starts with `plan ` or `print ` is a procedure the skill runs
 # (skills/genesis/SKILL.md); every other step is one plain command to run as printed, except that
@@ -71,6 +72,7 @@ value() { printf '%s\n' "$values" | sed -n "s/^$1: //p"; }
 REPO="$(value repo)" VIS="$(value visibility)" CMD="$(value test_command)"
 TEST_FILE="$(value test_file)" SENTENCE="$(value sentence)"
 MODELS="$(value model_scenarios)" CAP="$(value model_call_cap)"
+MINUTES="$(value model_timeout_minutes)"
 ABS="$(cd "$DIR" && pwd)"
 PHYS="$(cd "$DIR" && pwd -P)"
 
@@ -195,7 +197,8 @@ D="$(q "$ABS")"
 printf 'dir: %s\nrepo: %s\nstage: %s\n' "$ABS" "$REPO" "$STAGE"
 MODEL_WF=""
 if [ "${MODELS:-0}" -gt 0 ]; then
-  printf 'model_scenarios: %s\nmodel_call_cap: %s\n' "$MODELS" "$CAP"
+  printf 'model_scenarios: %s\nmodel_call_cap: %s\nmodel_timeout_minutes: %s\n' "$MODELS" \
+    "$CAP" "$MINUTES"
   MODEL_WF=" .github/workflows/evals-model.yml"
 fi
 case "$STAGE" in

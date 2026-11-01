@@ -45,8 +45,9 @@
 # --values checks the proposal as DIR alone does, then prints GENESIS.md's values, one
 # `key: value` line each: repo, visibility, test_command, test_file (the file that detects it),
 # and sentence (its lines joined by spaces); then model_scenarios (how many PRD scenarios are
-# `judge: model`) and model_call_cap (EVALS_MAX_CALLS in the evals-model.yml template: the most
-# model calls one dispatch makes). octo-genesis-plan.sh reads them.
+# `judge: model`), model_call_cap (EVALS_MAX_CALLS in the evals-model.yml template: the most
+# model calls one dispatch makes), and model_timeout_minutes (the template's judge job's
+# timeout-minutes). octo-genesis-plan.sh reads them.
 #
 # --skeleton checks the skeleton genesis --approve wrote (skills/genesis/references/skeleton.md),
 # against GENESIS.md's test_command:
@@ -64,7 +65,8 @@
 #     .github/workflows/evals.yml and evals-guard.yml, and evals-model.yml when the PRD has a
 #     `judge: model` scenario, are their template line for line, comments and blank lines aside,
 #     with the stack's setup steps only where the template marks them (in evals-guard.yml, inside
-#     the must-fail job); evals.yml triggers only on push and workflow_dispatch, evals-guard.yml
+#     the must-fail job; in evals-model.yml, inside the evidence job), none naming a secret;
+#     evals.yml triggers only on push and workflow_dispatch, evals-guard.yml
 #     only on pull_request, and evals-model.yml only on workflow_dispatch; without a `judge: model`
 #     scenario, evals-model.yml must not exist; and each PRD scenario has evals/<id>/scenario.md
 #     whose front matter has the lines `id: <id>`, `judge: <judge>`, and `requirement: R<n>` as
@@ -547,8 +549,10 @@ triggers() {
 # check_eval_workflow <name> <trigger...> : .github/workflows/<name> is its template line for line,
 # comments and blank lines aside, except where the template has the line `# genesis: the stack's
 # setup …`: the stack's setup steps go there, and only there, as lines indented six spaces or more
-# (steps, not a job, a job key such as permissions:, or a top-level key). Setup runs the PR's code,
-# so in evals-guard.yml only the must-fail job may have it. It triggers on exactly the given events.
+# (steps, not a job, a job key such as permissions:, or a top-level key) that never name secrets.
+# Setup runs the repo's code, so in evals-guard.yml only the must-fail job may have it, and in
+# evals-model.yml only the evidence job, never the judge job that holds the model key; and a
+# setup step has no use for a secret. It triggers on exactly the given events.
 check_eval_workflow() {
   local name="$1" f="$ABS/.github/workflows/$1" t w kind want have src; shift
   src="(skills/genesis/templates/.github/workflows/$name)"
@@ -576,8 +580,10 @@ $(awk -v ph="# genesis: the stack's setup and install steps from ci.yml" '
       for (i = tail; i >= 1; i--) { j = m - tail + i
         if (j <= gap) diff("missing", want[gap + i], "")
         if (have[j] != want[gap + i]) diff("differs", want[gap + i], have[j]) }
-      for (i = gap + 1; i <= m - tail; i++)
+      for (i = gap + 1; i <= m - tail; i++) {
         if (!has || have[i] !~ /^      /) diff("extra", want[gap], have[i])
+        if (have[i] ~ /(^|[^A-Za-z0-9_])secrets([^A-Za-z0-9_]|$)/)
+          diff("secret", want[gap], have[i]) }
     }' "$TEMPLATES/.github/workflows/$name" "$f")
 EOF
   case "$kind" in
@@ -585,6 +591,8 @@ EOF
     differs) fail ".github/workflows/$name: has '$have' where its template has '$want' $src" ;;
     extra) fail ".github/workflows/$name: has '$have' after '$want': only the setup steps," \
       "indented as steps, may go where its template has the '# genesis:' line $src" ;;
+    secret) fail ".github/workflows/$name: has '$have' in the setup steps: a setup step" \
+      "names no secret $src" ;;
   esac
   t="$(triggers "$f" | sort -u)"
   for w in "$@"; do
@@ -746,8 +754,10 @@ if [ "$MODE" = values ]; then
   printf 'repo: %s\nvisibility: %s\ntest_command: %s\ntest_file: %s\nsentence: %s\n' \
     "$(fm_value "$GENESIS_FM" repo)" "$(fm_value "$GENESIS_FM" visibility)" "$TEST_CMD" \
     "$TEST_FILE" "$(sentence_lines "$GENESIS_FM" | paste -sd ' ' -)"
-  printf 'model_scenarios: %s\nmodel_call_cap: %s\n' \
+  printf 'model_scenarios: %s\nmodel_call_cap: %s\nmodel_timeout_minutes: %s\n' \
     "$(scenario_rows | awk '$2 == "model" { n++ } END { print n + 0 }')" \
     "$(sed -n 's/^ *EVALS_MAX_CALLS: \([0-9][0-9]*\)$/\1/p' \
-      "$TEMPLATES/.github/workflows/evals-model.yml")"
+      "$TEMPLATES/.github/workflows/evals-model.yml")" \
+    "$(awk '/^  [^ ]/ { job = $1 } job == "judge:" && /^    timeout-minutes: [0-9]+$/ {
+      print $2; exit }' "$TEMPLATES/.github/workflows/evals-model.yml")"
 fi

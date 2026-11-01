@@ -4,14 +4,15 @@
 # Usage:
 #   bash evals/judge.sh PROMPT_FILE
 #
-# Only `bash evals/run.sh --model` calls it, once per `judge: model` eval, and counts the calls
+# Only `bash evals/run.sh --judge` calls it, once per `judge: model` eval, and counts the calls
 # against EVALS_MAX_CALLS before each one. PROMPT_FILE holds the scenario and the evidence the
-# eval's check.sh printed. The reply must be exactly PASS or FAIL, whitespace around it aside:
-# any other reply, an HTTP error, or a response that isn't one text block is a failure.
+# eval's check.sh printed in the evidence job, at most EVALS_MAX_EVIDENCE_BYTES of it. The reply
+# must be exactly PASS or FAIL, whitespace around it aside: any other reply, an HTTP error, or a
+# response that isn't one text block is a failure. It asks for at most 16 output tokens.
 #
 # Environment:
 #   ANTHROPIC_API_KEY  the model key (required); sent only in a request header, never printed
-#   EVALS_MODEL        the model (default: claude-sonnet-5-5)
+#   EVALS_MODEL        the model (default: claude-sonnet-5-5; the workflow pins it)
 #
 # It prints one line: PASS, FAIL, or `error: <why>`. Needs curl and jq.
 #

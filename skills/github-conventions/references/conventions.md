@@ -58,7 +58,11 @@ Independent gates keep deploy, spend, and delete changes, and weakened evals, in
   hand. This is the backstop for sensitive files, whatever the issue's labels. In a repo genesis
   created, its `.github/workflows/` entry covers the evals guard and `evals-model.yml`, so a
   `schedule:` trigger (unattended model spend), a higher call cap, or a longer timeout there needs
-  a human.
+  a human to merge. It holds only the merge: a workflow pushed on a branch runs, with the repo's
+  secrets, before any PR exists. Keep a secret such as the model key in a GitHub Environment
+  restricted to the default branch, named by the job that uses it (`environment:`), and use a
+  repo secret only where environments aren't available (a private repo on GitHub Free);
+  `skills/genesis/references/evals.md` → Model-judged evals has the steps.
 - **Evals guard (`auto`).** Where the base branch has `.github/workflows/evals-guard.yml` (a repo
   genesis created), `auto` merges only when `scripts/octo-evals-guard.sh` finds both guard checks
   passed on the reviewed commit (against the base branch's tip, when the PR changes `evals/` or
