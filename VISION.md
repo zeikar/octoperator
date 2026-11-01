@@ -49,7 +49,11 @@ conflicts with it. Only a human edits it.
   gate catches only labeled issues — a risky issue nobody labeled can still be built — so list
   sensitive files (deploy workflows, infrastructure, migrations) in `approval_paths` as the
   backstop. The path gate covers only file changes `auto` would merge; it does not stop commands
-  run while building, and in a repo that deploys on merge, every merge is a deploy.
+  run while building, and in a repo that deploys on merge, every merge is a deploy. Two more limits
+  the gates can't close: the `approved` check tells a bot from a person but not a person from
+  Octoperator, which runs under the same `gh` login, so "Octoperator never adds it" is an
+  instruction, not an enforced check; and `approval_paths` lives in the git-ignored, per-machine
+  settings file, so a clone or machine without it configured runs with no path gate.
 
 ## Roadmap
 
