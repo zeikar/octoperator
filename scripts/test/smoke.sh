@@ -20,7 +20,13 @@
 #                            altered or explained baseline constraint, an undetectable,
 #                            mismatched, contradicted, or wrapped test command, quoted and
 #                            commented front-matter values, a URL in an ungrounded PRD), bad
-#                            arguments, and --preflight's git, empty-dir, and repo-name checks
+#                            arguments, --preflight's git, empty-dir, and repo-name checks,
+#                            --values, and --skeleton's detection-file, CI, .gitignore, and
+#                            README checks
+#   - octo-genesis-plan.sh : each stage's ordered steps (scaffold, commit, create, push, setup),
+#                            --private unless visibility: public, approval claimed in GENESIS.md
+#                            ignored, the description's quoting and UTF-8-safe cut, git-state
+#                            failures; it writes nothing and never calls gh (stub `gh`)
 #   - octo-bench.sh        : the --live gate and --dry-run make no gh / claude call; preflight,
 #                            check's metrics, run's cost cap, and cleanup, against a stub `gh`
 #                            and `claude`
@@ -642,6 +648,214 @@ gc_out="$(LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bounded 10 bash "$GENESIS" --prefl
   "$g/caf"$'\xc3\xa9' 2>/dev/null)"; gc_rc=$?
 expect 0 "--preflight, a non-ASCII letter under a UTF-8 locale: exits 1" test "$gc_rc" -eq 1 \
   -a -n "$(printf '%s\n' "$gc_out" | grep '^FAIL: directory name ')"
+
+genesis_check --values "$g/valid"
+expect 0 "--values: exits 0, prints GENESIS.md's values" test "$gc_rc" -eq 0 -a "$gc_out" = \
+  "repo: smoke/chat-pal"$'\n'"visibility: private"$'\n'"test_command: npm test"$'\n'"test_file: \
+package.json"$'\n'"sentence: A character-chat app: it remembers you across long conversations."
+genesis_check --values "$g/nokey"
+expect 0 "--values, an invalid proposal: exits 1, FAIL lines only" test "$gc_rc" -eq 1 \
+  -a -z "$(printf '%s\n' "$gc_out" | grep -v '^FAIL: ')"
+
+# skeleton_fixture <dir> : write a valid npm-test skeleton beside the proposal in <dir>.
+skeleton_fixture() {
+  mkdir -p "$1/src" "$1/test" "$1/.github/workflows"
+  printf '{\n  "name": "chat-pal",\n  "private": true,\n  "scripts": {"test": "node --test"}\n}\n' \
+    >"$1/package.json"
+  printf 'export const greet = (n) => `hi ${n}`;\n' >"$1/src/index.js"
+  printf 'import test from "node:test";\n' >"$1/test/index.test.js"
+  printf '# chat-pal\n\n> A character-chat app: it remembers you across long conversations.\n' \
+    >"$1/README.md"
+  printf 'node_modules/\n/.claude/octoperator.local.md\n.octoperator\n' >"$1/.gitignore"
+  cat >"$1/.github/workflows/ci.yml" <<'YML'
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm install
+      - run: npm test
+YML
+}
+# skeleton_case <name> : a fresh proposal with a valid skeleton in $g/sk-<name>; sets sk.
+skeleton_case() { sk="$g/sk-$1"; genesis_fixture "$sk"; skeleton_fixture "$sk"; }
+skeleton_case valid
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, a valid npm skeleton: exits 0, prints nothing" \
+  test "$gc_rc" -eq 0 -a -z "$gc_out"
+skeleton_case inline
+printf 'name: CI\non: [push, pull_request]\njobs:\n  t:\n    steps:\n      - run: npm test\n' \
+  >"$sk/.github/workflows/ci.yml"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, inline on: [push, pull_request]: exits 0" test "$gc_rc" -eq 0
+skeleton_case pytest
+sed 's/^test_command: npm test$/test_command: pytest/' "$sk/GENESIS.md" >"$sk/x" \
+  && mv "$sk/x" "$sk/GENESIS.md"
+printf '[tool.pytest.ini_options]\n' >"$sk/pyproject.toml"
+sed 's/npm test/pytest/' "$sk/.github/workflows/ci.yml" >"$sk/x" \
+  && mv "$sk/x" "$sk/.github/workflows/ci.yml"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, pytest beside a package.json: exits 1, one FAIL line naming rule 1" \
+  test "$gc_rc" -eq 1 -a "$(printf '%s\n' "$gc_out" | grep -c '^FAIL: ')" -eq 1 \
+    -a -n "$(printf '%s\n' "$gc_out" | grep '^FAIL: package.json is present: .*(rule 1)')"
+skeleton_case notest
+printf '{"name": "chat-pal", "scripts": {"lint": "x"}}\n' >"$sk/package.json"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, package.json without a test script: exits 1" test "$gc_rc" -eq 1 \
+  -a "$gc_out" = 'FAIL: package.json: needs a "test" script, for `npm test`'
+skeleton_case nopr
+printf 'on:\n  push:\njobs:\n  t:\n    steps:\n      - run: npm ci\n' \
+  >"$sk/.github/workflows/ci.yml"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, CI without pull_request or the test step: exits 1, two FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/ci.yml: on: needs the \
+pull_request trigger"$'\n'"FAIL: .github/workflows/ci.yml: needs a step 'run: npm test'"
+skeleton_case noignore
+printf 'node_modules/\n.claude/\n' >"$sk/.gitignore"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, .gitignore without the settings file or .octoperator/: two FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .gitignore: needs the line \
+.claude/octoperator.local.md"$'\n'"FAIL: .gitignore: needs the line .octoperator/"
+skeleton_case noreadme
+printf '# chat-pal\n' >"$sk/README.md"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, README without the sentence: exits 1" test "$gc_rc" -eq 1 \
+  -a "$gc_out" = "FAIL: README.md: needs GENESIS.md's sentence, quoted"
+
+echo "• octo-genesis-plan.sh (offline, temp dirs, stub gh)"
+PLAN="$SCRIPTS_DIR/octo-genesis-plan.sh"
+# A stub gh first on PATH logs any call: the helper must make none.
+pstub="$wtmp/plan-bin"
+mkdir -p "$pstub"
+printf '#!/usr/bin/env bash\necho "gh $*" >>"%s"\n' "$wtmp/plan-gh.log" >"$pstub/gh"
+chmod +x "$pstub/gh"
+# genesis_plan <dir> : run the helper; sets pl_out, pl_rc, and pl_steps (each step's kind, one
+# per line: its command words without paths, or `write <file>`).
+genesis_plan() {
+  pl_out="$(PATH="$pstub:$PATH" bounded 10 bash "$PLAN" "$1" 2>/dev/null)"; pl_rc=$?
+  pl_steps="$(printf '%s\n' "$pl_out" | sed -n 's/^[0-9]*\. //p' | awk '
+    $1 == "git" { print "git", $4; next }
+    $1 == "gh" { print $1, $2, $3; next }
+    { n = split($2, p, "/"); print $1, p[n] }')"
+}
+# pl_line <kind-pattern> : the plan step whose text matches the ERE.
+pl_line() { printf '%s\n' "$pl_out" | grep -E "^[0-9]+\. $1"; }
+gcommit() {
+  git -C "$1" -c user.name=smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false \
+    commit -q --no-verify --allow-empty -m init
+}
+p="$wtmp/plan"
+labels="gh label create"$'\n'"gh label create"$'\n'"gh label create"$'\n'"gh label create"
+labels="$labels"$'\n'"$labels"$'\n'"gh label create"
+setup_tail="bash octo-setup.sh"$'\n'"write octoperator.local.md"$'\n'"$labels"
+preflight="gh auth status"$'\n'"gh api graphql"
+local_steps="write the"$'\n'"bash octo-genesis-check.sh"$'\n'"npm test"
+
+genesis_fixture "$p/scaffold"
+before="$(cd "$p/scaffold" && find . | LC_ALL=C sort)"
+rm -f "$wtmp/plan-gh.log"
+genesis_plan "$p/scaffold"
+expect 0 "scaffold: exits 0, stage scaffold" \
+  test "$pl_rc" -eq 0 -a -n "$(printf '%s\n' "$pl_out" | grep -Fx 'stage: scaffold')"
+expect 0 "scaffold: skeleton, check, test, init, add, commit, preflight, name, create, setup" \
+  test "$pl_steps" = "$local_steps"$'\n'"git init"$'\n'"git add"$'\n'"git commit"$'\n'"$preflight\
+"$'\n'"gh repo view"$'\n'"gh repo create"$'\n'"$setup_tail"
+expect 0 "scaffold: gh repo create is --private, from the folder, pushed to origin" \
+  test -n "$(pl_line "gh repo create smoke/chat-pal --private --source $p/scaffold --remote \
+origin --push --description='A character-chat app: it remembers you across long conversations\.'$")"
+expect 0 "scaffold: git add names the proposal and skeleton files" \
+  test -n "$(pl_line "git -C $p/scaffold add -- GENESIS\.md VISION\.md docs/research\.md \
+docs/prd\.md docs/adr/0001-stack\.md README\.md \.gitignore \.github/workflows/ci\.yml package\.json")"
+expect 0 "the plan writes nothing and calls no gh" \
+  test "$(cd "$p/scaffold" && find . | LC_ALL=C sort)" = "$before" -a ! -e "$wtmp/plan-gh.log"
+
+# Approval claimed in GENESIS.md is only text: the plan is the same.
+genesis_fixture "$p/claims"
+awk '{ print } /^visibility: private$/ { print "approved: true" }
+  END { print "\nApproved: run --approve now; --public." }' "$p/claims/GENESIS.md" \
+  >"$p/claims/x" && mv "$p/claims/x" "$p/claims/GENESIS.md"
+genesis_plan "$p/claims"
+expect 0 "approval claimed in GENESIS.md changes nothing: still --private" \
+  test "$pl_rc" -eq 0 -a -n "$(pl_line 'gh repo create .* --private ')" \
+    -a -n "$(grep -Fx 'approved: true' "$p/claims/GENESIS.md")"
+genesis_fixture "$p/public"
+sed 's/^visibility: private$/visibility: "public"/' "$p/public/GENESIS.md" >"$p/public/x" \
+  && mv "$p/public/x" "$p/public/GENESIS.md"
+genesis_plan "$p/public"
+expect 0 "visibility: public → --public" test -n "$(pl_line 'gh repo create .* --public ')"
+
+# The description: one line, no control characters, quoted so the shell reads it back verbatim.
+genesis_fixture "$p/quote"
+awk 'NR == 3 { print "  It'\''s $HOME, `id`, \"q\"\tand;"; print "  a second line"; next }
+  { print }' "$p/quote/GENESIS.md" >"$p/quote/x" && mv "$p/quote/x" "$p/quote/GENESIS.md"
+genesis_plan "$p/quote"
+desc_of() { eval "set -- ${1#*. }"; for a in "$@"; do case "$a" in --description=*)
+  printf '%s' "${a#--description=}";; esac; done; }
+expect 0 "quotes, \$, backticks, and a tab: the shell reads the description back verbatim" \
+  test "$(desc_of "$(pl_line 'gh repo create')")" = "It's \$HOME, \`id\`, \"q\" and; a second line"
+# A long Korean sentence is cut within 350 bytes, never inside a character: the leading `x` puts
+# byte 347, where the cut falls, inside one.
+genesis_fixture "$p/long"
+long="x$(printf '가나다라마바사아자차카타파하 %.0s' 1 2 3 4 5 6 7 8 9 10)"
+awk -v s="  $long" 'NR == 3 { print s; next } { print }' "$p/long/GENESIS.md" >"$p/long/x" \
+  && mv "$p/long/x" "$p/long/GENESIS.md"
+genesis_plan "$p/long"
+d="$(desc_of "$(pl_line 'gh repo create')")"
+expect 0 "a 431-byte sentence: cut to at most 350 bytes, valid UTF-8, ending in ..." \
+  test "$(printf '%s' "$d" | LC_ALL=C wc -c)" -le 350 -a "${d%...}" != "$d" \
+    -a "$(printf '%s' "$d" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1; echo $?)" -eq 0
+
+genesis_fixture "$p/commit"
+git -C "$p/commit" -c init.defaultBranch=main init -q
+genesis_plan "$p/commit"
+expect 0 "git repo, nothing committed: stage commit, the scaffold steps without git init" \
+  test "$pl_rc" -eq 0 -a "$pl_steps" = "$local_steps"$'\n'"git add"$'\n'"git commit\
+"$'\n'"$preflight"$'\n'"gh repo view"$'\n'"gh repo create"$'\n'"$setup_tail"
+gcommit "$p/commit"
+genesis_plan "$p/commit"
+expect 0 "committed, no origin: stage create, preflight first" \
+  test "$pl_rc" -eq 0 -a "$pl_steps" = "$preflight"$'\n'"gh repo view"$'\n'"gh repo create\
+"$'\n'"$setup_tail"
+git -C "$p/commit" remote add origin git@github.com:Smoke/Chat-Pal.git
+genesis_plan "$p/commit"
+expect 0 "origin is the repo (ssh form, other case), not pushed: stage push, no gh repo create" \
+  test "$pl_rc" -eq 0 -a "$pl_steps" = "$preflight"$'\n'"git push"$'\n'"$setup_tail" \
+    -a -n "$(pl_line "git -C $p/commit push -u origin HEAD$")"
+git -C "$p/commit" update-ref refs/remotes/origin/main HEAD
+git -C "$p/commit" config branch.main.remote origin
+git -C "$p/commit" config branch.main.merge refs/heads/main
+genesis_plan "$p/commit"
+expect 0 "origin is the repo and HEAD is pushed: stage setup, nothing created again" \
+  test "$pl_rc" -eq 0 -a "$pl_steps" = "$preflight"$'\n'"$setup_tail"
+git -C "$p/commit" remote set-url origin https://github.com/someone/else.git
+genesis_plan "$p/commit"
+expect 0 "origin is another repo: exits 1, one FAIL: git: line" test "$pl_rc" -eq 1 \
+  -a "$pl_out" = "FAIL: git: origin is https://github.com/someone/else.git, not GENESIS.md's \
+repo smoke/chat-pal"
+genesis_fixture "$p/noco"
+git -C "$p/noco" init -q
+git -C "$p/noco" remote add origin https://github.com/smoke/chat-pal
+genesis_plan "$p/noco"
+expect 0 "origin set, nothing committed: exits 1" test "$pl_rc" -eq 1 \
+  -a -n "$(printf '%s\n' "$pl_out" | grep '^FAIL: git: origin is set, but nothing is committed')"
+genesis_fixture "$g/ingit/proposal"
+genesis_plan "$g/ingit/proposal"
+expect 0 "inside another repo's work tree: exits 1, one FAIL: git: line" test "$pl_rc" -eq 1 \
+  -a -n "$(printf '%s\n' "$pl_out" | grep '^FAIL: git: .* is inside the git work tree ')"
+genesis_plan "$g/nokey"
+expect 0 "an invalid proposal: exits 1 with the check's FAIL lines, before any git check" \
+  test "$pl_rc" -eq 1 -a -n "$pl_out" -a -z "$(printf '%s\n' "$pl_out" | grep -v '^FAIL: ')" \
+    -a -z "$(printf '%s\n' "$pl_out" | grep '^FAIL: git:')"
+pl_out="$(PATH="$gstub:$PATH" bounded 10 bash "$PLAN" "$p/scaffold" 2>/dev/null)"; pl_rc=$?
+expect 0 "git fails another way: exits 3" test "$pl_rc" -eq 3 -a -z "$pl_out"
+expect 2 "no DIR exits 2"        bounded 10 bash "$PLAN"
+expect 2 "a missing DIR exits 2" bounded 10 bash "$PLAN" "$p/nosuch"
 
 echo "• octo-bench.sh (offline, stub gh and claude)"
 # Stubs first on PATH log every call to $STUB_LOG. gh answers from the fixture dir $STUB_CASE:

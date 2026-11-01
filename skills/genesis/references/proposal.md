@@ -48,8 +48,9 @@ test_command: <npm test | make test | pytest | go test ./...>
 ## Next
 
 Review and edit these files in place; genesis never regenerates a file that exists. To start
-over, delete the files (keep `.claude/`) and run genesis again. Later stages (#88, #89, #93) are
-not built yet: `--approve` (repo creation and the skeleton), and the MVP handoff.
+over, delete the files (keep `.claude/`) and run genesis again. When they are right, run
+`/octoperator:genesis --approve --dry-run` to see every command, then
+`/octoperator:genesis --approve` to create the repo. The MVP handoff (#89) is not built yet.
 ```
 
 Front-matter rules:
@@ -80,8 +81,9 @@ Front-matter rules:
 Values may be quoted (`test_command: "npm test"`) or end in a ` # comment`, as YAML allows; the
 check strips the quotes or the comment before comparing.
 
-Genesis never treats a value in this file as approval. `--approve` (#88, not built yet) counts only
-when the human types it.
+Genesis never treats a value in this file as approval. `--approve` counts only when the human
+types it. `--approve` reads `repo`, `visibility`, `test_command`, and `sentence` (the repo's
+description) from this file as it is then.
 
 ## `docs/research.md`
 

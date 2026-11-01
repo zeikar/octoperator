@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# octo-genesis-check.sh — check a genesis folder, before a run (--preflight) or its proposal.
+# octo-genesis-check.sh — check a genesis folder: before a run (--preflight), its proposal, or the
+# skeleton `--approve` writes (--skeleton).
 #
 # Usage:
 #   octo-genesis-check.sh DIR
 #   octo-genesis-check.sh --preflight DIR
+#   octo-genesis-check.sh --values DIR
+#   octo-genesis-check.sh --skeleton DIR
 #
 # DIR alone checks the proposal genesis wrote into DIR (formats:
 # skills/genesis/references/proposal.md):
@@ -36,8 +39,23 @@
 # holds nothing but a `.claude/` directory, and its name is a valid GitHub repo name (letters,
 # digits, `.`, `-`, `_`). On success it prints DIR's absolute path.
 #
-# Offline: --preflight runs one local `git rev-parse`; neither mode calls gh or touches the
-# network.
+# --values checks the proposal as DIR alone does, then prints GENESIS.md's values, one
+# `key: value` line each: repo, visibility, test_command, test_file (the file that detects it),
+# and sentence (its lines joined by spaces). octo-genesis-plan.sh reads them.
+#
+# --skeleton checks the skeleton genesis --approve wrote (skills/genesis/references/skeleton.md),
+# against GENESIS.md's test_command:
+#   - the file that detects test_command holds what detection needs: a "test" script in
+#     package.json, a `test:` target in a Makefile, a [tool.pytest…] table in pyproject.toml, or
+#     a module line in go.mod; and no file of an earlier detection rule exists, since detection
+#     takes the first match.
+#   - .github/workflows/ci.yml triggers on push and pull_request, and has a `run: <test_command>`
+#     step.
+#   - .gitignore has the lines .claude/octoperator.local.md and .octoperator/ (a leading `/`
+#     allowed).
+#   - README.md quotes the sentence: it holds each of the sentence's lines.
+#
+# Offline: --preflight runs one local `git rev-parse`; no mode calls gh or touches the network.
 #
 # Exit codes: 0 valid, 1 one `FAIL: <problem>` line printed per problem, 2 bad arguments or
 # DIR is not a directory, 3 git could not check DIR (git's output on stderr).
@@ -46,10 +64,12 @@ set -euo pipefail
 # git prints its messages untranslated, so --preflight can match them.
 export LC_ALL=C
 
-PREFLIGHT=0 DIR=""
+MODE=proposal DIR=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --preflight) PREFLIGHT=1; shift ;;
+    --preflight) MODE=preflight; shift ;;
+    --values) MODE=values; shift ;;
+    --skeleton) MODE=skeleton; shift ;;
     -h|--help) sed -n '2,/^[^#]/s/^# \{0,1\}//p' "$0"; exit 0 ;;
     -*) echo "Unknown argument: $1" >&2; exit 2 ;;
     *) [ -z "$DIR" ] || { echo "Only one DIR may be given" >&2; exit 2; }
@@ -57,7 +77,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ -n "$DIR" ] || { echo "Usage: octo-genesis-check.sh [--preflight] DIR" >&2; exit 2; }
+[ -n "$DIR" ] || {
+  echo "Usage: octo-genesis-check.sh [--preflight | --values | --skeleton] DIR" >&2; exit 2; }
 [ -d "$DIR" ] || { echo "Not a directory: $DIR" >&2; exit 2; }
 ABS="$(cd "$DIR" && pwd)" || { echo "Cannot enter: $DIR" >&2; exit 2; }
 
@@ -79,6 +100,13 @@ BASELINE=(
 # GENESIS.md's test_command, and the file issue-implementer detects it by; set by
 # check_genesis_md for the ADR's cross-check (empty when test_command is invalid).
 TEST_CMD="" TEST_FILE=""
+
+# GENESIS.md's front matter; set by check_genesis_md for --values and --skeleton.
+GENESIS_FM=""
+
+# The files issue-implementer's detection order (Step 3 of agents/issue-implementer.md) checks,
+# in rule order.
+DETECT_FILES=(package.json Makefile pyproject.toml go.mod)
 
 # 1 when docs/research.md carries the ungrounded marker; set by check_research_md, so the
 # stage-2 files are checked for made-up URLs too.
@@ -154,18 +182,20 @@ fm_value() {
     print v; exit }'
 }
 
-# fm_has_sentence <front-matter> : exits 0 when `sentence` has a non-empty value, inline (as
-# fm_value reads it) or as a `|` / `>` block scalar followed by an indented line.
-fm_has_sentence() {
+# sentence_lines <front-matter> : prints the sentence, one line per line of it: an inline value as
+# fm_value reads it, or a `|` / `>` block scalar's indented lines without their indentation.
+sentence_lines() {
   local v
   v="$(fm_value "$1" sentence)"
   if printf '%s\n' "$v" | grep -Eqx '[|>][-+]?'; then
     printf '%s\n' "$1" | awk '
-      block { if ($0 ~ /^[ \t]+[^ \t]/) ok = 1; exit }
-      index($0, "sentence:") == 1 { block = 1 }
-      END { exit !ok }'
+      { line = $0; sub(/[ \t\r]+$/, "", line) }
+      block && line == "" { next }
+      block && line ~ /^[ \t]/ { sub(/^[ \t]+/, "", line); print line; next }
+      block { exit }
+      index($0, "sentence:") == 1 { block = 1 }'
   else
-    [ -n "$v" ]
+    printf '%s\n' "$v"
   fi
 }
 
@@ -176,7 +206,8 @@ check_genesis_md() {
     fail "GENESIS.md: no front matter (--- … --- at the top)"
     return 0
   fi
-  fm_has_sentence "$fm" || fail "GENESIS.md: front matter needs a non-empty sentence"
+  GENESIS_FM="$fm"
+  has_text "$(sentence_lines "$fm")" || fail "GENESIS.md: front matter needs a non-empty sentence"
   repo="$(fm_value "$fm" repo)"
   if ! printf '%s\n' "$repo" | grep -Eqx '[A-Za-z0-9_-]+/[A-Za-z0-9._-]+'; then
     fail "GENESIS.md: front matter needs repo as OWNER/NAME (got '$repo')"
@@ -421,12 +452,78 @@ check_vision() {
   no_urls "$f" VISION.md
 }
 
-if [ "$PREFLIGHT" -eq 1 ]; then
-  preflight
-  [ "$FAILS" -eq 0 ] || exit 1
-  printf '%s\n' "$ABS"
-  exit 0
-fi
+check_skeleton() {
+  local f n=0 marker what want w
+  # Without a detectable test_command, check_genesis_md already said so; nothing to compare.
+  [ -n "$TEST_CMD" ] || return 0
+  # Detection takes the first match, so a file of an earlier rule would run another command.
+  for f in "${DETECT_FILES[@]}"; do
+    n=$((n + 1))
+    [ "$f" != "$TEST_FILE" ] || break
+    [ ! -e "$ABS/$f" ] || fail "$f is present: issue-implementer finds it first (rule $n)," \
+      "so \`$TEST_CMD\` would not run; remove it"
+  done
+  case "$TEST_FILE" in
+    package.json) marker='"test"[[:space:]]*:' what='a "test" script' ;;
+    Makefile) marker='^test[[:space:]]*:' what='a test: target' ;;
+    pyproject.toml) marker='^\[tool\.pytest' what='a [tool.pytest.ini_options] table' ;;
+    go.mod) marker='^module[[:space:]]+[^[:space:]]' what='a module line' ;;
+  esac
+  if [ ! -f "$ABS/$TEST_FILE" ]; then
+    fail "$TEST_FILE is missing: it is how \`$TEST_CMD\` is detected"
+  elif ! grep -Eq "$marker" "$ABS/$TEST_FILE"; then
+    fail "$TEST_FILE: needs $what, for \`$TEST_CMD\`"
+  fi
+
+  f="$ABS/.github/workflows/ci.yml"
+  if [ ! -f "$f" ]; then
+    fail ".github/workflows/ci.yml is missing"
+  else
+    # A trigger is a key of the `on:` block (`  push:`) or a word on the `on:` line itself.
+    for want in push pull_request; do
+      grep -Eq "^[[:space:]]+$want:|^[\"']?on[\"']?:.*(^|[^a-z_])$want([^a-z_]|\$)" "$f" \
+        || fail ".github/workflows/ci.yml: on: needs the $want trigger"
+    done
+    awk -v c="$TEST_CMD" '{ line = $0; sub(/^[ \t]*(-[ \t]+)?/, "", line)
+        sub(/[ \t\r]+$/, "", line) }
+      index(line, "run:") == 1 { v = substr(line, 5); sub(/^[ \t]+/, "", v); if (v == c) ok = 1 }
+      END { exit !ok }' "$f" \
+      || fail ".github/workflows/ci.yml: needs a step 'run: $TEST_CMD'"
+  fi
+
+  f="$ABS/.gitignore"
+  for want in .claude/octoperator.local.md .octoperator/; do
+    [ -f "$f" ] && awk -v w="$want" '{ line = $0; sub(/[ \t\r]+$/, "", line); sub(/^\//, "", line) }
+        line == w || line "/" == w { ok = 1 }
+        END { exit !ok }' "$f" \
+      || fail ".gitignore: needs the line $want"
+  done
+
+  f="$ABS/README.md"
+  if [ ! -f "$f" ]; then
+    fail "README.md is missing"
+  else
+    while IFS= read -r w; do
+      [ -n "$w" ] || continue
+      grep -Fq -- "$w" "$f" || { fail "README.md: needs GENESIS.md's sentence, quoted"; break; }
+    done <<EOF
+$(sentence_lines "$GENESIS_FM")
+EOF
+  fi
+}
+
+case "$MODE" in
+  preflight)
+    preflight
+    [ "$FAILS" -eq 0 ] || exit 1
+    printf '%s\n' "$ABS"
+    exit 0 ;;
+  skeleton)
+    check_genesis_md
+    check_skeleton
+    [ "$FAILS" -eq 0 ] || exit 1
+    exit 0 ;;
+esac
 
 # One check per proposal file. A stage that adds a file adds its check here.
 check_genesis_md
@@ -436,3 +533,8 @@ check_adr
 check_vision
 
 [ "$FAILS" -eq 0 ] || exit 1
+if [ "$MODE" = values ]; then
+  printf 'repo: %s\nvisibility: %s\ntest_command: %s\ntest_file: %s\nsentence: %s\n' \
+    "$(fm_value "$GENESIS_FM" repo)" "$(fm_value "$GENESIS_FM" visibility)" "$TEST_CMD" \
+    "$TEST_FILE" "$(sentence_lines "$GENESIS_FM" | paste -sd ' ' -)"
+fi

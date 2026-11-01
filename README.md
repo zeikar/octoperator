@@ -36,7 +36,8 @@ autonomous shipping, plus the always-on knowledge layer.
 
 | Group | Command | What it does |
 |-------|---------|--------------|
-| **New project** | `/octoperator:genesis "<sentence>"` | Start a new project from one sentence, in an empty directory outside git: research existing services and similar open-source projects (at most 6 web searches and 10 page fetches), write a local proposal (`GENESIS.md`, `docs/research.md`, a PRD, a stack ADR, and a `VISION.md` draft), and stop at a human checkpoint with `genesis: proposed <dir>`. Makes no GitHub write. The later stages (`--approve` to create a private repo, MVP handoff) are not built yet (see [Starting a new project](#starting-a-new-project-genesis)) |
+| **New project** | `/octoperator:genesis "<sentence>"` | Start a new project from one sentence, in an empty directory outside git: research existing services and similar open-source projects (at most 6 web searches and 10 page fetches), write a local proposal (`GENESIS.md`, `docs/research.md`, a PRD, a stack ADR, and a `VISION.md` draft), and stop at a human checkpoint with `genesis: proposed <dir>`. Makes no GitHub write |
+| | `/octoperator:genesis --approve [--dry-run]` | Re-run in the proposal folder once you've reviewed it: write a minimal skeleton (one module, one passing test, CI, `.gitignore`, README), run its test once, commit, create the **private** repo with `gh repo create`, and write the Octoperator settings and labels; ends with `genesis: scaffolded <repo>`. `--dry-run` prints every command and writes nothing. The MVP handoff is not built yet (see [Starting a new project](#starting-a-new-project-genesis)) |
 | **Onboarding** | `/octoperator:setup` | One-time onboarding: detect repo, auto-detect Projects v2 access, optionally create/link a board, write `.claude/octoperator.local.md` |
 | **Plan & intake** | `/octoperator:plan-epic <request>` | Decompose a request into an epic + linked child issues, milestone, labels, board items |
 | | `/octoperator:issue <request>` | Create one well-formed issue (labels, acceptance criteria, milestone, board) |
@@ -64,7 +65,8 @@ autonomous shipping, plus the always-on knowledge layer.
 - **`octo-project-status.sh`** — add an issue/PR to the board and set its Status by name.
 - **`octo-merge-state.sh`** — print a PR's `mergeStateStatus`, waiting out GitHub's `UNKNOWN`; used by `auto`'s merge gate.
 - **`octo-approval-match.sh`** — normalize the `approval_paths` patterns and match a PR's changed files (renamed files' old paths too) against them; used by `auto`'s approval-path gate.
-- **`octo-genesis-check.sh`** — check that a directory is empty and outside git for `genesis` (`--preflight`), and that the proposal it wrote is complete: `GENESIS.md` front matter (including a `test_command` that `issue-implementer` detects), the `docs/research.md`, `docs/prd.md`, and `docs/adr/0001-stack.md` sections, and a `VISION.md` with the baseline immutable constraints verbatim; offline.
+- **`octo-genesis-check.sh`** — check that a directory is empty and outside git for `genesis` (`--preflight`), and that the proposal it wrote is complete: `GENESIS.md` front matter (including a `test_command` that `issue-implementer` detects), the `docs/research.md`, `docs/prd.md`, and `docs/adr/0001-stack.md` sections, and a `VISION.md` with the baseline immutable constraints verbatim; with `--skeleton`, that the skeleton `--approve` wrote is detectable and wired up (the test command's detection file and no earlier one, CI on `push` and `pull_request`, the `.gitignore` entries, the sentence in the README); offline.
+- **`octo-genesis-plan.sh`** — work out where `genesis --approve` resumes from the folder's git state (`scaffold`, `commit`, `create`, `push`, or `setup`) and print its ordered commands, the `gh repo create` description made safe; read-only and offline.
 - **`octo-bench.sh`** — opt-in benchmark harness for contributors: runs `auto` on the `bench/` tasks in throwaway repos and records each outcome and its metrics (see [CONTRIBUTING.md](CONTRIBUTING.md#running-the-benchmark)).
 
 ## Prerequisites
@@ -331,8 +333,8 @@ system keyring, a cron job may not be able to read it, since cron has no desktop
   → standup report; merged-PR issues auto-moved to Done
 ```
 
-Every skill except `setup` and `genesis` accepts `--dry-run` to preview without writing to GitHub.
-(`genesis`'s first run makes no GitHub write.)
+Every skill except `setup` accepts `--dry-run` to preview without writing to GitHub; `genesis`
+takes it with `--approve` (its first run makes no GitHub write).
 
 ## Starting a new project (`genesis`)
 
@@ -357,8 +359,31 @@ sentence alone and marks it `ungrounded: no web access`. Its only `gh` call is t
 `gh api user`. The checkpoint lists the decisions you own: the stack (in the ADR), the repo name
 and visibility (in `GENESIS.md`), and that approving will create a private repo whose GitHub
 Actions minutes count against your plan's quota. Edit the files in place; genesis never
-regenerates a file that exists, so to start over, delete them. The later stages (`--approve` to
-create the private repo, and the MVP handoff to autopilot) are not built yet. The plan is
+regenerates a file that exists, so to start over, delete them.
+
+When the proposal is right, approve it in the same folder. Only the flag you type counts; a file
+that claims approval doesn't:
+
+```text
+/octoperator:genesis --approve --dry-run
+  → the ordered commands: write the skeleton, check it, <test command>, git init, git add,
+    git commit, gh auth status, gh api graphql, gh repo view, gh repo create --private …,
+    setup (settings and labels); nothing written
+/octoperator:genesis --approve
+  → README.md, .gitignore, .github/workflows/ci.yml, the test command's manifest, one module and
+    one test (each only if missing)
+  → <test command> once, locally (it prompts: allow it, or pre-allow it in settings.local.json)
+  → git init, commit, then gh repo create OWNER/NAME --private --push
+  → .claude/octoperator.local.md (no board; approval_paths: [".github/workflows/"]) and labels
+  → genesis: scaffolded OWNER/NAME
+```
+
+Every local step runs before anything goes outward: a failing test stops the run before
+`git init`. The repo is `--private` unless `GENESIS.md` says `visibility: public`. Pushing the CI
+workflow needs the token's `workflow` scope (`gh auth refresh -s workflow`). A re-run resumes from
+what exists (the git repo, the `origin` remote, the push), so nothing is created twice. Run it on
+your machine: Claude Code cloud sessions block GitHub's GraphQL API (#79). The MVP handoff to
+autopilot (#89) and the next milestone (#93) are not built yet. The plan is
 [epic #85](https://github.com/zeikar/octoperator/issues/85).
 
 ## Product vision (`VISION.md`)
