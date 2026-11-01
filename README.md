@@ -220,6 +220,10 @@ cd /path/to/repo && claude -p "/octoperator:autopilot --mode full --cycles 1" \
   --output-format json
 ```
 
+This needs Claude Code v2.1.259 or later (`claude --version`). Older versions reject
+`--permission-prompts` as an unknown option, so every scheduled run fails and the error lands only
+in the err log.
+
 `--max-budget-usd` stops the run at that estimated spend; leave some headroom, since spend can
 pass the cap slightly. `--cycles 1` keeps a run small enough to finish under the cap. A run the cap
 stops ends with no final text: the log shows `"subtype": "error_max_budget_usd"`, the ledger gets
@@ -246,7 +250,11 @@ tail -n 1 /path/to/octoperator-autopilot.log \
 ```
 
 Unload the job when it prints `autopilot: nothing to do` or `autopilot: converged → observe`.
-`error_max_budget_usd` means the cap stopped the run (see above).
+`error_max_budget_usd` means the cap stopped the run (see above). A run that fails before it
+writes its JSON (an unknown flag, an auth error, a crash) adds nothing to the log, so the last line
+is still the previous run's. If the err log grew since then, or the log file's modification time
+is older than the job's interval, the latest run didn't finish: read the err log before trusting
+the status line.
 
 On macOS, use a launchd agent. Save this as
 `~/Library/LaunchAgents/dev.octoperator.autopilot.plist`, then run
