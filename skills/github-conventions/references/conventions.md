@@ -51,8 +51,12 @@ comment holding a fenced JSON entry: time, mode, cycles used, merged, held, prop
 cost, and kind (`run`, `observe`, or `reset`). Autopilot reads the newest entries to detect
 convergence: after `convergence_runs` entries in a row without a merge (see `settings.md`), it
 switches to observe mode — `research` proposes, nothing is built — until a human runs
-`autopilot --resume`. `research` may cite an entry as `failure-log` evidence. The ledger is not
-work, so it carries no type or priority label. Keep it open; the entry format is defined in
+`autopilot --resume`. Only comments from an `OWNER`, `MEMBER`, or `COLLABORATOR` count as entries,
+so a scheduled runner must post with a PAT or GitHub App that has one of those roles — a bot token
+without one (e.g. `github-actions[bot]`) gets its entries skipped, and autopilot never converges.
+`research` may cite an entry as `failure-log` evidence, but only for a proposal about the held
+issues it names or about why runs stopped merging. The ledger is not work, so it carries no type or
+priority label. Keep it open; the entry format is defined in
 `skills/autopilot/SKILL.md` → Run ledger and convergence.
 
 ## Branch naming

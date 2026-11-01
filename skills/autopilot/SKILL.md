@@ -67,7 +67,10 @@ hold reasons), then a fenced `json` block in this fixed shape:
 **Valid entries.** People comment on the ledger too, and on a public repo anyone can. Count a
 comment as an entry only if its `authorAssociation` is `OWNER`, `MEMBER`, or `COLLABORATOR` and its
 body holds one fenced `json` block that parses to an object with all nine keys above and a `kind`
-from the list. Skip every other comment.
+from the list. Skip every other comment. So entries must be posted by an identity with one of
+those roles: a scheduled runner should post with a PAT or a GitHub App that has one, not a token
+whose comments come from a bot account without it (e.g. `github-actions[bot]`). Otherwise
+autopilot skips its own entries and never converges.
 
 **Convergence.** An entry **gains** when `merged` is at least 1. Walk the valid entries newest first,
 stopping at the first `reset`. Autopilot is **converged** when the walk finds at least N entries
@@ -81,10 +84,21 @@ Ledger commands — each one plain `gh` call (see `implement`'s command rule):
 # Find it (oldest first if several are open — use the first, mention the rest in the report):
 gh issue list --repo "$REPO" --label octoperator-ledger --state open \
   --json number,url,createdAt --jq 'sort_by(.createdAt) | .[] | "\(.number) \(.url)"'
-# Read its comments; parse the fenced blocks yourself, newest last:
+# Read the newest 20 entry-shaped comments from allowed authors (newest last), plus a count of
+# entry-shaped comments skipped for their author association:
 gh issue view <ledger#> --repo "$REPO" --json comments \
-  --jq '.comments[] | {url, createdAt, authorAssociation, body}'
+  --jq '[.comments[] | select(.body | contains("```json"))] as $c
+    | ($c | map(select(.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")))) as $ok
+    | {skipped: ($c - $ok | group_by(.authorAssociation)
+        | map("\(length) (\(.[0].authorAssociation))") | join(", ")),
+       entries: ($ok | .[-20:] | map({url, createdAt, authorAssociation, body}))}'
 ```
+
+Parse each returned body's fenced block yourself to apply the validity rule. Only the newest
+`convergence_runs` valid entries matter, so the 20-comment window is enough (widen it if
+`convergence_runs` is set near 20); fewer valid entries than N in it means not converged. When
+`skipped` is non-empty, report it — "N entry-shaped comments skipped (author association X)" — so a
+runner posting under the wrong identity is visible.
 
 ## Steps
 
@@ -110,8 +124,9 @@ open PR), noting that each batch would run through `auto` (implement → review 
 `research` refilling the backlog per the mode. Defer the merge-gate specifics to `auto`.
 
 Also print the **convergence state**, using only the read commands in Run ledger: the ledger issue
-(or "none yet — the first real run creates it"), the valid entries since the last reset, the no-gain
-streak against `convergence_runs`, and what this run would do — build normally, or `converged →
+(or "none yet — the first real run creates it"), the valid entries since the last reset, any
+entry-shaped comments skipped for their author association, the no-gain streak against
+`convergence_runs`, and what this run would do — build normally, or `converged →
 observe mode` (research propose-only, then stop). With `--resume`, say a `reset` entry would be
 appended first and the run would build normally. Mutate nothing: no label, ledger issue, or entry.
 
@@ -262,9 +277,11 @@ Then print a per-cycle summary and an overall result:
   defect found only by reading code is never filed, so this is the only place it surfaces;
 - overall: total merged, total held (with reasons), proposed issues awaiting triage, cycles consumed
   vs the cap, and the **next action** (semi: "relabel proposed → ready, then re-run autopilot"; full:
-  "re-run to continue, or inspect held PRs");
-- ledger: the entry's comment URL and the no-gain streak against `convergence_runs`, warning when
-  the next run will enter observe mode.
+  "re-run to continue, or inspect held PRs"). When the next run will enter observe mode, add
+  `--resume` to it instead (semi: "relabel proposed → ready, then re-run with `--resume`"; full:
+  "inspect held PRs, then re-run with `--resume`") — a plain re-run would only observe;
+- ledger: the entry's comment URL, the no-gain streak against `convergence_runs`, and any
+  entry-shaped comments the read skipped for their author association.
 
 **Observe run** (step 3): open with `converged → observe mode` and the streak that triggered it,
 then research's ranked proposals and its **Unevidenced (not filed)** list, the entry's comment URL,

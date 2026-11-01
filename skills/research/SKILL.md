@@ -86,17 +86,22 @@ Build an evidence base before proposing — read, do not write:
       --jq '.[] | select(now - (.updatedAt | fromdateiso8601) > 3600)'
     ```
     The ledger is the open issue labeled `octoperator-ledger`; each autopilot run appends one entry
-    to it (format and validity rules in `autopilot`'s Run ledger section). An entry is evidence when
-    it records held work (`held` above 0; its summary line names the issues and reasons) or belongs
-    to a streak of entries with nothing merged:
+    to it. Format, validity rules, and the read command (the newest 20 entry-shaped comments from
+    allowed authors) are in the Run ledger section of
+    `${CLAUDE_PLUGIN_ROOT}/skills/autopilot/SKILL.md`; find the issue with:
     ```bash
     gh issue list --repo "$REPO" --label octoperator-ledger --state open --json number,url
-    gh issue view <n> --repo "$REPO" --json comments \
-      --jq '.comments[] | {url, createdAt, authorAssociation, body}'
     ```
-    Cite the PR or the entry's comment URL. A held PR is in-flight work, so it supports a root-cause
-    or tooling proposal (why such PRs get held) — never a re-proposal of the held PR's own issue
-    (step 3 dedupes that away).
+    A valid entry counts only when `held` is above 0 (its summary line names the held issues and
+    reasons) or it is part of a no-gain streak: one of `convergence_runs` (the setting in
+    `.claude/octoperator.local.md`, default `3`) consecutive entries since the last `reset` with
+    `merged` at 0.
+    Cite the PR or the entry's comment URL. Both are narrow evidence. A held PR is in-flight work,
+    so it supports a root-cause or tooling proposal (why such PRs get held) — never a re-proposal of
+    the held PR's own issue (step 3 dedupes that away). A ledger entry supports only a proposal
+    about why the issues it names were held, or, for a no-merge streak, about why runs stopped
+    merging (the loop or its tooling). Neither is ever evidence for an unrelated proposal: an entry
+    exists after every quiet run, so citing it elsewhere would let any lead pass as evidenced.
   - **user-feedback** — an issue or comment a person wrote, not one Octoperator generated. The author
     can't tell them apart (Octoperator posts as the same GitHub user), so exclude: issues labeled
     `proposed`; issues whose body has a `## Evidence` section (research's own, even after a human
