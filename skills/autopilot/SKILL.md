@@ -326,11 +326,16 @@ scheduled fire delivers the same message a hand-typed run would, so decide mecha
    covers a fixed-interval `/loop` such as `/loop 6h …` and a task made with `CronCreate`.
    **Several** → delete nothing, and report `schedule: not stopped (<N> matching cron tasks) —
    cancel it by hand`.
-3. **None**, this turn is a self-paced `/loop` iteration (the loop's wakeup started it, so this
-   session's `/loop` instructions expect it to end with a `ScheduleWakeup` call), and that loop's
-   prompt exactly equals the message that started this turn → call `ScheduleWakeup` with
-   `stop: true`, and report `schedule: stopped the self-paced /loop`. A self-paced loop with any
-   other prompt, such as `/loop babysit PR 12`, belongs to the user: leave it running.
+3. **None**, this turn is a self-paced `/loop` iteration (the `/loop` command or the loop's
+   wakeup started it, so this session's `/loop` instructions expect it to end with a
+   `ScheduleWakeup` call), and that loop's prompt — its `/loop` input with the `/loop` prefix and
+   any leading interval token removed — exactly equals the autopilot invocation this turn runs
+   (`/octoperator:autopilot` and its arguments) → call `ScheduleWakeup` with `stop: true`, and
+   report `schedule: stopped the self-paced /loop`. A wakeup may re-deliver the whole `/loop` input
+   rather than the bare prompt, so the message that started this turn counts when it is exactly
+   `<prompt>`, `/loop <prompt>`, or the loop's own wakeup sentinel; any other message means the
+   turn isn't this loop's. A self-paced loop with any other prompt, such as `/loop babysit PR 12`,
+   belongs to the user: leave it running.
 4. **None** otherwise → a plain run: skip this step and print no `schedule:` line. This covers a
    run typed by hand (even while another loop waits), run under `/goal`, or started by
    `claude -p`.
