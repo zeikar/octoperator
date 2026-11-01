@@ -38,12 +38,17 @@ What stage 3 writes into the new repo, each only when missing:
   `evals-model.yml` it is in the `evidence` job only, and the `judge` job, which holds the model
   key, must stay free of them. **Checked:** the file is its template line for line, comments and
   blank lines aside, except where the template has that line: only there may lines go, and only
-  lines indented as steps (six spaces or more) that never name `secrets`, so no setup step, job
-  key (`permissions:`, `env:`), job, or secret lands anywhere else; `evals.yml`
+  lines indented as steps (six spaces or more), so no setup step, job key (`permissions:`,
+  `env:`), or job lands anywhere else. No line there, comment lines included (inside a `run: |`
+  block a `#` line is text), holds `secrets` in any case, since expressions ignore case
+  (`SECRETS.X`, `toJSON(Secrets)`), or a backslash, since a YAML escape (`\x73ecrets`) or a
+  double-quoted line joined to the next could spell it, so no secret lands in a setup step. The
+  setup steps genesis copies from `ci.yml` (skeleton.md's table) have neither: write a long
+  command as one line or as two steps, never with a `\` line continuation; `evals.yml`
   triggers on exactly `push` (with `branches: [main]`) and `workflow_dispatch`;
   `evals-guard.yml` triggers on exactly `pull_request`; and `evals-model.yml` on exactly
   `workflow_dispatch`, so a copy with a `schedule:` or `push:` trigger, or without its
-  `timeout-minutes`, `EVALS_MAX_CALLS`, `EVALS_MAX_EVIDENCE_BYTES`, or `EVALS_MODEL` line, or with
+  `timeout-minutes`, `EVALS_MAX_CALLS`, `EVALS_MAX_PROMPT_BYTES`, or `EVALS_MODEL` line, or with
   another value in any, fails. Without a
   `judge: model` scenario, **checked:** `evals-model.yml` does not exist.
 - **One eval per scenario.** **Checked:** each `docs/prd.md` scenario has its `scenario.md` and
@@ -197,7 +202,8 @@ The workflow has two jobs, so the model key and the repo's code never share a ma
 - **`evidence`** checks out the repo, runs the stack's setup (which runs the repo's code: a
   `postinstall`, …), then `bash evals/run.sh --evidence "$RUNNER_TEMP/evidence"`, and uploads that
   directory as the `evals-model-evidence` artifact (`actions/upload-artifact`). No secret: no step
-  in it names one, and `--skeleton` rejects a setup step that does. `--evidence` skips the script
+  in it names one, and `--skeleton` rejects a setup line that holds `secrets` in any case, or a
+  backslash, which could spell it. `--evidence` skips the script
   evals and runs each model eval's `check.sh` as the offline run runs a check (`env -i`, its own
   process group, the repo unchanged after). Exit 0 with evidence on stdout → `<id>.txt` in the
   directory; a check that fails or prints nothing gets no file. It calls nothing and needs no key,
@@ -206,9 +212,10 @@ The workflow has two jobs, so the model key and the repo's code never share a ma
   `actions/download-artifact`, then `bash evals/run.sh --judge "$RUNNER_TEMP/evidence"`, the one
   step that gets the key. Which evals are model-judged, their `scenario.md` text, and the caps come
   from its own checkout and its step's `env:`, never from the artifact, which is only data: for
-  each model eval it reads `<id>.txt`, and a file that is missing, empty, a symlink, not a regular
-  file, or over `EVALS_MAX_EVIDENCE_BYTES` fails that eval without a call; any other file is
-  ignored. `judge.sh` then sends the `scenario.md` text and the evidence to the Anthropic
+  each model eval it reads `<id>.txt`, and a file that is missing, empty, a symlink, or not a
+  regular file fails that eval without a call, and so does a prompt (the `scenario.md` text and
+  the evidence) over `EVALS_MAX_PROMPT_BYTES`; any other file is ignored. The evidence is read
+  only up to the cap, never whole. `judge.sh` then sends the prompt to the Anthropic
   Messages API (`EVALS_MODEL`, `claude-sonnet-5-5` in the template), in a request header that
   holds the key, never on a command line or in the log, asking for one word. The eval passes only
   when the reply is exactly `PASS`, whitespace around it aside: `FAIL`, any other reply, or an
@@ -241,13 +248,17 @@ closes is the key and the spend.
   GitHub Free can't configure one.
 - **The caps.** Each dispatch makes at most `EVALS_MAX_CALLS` model calls (20 in the template, one
   per eval): `run.sh --judge` refuses to start without it, counts each call, and fails every eval
-  left once the cap is used, as `call cap reached`, without calling. Each call sends at most
-  `EVALS_MAX_EVIDENCE_BYTES` of evidence (200000 in the template, about 200 KB) and asks for at
-  most 16 output tokens, so a dispatch's spend is bounded by
-  `EVALS_MAX_CALLS × (EVALS_MAX_EVIDENCE_BYTES + the scenario.md text + a short system prompt)`
-  input and `EVALS_MAX_CALLS × 16` output tokens: about 4 million input tokens with the
-  template's values, counting one token per byte (text tokenizes to far fewer). Both caps and the
-  model are pinned in the judge step's `env:`. `timeout-minutes: 30` stops each job, and
+  left once the cap is used, as `call cap reached`, without calling. Each call's prompt, the
+  `scenario.md` text and the evidence together, is at most `EVALS_MAX_PROMPT_BYTES` (200000 in
+  the template, about 200 KB), or the eval fails without a call: a new model eval merges after a
+  format check alone, so its `scenario.md` is capped as its evidence is. With `judge.sh`'s fixed
+  system prompt and 16 output tokens, a dispatch's spend is bounded by
+  `EVALS_MAX_CALLS × (EVALS_MAX_PROMPT_BYTES + the system prompt)` input and
+  `EVALS_MAX_CALLS × 16` output tokens, pinned values all: 20 × (200000 + 293) bytes, about 4
+  million input tokens counting one token per byte (text tokenizes to far fewer), and 320 output
+  tokens.
+  Both caps and the model are pinned in the judge step's `env:`, and the system prompt in
+  `judge.sh`, which the guard fails a PR for changing. `timeout-minutes: 30` stops each job, and
   `EVALS_CHECK_TIMEOUT` each check, as in the offline run. The checkpoint and the handoff print
   the call cap and the judge job's timeout.
 - **Gates already in place.** A `schedule:` or `push:` trigger would be unattended spend, and so

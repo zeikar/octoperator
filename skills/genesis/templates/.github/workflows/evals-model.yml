@@ -6,9 +6,10 @@
 # stack's setup and each model eval's check.sh, which print the evidence, and uploads it as an
 # artifact; it gets no secret. judge runs no setup and no repo code: from its own checkout it
 # reads which evals are model-judged and their scenario.md, reads the artifact only as data (one
-# file per eval id; a missing, empty, or oversized file fails that eval uncalled, and an extra one
-# is ignored), and only its last step gets the key. That step pins EVALS_MAX_CALLS (the most model
-# calls a run makes), EVALS_MAX_EVIDENCE_BYTES, and EVALS_MODEL, and each job stops after
+# file per eval id; a missing or empty file, or a prompt over the byte cap, fails that eval
+# uncalled, and an extra file is ignored), and only its last step gets the key. That step pins
+# EVALS_MAX_CALLS (the most model calls a run makes), EVALS_MAX_PROMPT_BYTES (the most bytes of
+# scenario.md text and evidence one call sends), and EVALS_MODEL, and each job stops after
 # timeout-minutes. This file is in approval_paths, so a new trigger (a schedule: is unattended
 # spend), a higher cap, or a longer timeout needs a human.
 #
@@ -49,6 +50,6 @@ jobs:
       - run: bash evals/run.sh --judge "$RUNNER_TEMP/evidence"
         env:
           EVALS_MAX_CALLS: 20
-          EVALS_MAX_EVIDENCE_BYTES: 200000
+          EVALS_MAX_PROMPT_BYTES: 200000
           EVALS_MODEL: claude-sonnet-5-5
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

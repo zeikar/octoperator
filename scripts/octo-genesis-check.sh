@@ -549,10 +549,12 @@ triggers() {
 # check_eval_workflow <name> <trigger...> : .github/workflows/<name> is its template line for line,
 # comments and blank lines aside, except where the template has the line `# genesis: the stack's
 # setup …`: the stack's setup steps go there, and only there, as lines indented six spaces or more
-# (steps, not a job, a job key such as permissions:, or a top-level key) that never name secrets.
-# Setup runs the repo's code, so in evals-guard.yml only the must-fail job may have it, and in
-# evals-model.yml only the evidence job, never the judge job that holds the model key; and a
-# setup step has no use for a secret. It triggers on exactly the given events.
+# (steps, not a job, a job key such as permissions:, or a top-level key). No line there, comment
+# lines included, holds `secrets` in any case (expressions ignore case) or a backslash (a YAML
+# escape such as \x73, or a line joined to the next, could spell it). Setup runs the repo's code,
+# so in evals-guard.yml only the must-fail job may have it, and in evals-model.yml only the
+# evidence job, never the judge job that holds the model key; and a setup step has no use for a
+# secret. It triggers on exactly the given events.
 check_eval_workflow() {
   local name="$1" f="$ABS/.github/workflows/$1" t w kind want have src; shift
   src="(skills/genesis/templates/.github/workflows/$name)"
@@ -570,7 +572,8 @@ $(awk -v ph="# genesis: the stack's setup and install steps from ci.yml" '
       if (t == ph) { gap = n + 0; has = 1 }
       else if (!skip(l)) want[++n] = l
       next }
-    { l = norm($0); if (!skip(l)) have[++m] = l }
+    # A comment line can be text inside a block scalar, so the raw lines are kept too.
+    { raw[FNR] = norm($0); last = FNR; l = raw[FNR]; if (!skip(l)) { have[++m] = l; at[m] = FNR } }
     END {
       if (!has) gap = n
       tail = n - gap
@@ -580,10 +583,12 @@ $(awk -v ph="# genesis: the stack's setup and install steps from ci.yml" '
       for (i = tail; i >= 1; i--) { j = m - tail + i
         if (j <= gap) diff("missing", want[gap + i], "")
         if (have[j] != want[gap + i]) diff("differs", want[gap + i], have[j]) }
-      for (i = gap + 1; i <= m - tail; i++) {
+      for (i = gap + 1; i <= m - tail; i++)
         if (!has || have[i] !~ /^      /) diff("extra", want[gap], have[i])
-        if (have[i] ~ /(^|[^A-Za-z0-9_])secrets([^A-Za-z0-9_]|$)/)
-          diff("secret", want[gap], have[i]) }
+      lo = gap ? at[gap] + 1 : 1; hi = tail ? at[m - tail + 1] - 1 : last
+      for (i = lo; i <= hi; i++) {
+        if (index(tolower(raw[i]), "secrets")) diff("secret", want[gap], raw[i])
+        if (index(raw[i], "\\")) diff("backslash", want[gap], raw[i]) }
     }' "$TEMPLATES/.github/workflows/$name" "$f")
 EOF
   case "$kind" in
@@ -593,6 +598,8 @@ EOF
       "indented as steps, may go where its template has the '# genesis:' line $src" ;;
     secret) fail ".github/workflows/$name: has '$have' in the setup steps: a setup step" \
       "names no secret $src" ;;
+    backslash) fail ".github/workflows/$name: has '$have' in the setup steps: a setup step" \
+      "has no backslash $src" ;;
   esac
   t="$(triggers "$f" | sort -u)"
   for w in "$@"; do

@@ -420,8 +420,8 @@ each new check. Confirm the first `Evals` run on `main` is red.
 A `judge: model` scenario, such as whether replies keep a persona's tone, spends model tokens, so
 the offline run skips it. When the PRD has one, genesis also writes `evals-model.yml`, which runs
 those evals only when you dispatch it, with at most `EVALS_MAX_CALLS` model calls (20), each
-with at most `EVALS_MAX_EVIDENCE_BYTES` of evidence (200000), and a 30-minute timeout per job,
-once you add the `ANTHROPIC_API_KEY` secret. One job runs the repo's setup and checks to build the
+sending at most `EVALS_MAX_PROMPT_BYTES` of scenario and evidence (200000), and a 30-minute
+timeout per job, once you add the `ANTHROPIC_API_KEY` secret. One job runs the repo's setup and checks to build the
 evidence, with no secret; a second, with no repo code, sends it to the model, and only that job
 gets the key. `approval_paths` holds only the merge, and a workflow pushed on a branch runs with
 repo secrets, so keep the key in a GitHub Environment restricted to `main` where your plan allows

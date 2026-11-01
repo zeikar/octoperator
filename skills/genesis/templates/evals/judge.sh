@@ -6,7 +6,7 @@
 #
 # Only `bash evals/run.sh --judge` calls it, once per `judge: model` eval, and counts the calls
 # against EVALS_MAX_CALLS before each one. PROMPT_FILE holds the scenario and the evidence the
-# eval's check.sh printed in the evidence job, at most EVALS_MAX_EVIDENCE_BYTES of it. The reply
+# eval's check.sh printed in the evidence job, at most EVALS_MAX_PROMPT_BYTES in all. The reply
 # must be exactly PASS or FAIL, whitespace around it aside: any other reply, an HTTP error, or a
 # response that isn't one text block is a failure. It asks for at most 16 output tokens.
 #

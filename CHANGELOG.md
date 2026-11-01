@@ -108,18 +108,20 @@ All notable changes to Octoperator are documented in this file. The format is ba
   `<dir>/<id>.txt`, and uploads it as an artifact; it gets no secret. The `judge` job
   (`needs: evidence`) runs no setup: a fresh checkout, the artifact, then
   `bash evals/run.sh --judge <dir>`, the only step with the key, which pins `EVALS_MAX_CALLS: 20`,
-  `EVALS_MAX_EVIDENCE_BYTES: 200000`, and `EVALS_MODEL: claude-sonnet-5-5`. It takes the model
+  `EVALS_MAX_PROMPT_BYTES: 200000`, and `EVALS_MODEL: claude-sonnet-5-5`. It takes the model
   evals, their scenario text, and the caps from its own checkout, reads the artifact only as
-  data (a missing, empty, symlinked, or oversized file fails that eval without a call; an extra
-  one is ignored), and asks new template `evals/judge.sh` (one Anthropic Messages API call with
-  curl, the key in a header file) for exactly `PASS` or `FAIL`; any other reply fails the eval.
+  data (a missing, empty, or symlinked file, or a prompt of scenario text and evidence over the
+  byte cap, fails that eval without a call; an extra file is ignored), and asks new template
+  `evals/judge.sh` (one Anthropic Messages API call with curl, the key in a header file) for
+  exactly `PASS` or `FAIL`; any other reply fails the eval.
   `run.sh --judge` refuses to start without the cap or the key, and once the cap is used fails
   each eval left without a call. The offline run still skips model evals without changing its
   exit code. Every eval, model-judged ones included, now needs a `check.sh`, in `--skeleton` and
   the guard. `octo-genesis-check.sh --skeleton` holds `evals-model.yml` to its template line for
   line (a `schedule:` or `push:` trigger, a removed or changed cap, byte cap, model, or timeout,
-  or setup steps in the judge job fail), rejects a setup step that names a secret in any eval
-  workflow, and fails `evals-model.yml` when the PRD has no model scenario; `--values` prints
+  or setup steps in the judge job fail), rejects a setup line, comment lines included, that
+  holds `secrets` in any case or a backslash (which could spell it) in any eval workflow, and
+  fails `evals-model.yml` when the PRD has no model scenario; `--values` prints
   `model_scenarios`, `model_call_cap`, and `model_timeout_minutes`, which the checkpoint, the
   plan, and the handoff show. Genesis never sets a secret or dispatches a workflow, and
   Octoperator's CI calls no model: the tests use a fake `curl`. `references/evals.md` documents

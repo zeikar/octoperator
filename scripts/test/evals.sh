@@ -19,9 +19,10 @@
 #                key and no cap, calls nothing, writes one <id>.txt per eval with evidence (none
 #                for a failed or silent check), refuses a non-empty DIR, and fails when it has no
 #                evidence at all; --judge runs no check, needs the call cap (EVALS_MAX_CALLS), the
-#                key, and a valid EVALS_MAX_EVIDENCE_BYTES, takes its eval list from its own
-#                checkout, fails an eval whose file is missing, a symlink, a directory, empty, or
-#                over the byte cap (200000 by default) without a call, ignores extra files, and
+#                key, and a valid EVALS_MAX_PROMPT_BYTES, takes its eval list from its own
+#                checkout, fails an eval whose file is missing, a symlink, a directory, or empty,
+#                or whose prompt (scenario.md text and evidence, either one large) is over the
+#                byte cap (200000 by default), without a call, ignores extra files, and
 #                once the cap is used fails the evals left uncalled; the prompt holds the scenario
 #                and the evidence; the key goes only into a header file, never into curl's
 #                arguments or any output; and the template's two jobs, run as the workflow runs
@@ -357,8 +358,8 @@ out="$(PATH="$fake:$PATH" EVALS_MAX_CALLS=5 env -u ANTHROPIC_API_KEY \
   bash "$m/evals/run.sh" --judge "$ev" 2>&1)"; rc=$?
 check "--judge with no key: exits 2, no call" test "$rc" -eq 2 -a "$(calls)" -eq 0
 for b in 0 abc; do
-  EVALS_MAX_CALLS=5 EVALS_MAX_EVIDENCE_BYTES="$b" ANTHROPIC_API_KEY="$KEY" model_run --judge "$ev"
-  check "--judge with EVALS_MAX_EVIDENCE_BYTES=$b: exits 2, no call" \
+  EVALS_MAX_CALLS=5 EVALS_MAX_PROMPT_BYTES="$b" ANTHROPIC_API_KEY="$KEY" model_run --judge "$ev"
+  check "--judge with EVALS_MAX_PROMPT_BYTES=$b: exits 2, no call" \
     test "$rc" -eq 2 -a "$(calls)" -eq 0
 done
 EVALS_MAX_CALLS=5 ANTHROPIC_API_KEY="$KEY" model_run --judge "$tmp/no-such-dir"
@@ -410,23 +411,38 @@ check "--judge, a tampered artifact: one call, for the one real evidence file" \
     && has "$out" "fail: d-silent (evidence file d-silent.txt is empty)" \
     && has "$out" "evals: 1/4 passed (1 skipped)" && echo y)" \
     -a -z "$(printf '%s\n' "$out" | grep -e x-new -e zz- -e 'pass: e-script')"
-# The evidence byte cap: over it, the eval fails before any call; at it, the call is made.
+# The prompt byte cap: over it, the eval fails before any call; at it, the call is made. The prompt
+# is `Scenario:\n`, the scenario text (`\nThe scenario.\n`), `\nEvidence:\n`, then the evidence:
+# 36 bytes, then 50 of evidence.
 cap="$tmp/cap-evidence"
 mkdir -p "$cap"
 printf 'say-pass %041d' 0 >"$cap/a-good.txt"
 printf 'say-pass %042d' 0 >"$cap/b-bad.txt"
 rm -f "$tmp/curl.args"
-EVALS_MAX_CALLS=10 EVALS_MAX_EVIDENCE_BYTES=50 ANTHROPIC_API_KEY="$KEY" model_run --judge "$cap"
-check "--judge: evidence at EVALS_MAX_EVIDENCE_BYTES is sent, one byte over fails uncalled" \
-  test "$(wc -c <"$cap/a-good.txt" | tr -d ' ')" -eq 50 -a "$rc" -eq 1 -a "$(calls)" -eq 1 \
-    -a -n "$(has "$out" "pass: a-good" \
-    && has "$out" "fail: b-bad (evidence over EVALS_MAX_EVIDENCE_BYTES=50 bytes)" && echo y)"
+EVALS_MAX_CALLS=10 EVALS_MAX_PROMPT_BYTES=86 ANTHROPIC_API_KEY="$KEY" model_run --judge "$cap"
+check "--judge: a prompt at EVALS_MAX_PROMPT_BYTES is sent, one byte over fails uncalled" \
+  test "$(jq -j '.messages[0].content' "$tmp/curl.body" | wc -c | tr -d ' ')" -eq 86 \
+    -a "$rc" -eq 1 -a "$(calls)" -eq 1 -a -n "$(has "$out" "pass: a-good" \
+    && has "$out" "fail: b-bad (prompt over EVALS_MAX_PROMPT_BYTES=86 bytes)" && echo y)"
 head -c 200001 /dev/zero | tr '\0' x >"$cap/a-good.txt"
 rm -f "$tmp/curl.args" "$cap/b-bad.txt"
 EVALS_MAX_CALLS=10 ANTHROPIC_API_KEY="$KEY" model_run --judge "$cap"
 check "--judge: the byte cap defaults to 200000" test "$rc" -eq 1 -a "$(calls)" -eq 0 \
-  -a -n "$(has "$out" "fail: a-good (evidence over EVALS_MAX_EVIDENCE_BYTES=200000 bytes)" \
+  -a -n "$(has "$out" "fail: a-good (prompt over EVALS_MAX_PROMPT_BYTES=200000 bytes)" \
     && echo y)"
+# The cap is on the whole prompt: a new model eval merges after a format check alone, so a large
+# scenario.md fails uncalled too, however small its evidence.
+cp "$m/evals/a-good/scenario.md" "$tmp/a-good.scenario" \
+  && head -c 200001 /dev/zero | tr '\0' x >>"$m/evals/a-good/scenario.md" \
+  && echo "bot: say-pass" >"$cap/a-good.txt" || { echo "evals: cp failed" >&2; exit 1; }
+rm -f "$tmp/curl.args"
+EVALS_MAX_CALLS=10 ANTHROPIC_API_KEY="$KEY" model_run --judge "$cap"
+check "--judge: an oversized scenario.md with small evidence fails uncalled" \
+  test "$rc" -eq 1 -a "$(calls)" -eq 0 \
+    -a -n "$(has "$out" "fail: a-good (prompt over EVALS_MAX_PROMPT_BYTES=200000 bytes)" \
+    && has "$out" "evals: model calls: 0/10" && echo y)"
+mv "$tmp/a-good.scenario" "$m/evals/a-good/scenario.md" \
+  || { echo "evals: mv failed" >&2; exit 1; }
 
 # The workflow's two jobs, as the template runs them: the evidence step, then the judge step with
 # the template's own env (its cap, byte cap, and model) and a fresh copy of the artifact.
@@ -445,9 +461,9 @@ model_env() {
       v = $0; sub(/^ *[A-Z_]+: /, "", v); print k "=" v; next } { e = 0 }' "$MWF" \
     | grep -v '^ANTHROPIC_API_KEY='
 }
-check "the template's judge step pins EVALS_MAX_CALLS, EVALS_MAX_EVIDENCE_BYTES, and EVALS_MODEL" \
+check "the template's judge step pins EVALS_MAX_CALLS, EVALS_MAX_PROMPT_BYTES, and EVALS_MODEL" \
   test "$(model_env | sed 's/=.*//' | paste -sd ' ' -)" = \
-    "EVALS_MAX_CALLS EVALS_MAX_EVIDENCE_BYTES EVALS_MODEL"
+    "EVALS_MAX_CALLS EVALS_MAX_PROMPT_BYTES EVALS_MODEL"
 rm -rf "$tmp/rt" "$tmp/rt2" "$tmp/curl.args"
 out="$(cd "$m" && env -u ANTHROPIC_API_KEY PATH="$fake:$PATH" GITHUB_ACTIONS=true \
   RUNNER_TEMP="$tmp/rt" bash -c "$(model_step evidence)" 2>&1)"; rc=$?

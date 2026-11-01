@@ -21,10 +21,11 @@
 #   --judge     runs no check: for each `judge: model` eval in this script's own evals/, it reads
 #               DIR/<id>.txt as data, and evals/judge.sh asks the model whether the scenario.md
 #               text holds for it, PASS or FAIL. A missing, empty, symlinked, or non-regular
-#               file, or one over EVALS_MAX_EVIDENCE_BYTES (default 200000), fails that eval
-#               uncalled; any other file in DIR is ignored. It needs EVALS_MAX_CALLS, a positive integer, and
-#               makes at most that many model calls: once they are used, each eval left fails as
-#               `call cap reached`, uncalled.
+#               file fails that eval uncalled, and so does a prompt (the scenario.md text and the
+#               evidence) over EVALS_MAX_PROMPT_BYTES (default 200000); any other file in DIR is
+#               ignored. It needs EVALS_MAX_CALLS, a positive integer, and makes at most that many
+#               model calls: once they are used, each eval left fails as `call cap reached`,
+#               uncalled.
 #
 # REPO_DIR defaults to the directory above this script's, and must be in a git work tree. Each
 # check runs from a neutral `mktemp -d` directory, under `env -i PATH=… HOME=…`, with stdin from
@@ -52,7 +53,7 @@
 #
 # Exit codes: 0 every eval it ran passed (with --evidence: it wrote evidence for at least one), 1
 # any failed (with --evidence: none had evidence) or the run stopped, 2 bad arguments (or, with
-# --judge, no EVALS_MAX_CALLS or model key, or a bad EVALS_MAX_EVIDENCE_BYTES).
+# --judge, no EVALS_MAX_CALLS or model key, or a bad EVALS_MAX_PROMPT_BYTES).
 set -uo pipefail
 
 USAGE="Usage: bash evals/run.sh [--evidence DIR | --judge DIR] [REPO_DIR]"
@@ -83,14 +84,14 @@ if [ "$MODE" = evidence ]; then
 elif [ "$MODE" = judge ]; then
   [ -d "$OUT" ] \
     || { echo "Not a directory: $OUT (--judge reads the evidence from it)" >&2; exit 2; }
-  # Every model call spends money: no cap, no run. The evidence is sent whole, so it is capped too.
+  # Every model call spends money: no cap, no run. Each call's prompt is capped too.
   MAX_CALLS="${EVALS_MAX_CALLS:-}"
   case "$MAX_CALLS" in ''|*[!0-9]*) MAX_CALLS=0 ;; esac
   [ "$MAX_CALLS" -ge 1 ] || { echo "EVALS_MAX_CALLS must be a positive integer" >&2; exit 2; }
-  MAX_BYTES="${EVALS_MAX_EVIDENCE_BYTES:-200000}"
+  MAX_BYTES="${EVALS_MAX_PROMPT_BYTES:-200000}"
   case "$MAX_BYTES" in ''|*[!0-9]*) MAX_BYTES=0 ;; esac
   [ "$MAX_BYTES" -ge 1 ] \
-    || { echo "EVALS_MAX_EVIDENCE_BYTES must be a positive integer" >&2; exit 2; }
+    || { echo "EVALS_MAX_PROMPT_BYTES must be a positive integer" >&2; exit 2; }
   [ -n "${ANTHROPIC_API_KEY:-}" ] \
     || { echo "ANTHROPIC_API_KEY is not set: add it as a secret (references/evals.md)" >&2
          exit 2; }
@@ -213,6 +214,8 @@ for d in "$EVALS"/*/; do
     passed=$((passed + 1)); echo "evidence: $id"; continue
   fi
   # --judge: this checkout chose the eval; the artifact is only data, read up to the byte cap.
+  # The cap is on the whole prompt: a new model eval merges after a format check alone, so a large
+  # scenario.md would cost as much as large evidence.
   ev="$OUT/$id.txt"
   if [ -L "$ev" ] || [ ! -f "$ev" ]; then
     failed_eval "$id" "no evidence file $id.txt: the evidence job's log says why"; continue
@@ -220,20 +223,20 @@ for d in "$EVALS"/*/; do
   if ! head -c "$((MAX_BYTES + 1))" "$ev" >"$tmp/$id.out" 2>/dev/null; then
     failed_eval "$id" "evidence file $id.txt unreadable"; continue
   fi
-  size="$(wc -c <"$tmp/$id.out" | tr -d ' ')"
-  if [ "$size" -eq 0 ]; then failed_eval "$id" "evidence file $id.txt is empty"; continue; fi
+  if [ ! -s "$tmp/$id.out" ]; then failed_eval "$id" "evidence file $id.txt is empty"; continue; fi
+  { echo "Scenario:"
+    awk 'NR == 1 { next } !body && $0 == "---" { body = 1; next } body' "$d/scenario.md"
+    printf '\nEvidence:\n'
+    cat "$tmp/$id.out"
+  } | head -c "$((MAX_BYTES + 1))" >"$tmp/$id.prompt"
+  size="$(wc -c <"$tmp/$id.prompt" | tr -d ' ')"
   if [ "$size" -gt "$MAX_BYTES" ]; then
-    failed_eval "$id" "evidence over EVALS_MAX_EVIDENCE_BYTES=$MAX_BYTES bytes"; continue
+    failed_eval "$id" "prompt over EVALS_MAX_PROMPT_BYTES=$MAX_BYTES bytes"; continue
   fi
   if [ "$calls" -ge "$MAX_CALLS" ]; then
     failed_eval "$id" "call cap reached: EVALS_MAX_CALLS=$MAX_CALLS"; continue
   fi
   calls=$((calls + 1))
-  { echo "Scenario:"
-    awk 'NR == 1 { next } !body && $0 == "---" { body = 1; next } body' "$d/scenario.md"
-    printf '\nEvidence:\n'
-    cat "$tmp/$id.out"
-  } >"$tmp/$id.prompt"
   # judge.sh prints one line; control characters out, so it can't start a workflow command.
   verdict="$(bash "$EVALS/judge.sh" "$tmp/$id.prompt" </dev/null 2>"$log" | head -n 1 \
     | tr -d '\000-\037\177')"
