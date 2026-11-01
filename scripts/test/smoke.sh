@@ -14,6 +14,10 @@
 #   - octo-merge-state.sh  : the UNKNOWN re-query loop and gh-error exit, against a stub `gh`
 #   - octo-approval-match.sh : pattern normalization, malformed patterns, matching (renames
 #                            included), and the incomplete-file-list hold, against a stub `gh`
+#   - octo-genesis-check.sh : a valid proposal, a missing section or front-matter key, an
+#                            ungrounded proposal (and one with URLs or a misplaced or misspelled
+#                            marker), bad arguments, and --preflight's git, empty-dir, and
+#                            repo-name checks
 #   - octo-bench.sh        : the --live gate and --dry-run make no gh / claude call; preflight,
 #                            check's metrics, run's cost cap, and cleanup, against a stub `gh`
 #                            and `claude`
@@ -265,6 +269,178 @@ STUB_COUNT=3000 approval 'nothing'
 expect 0 "3000 changed files (the API limit): exits 3" test "$am_rc" -eq 3
 STUB_GH_RC=2 approval 'nothing'
 expect 0 "gh exit 2: exits 3, not the malformed-pattern 2" test "$am_rc" -eq 3
+
+echo "• octo-genesis-check.sh (offline, temp dirs)"
+GENESIS="$SCRIPTS_DIR/octo-genesis-check.sh"
+# genesis_fixture <dir> : write a valid, grounded proposal into <dir>.
+genesis_fixture() {
+  mkdir -p "$1/docs"
+  cat >"$1/GENESIS.md" <<'MD'
+---
+sentence: |-
+  A character-chat app: it remembers you across long conversations.
+repo: smoke/chat-pal
+visibility: private
+---
+
+# Genesis proposal
+MD
+  cat >"$1/docs/research.md" <<'MD'
+# Research: chat-pal
+
+## Problem
+
+Chat companions forget earlier conversations (https://foo.example/blog).
+
+## Prior art
+
+| Name | Kind | URL | License | Strengths | Gaps |
+|------|------|-----|---------|-----------|------|
+| Foo | service | https://foo.example | proprietary | polish | forgets |
+| Bar | OSS | https://github.com/x/bar | MIT | self-hosted | no memory |
+
+## Build
+
+- Long-term memory per user (https://foo.example/blog)
+
+## Skip
+
+- Voice calls — costly, and neither project's users ask for them (https://github.com/x/bar)
+
+## Sources
+
+- https://foo.example/blog — Foo's blog, accessed 2026-11-01
+- <https://github.com/x/bar> — accessed 2026-11-01
+MD
+}
+# genesis_check <args...> : run the helper; sets gc_out (stdout) and gc_rc.
+genesis_check() { gc_out="$(bounded 10 bash "$GENESIS" "$@" 2>/dev/null)"; gc_rc=$?; }
+g="$wtmp/genesis"
+genesis_fixture "$g/valid"
+genesis_check "$g/valid"
+expect 0 "valid proposal: exits 0, prints nothing" test "$gc_rc" -eq 0 -a -z "$gc_out"
+genesis_fixture "$g/nosection"
+sed 's/^## Skip$/## Avoid/' "$g/valid/docs/research.md" >"$g/nosection/docs/research.md"
+genesis_check "$g/nosection"
+expect 0 "missing ## Skip: exits 1 with a FAIL line" test "$gc_rc" -eq 1 \
+  -a "$gc_out" = "FAIL: docs/research.md: missing section ## Skip"
+genesis_fixture "$g/nokey"
+grep -v '^visibility:' "$g/valid/GENESIS.md" >"$g/nokey/GENESIS.md"
+genesis_check "$g/nokey"
+expect 0 "missing visibility key: exits 1 with a FAIL line" test "$gc_rc" -eq 1 \
+  -a -n "$(printf '%s\n' "$gc_out" | grep -Fx \
+    "FAIL: GENESIS.md: front matter needs visibility: private or public (got '')")"
+genesis_fixture "$g/nourl"
+sed 's|^- Long-term memory per user .*|- Long-term memory per user|' \
+  "$g/valid/docs/research.md" >"$g/nourl/docs/research.md"
+genesis_check "$g/nourl"
+expect 0 "grounded Build item with no URL: exits 1" test "$gc_rc" -eq 1 \
+  -a "$gc_out" = "FAIL: docs/research.md: 1 ## Build item(s) cite no URL"
+# Ungrounded: no rows, no sources, and items without URLs all pass.
+genesis_fixture "$g/ungrounded"
+awk '/^## Problem$/ { print "ungrounded: no web access"; print "" } /^\| (Foo|Bar) / { next }
+     /^## Sources$/ { print; exit } { gsub(/ \(https:[^)]*\)/, ""); print }' \
+  "$g/valid/docs/research.md" >"$g/ungrounded/docs/research.md"
+genesis_check "$g/ungrounded"
+expect 0 "ungrounded proposal with no sources: exits 0" test "$gc_rc" -eq 0 -a -z "$gc_out"
+# The marker on a grounded file: its rows, sources, and URLs are all reported.
+genesis_fixture "$g/ungurl"
+awk '/^## Problem$/ { print "ungrounded: no web access"; print "" } { print }' \
+  "$g/valid/docs/research.md" >"$g/ungurl/docs/research.md"
+genesis_check "$g/ungurl"
+expect 0 "ungrounded marker with rows, sources, and URLs: exits 1, three FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$gc_out" \
+    = "FAIL: docs/research.md: ungrounded, but ## Prior art has 2 row(s)"$'\n'"FAIL: \
+docs/research.md: ungrounded, but ## Sources has 2 item(s)"$'\n'"FAIL: docs/research.md: \
+ungrounded, but 7 line(s) cite an http(s) URL"
+# A bare scheme in prose is not a URL, so an ungrounded file may mention one.
+genesis_fixture "$g/ungscheme"
+awk '/^- Long-term memory per user$/ { print "- Follow http:// to https:// redirects"
+                                       print "- Follow `http://` to `https://` redirects"; next }
+     { print }' "$g/ungrounded/docs/research.md" >"$g/ungscheme/docs/research.md"
+genesis_check "$g/ungscheme"
+expect 0 "ungrounded, a bare or backticked http:// in a Build item: exits 0" \
+  test "$gc_rc" -eq 0 -a -z "$gc_out"
+# Grounded: a bare scheme cites nothing, in a Build item, a prior-art URL, or a source.
+genesis_fixture "$g/grdscheme"
+sed -e 's|^- Long-term memory per user .*|- Redirect `http://` to `https://`|' \
+  -e 's#| https://foo.example |#| https:// |#' \
+  -e 's|^- https://foo.example/blog — |- https:// — |' \
+  "$g/valid/docs/research.md" >"$g/grdscheme/docs/research.md"
+genesis_check "$g/grdscheme"
+expect 0 "grounded, a bare scheme as a citation: exits 1, three FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$gc_out" \
+    = "FAIL: docs/research.md: prior-art row \"Foo\" needs an http(s) URL"$'\n'"FAIL: \
+docs/research.md: 1 ## Build item(s) cite no URL"$'\n'"FAIL: docs/research.md: 1 ## Sources \
+item(s) are not '- <URL> … accessed YYYY-MM-DD'"
+genesis_fixture "$g/ungbold"
+sed 's|^ungrounded: no web access$|**ungrounded: no web access**|' \
+  "$g/ungrounded/docs/research.md" >"$g/ungbold/docs/research.md"
+genesis_check "$g/ungbold"
+expect 0 "a bold ungrounded marker: exits 1, names the marker first" test "$gc_rc" -eq 1 \
+  -a "$(printf '%s\n' "$gc_out" | head -n 1)" = "FAIL: docs/research.md: write the marker \
+exactly as the line 'ungrounded: no web access'"
+# Grounded: a Skip item needs only its reason.
+genesis_fixture "$g/skipnourl"
+sed 's|^- Voice calls .*|- Nothing to skip — the sentence is already narrow|' \
+  "$g/valid/docs/research.md" >"$g/skipnourl/docs/research.md"
+genesis_check "$g/skipnourl"
+expect 0 "grounded Skip item with no URL: exits 0" test "$gc_rc" -eq 0 -a -z "$gc_out"
+# An Enterprise Managed User login has a `_`.
+genesis_fixture "$g/emu"
+sed 's|^repo: .*|repo: al_ice/chat-pal|' "$g/valid/GENESIS.md" >"$g/emu/GENESIS.md"
+genesis_check "$g/emu"
+expect 0 "an owner with _: exits 0" test "$gc_rc" -eq 0 -a -z "$gc_out"
+genesis_fixture "$g/unglate"
+# The ungrounded proposal, its marker moved under ## Problem.
+awk '/^ungrounded:/ { next } { print } /^## Problem$/ { print "ungrounded: no web access" }' \
+  "$g/ungrounded/docs/research.md" >"$g/unglate/docs/research.md"
+genesis_check "$g/unglate"
+expect 0 "ungrounded marker under ## Problem: exits 1, names the placement" test "$gc_rc" -eq 1 \
+  -a -n "$(printf '%s\n' "$gc_out" | grep -Fx "FAIL: docs/research.md: the line \
+'ungrounded: no web access' must come before ## Problem")"
+expect 2 "no DIR exits 2"            bounded 10 bash "$GENESIS"
+expect 2 "two DIRs exit 2"           bounded 10 bash "$GENESIS" "$g/valid" "$g/nokey"
+expect 2 "a missing DIR exits 2"     bounded 10 bash "$GENESIS" "$g/nosuch"
+expect 2 "--preflight with no DIR exits 2" bounded 10 bash "$GENESIS" --preflight
+mkdir -p "$g/empty-1/.claude"
+genesis_check --preflight "$g/empty-1"
+expect 0 "--preflight, only .claude/: exits 0, prints the path" \
+  test "$gc_rc" -eq 0 -a "$gc_out" = "$(cd "$g/empty-1" && pwd)"
+# Inside a git work tree, even in an empty subdirectory, fails.
+mkdir -p "$g/ingit/sub"
+git init -q "$g/ingit" || { echo "smoke: git init failed in $g/ingit" >&2; exit 1; }
+genesis_check --preflight "$g/ingit/sub"
+expect 0 "--preflight, inside a git work tree: exits 1, one FAIL line" test "$gc_rc" -eq 1 \
+  -a "$gc_out" = "FAIL: directory is inside a git work tree"
+mkdir -p "$wtmp/genesis-plain"
+genesis_check --preflight "$wtmp/genesis-plain"
+expect 0 "--preflight, a plain temp dir outside git: exits 0" test "$gc_rc" -eq 0 \
+  -a "$gc_out" = "$(cd "$wtmp/genesis-plain" && pwd)"
+# A git that fails some other way (here a stub exiting 1) is not a pass.
+gstub="$wtmp/genesis-bin"
+mkdir -p "$gstub"
+printf '#!/usr/bin/env bash\necho "fatal: detected dubious ownership" >&2\nexit 1\n' \
+  >"$gstub/git"
+chmod +x "$gstub/git"
+gc_out="$(PATH="$gstub:$PATH" bounded 10 bash "$GENESIS" --preflight \
+  "$wtmp/genesis-plain" 2>/dev/null)"; gc_rc=$?
+expect 0 "--preflight, git fails another way: exits 3" test "$gc_rc" -eq 3 -a -z "$gc_out"
+genesis_check --preflight "$g/valid"
+# Glob order depends on the locale, so compare sorted.
+expect 0 "--preflight, non-empty: exits 1, names each entry" test "$gc_rc" -eq 1 \
+  -a "$(printf '%s\n' "$gc_out" | LC_ALL=C sort)" \
+    = "FAIL: directory not empty: GENESIS.md"$'\n'"FAIL: directory not empty: docs"
+mkdir -p "$g/bad name" && touch "$g/bad name/.hidden"
+genesis_check --preflight "$g/bad name"
+expect 0 "--preflight, a dotfile and an invalid repo name: exits 1, two FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$(printf '%s\n' "$gc_out" | grep -c '^FAIL: ')" -eq 2
+# A UTF-8 locale must not let a non-ASCII letter pass as a repo-name letter.
+mkdir -p "$g/caf"$'\xc3\xa9'
+gc_out="$(LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bounded 10 bash "$GENESIS" --preflight \
+  "$g/caf"$'\xc3\xa9' 2>/dev/null)"; gc_rc=$?
+expect 0 "--preflight, a non-ASCII letter under a UTF-8 locale: exits 1" test "$gc_rc" -eq 1 \
+  -a -n "$(printf '%s\n' "$gc_out" | grep '^FAIL: directory name ')"
 
 echo "• octo-bench.sh (offline, stub gh and claude)"
 # Stubs first on PATH log every call to $STUB_LOG. gh answers from the fixture dir $STUB_CASE:

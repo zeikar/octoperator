@@ -7,6 +7,18 @@ All notable changes to Octoperator are documented in this file. The format is ba
 ## [Unreleased]
 
 ### Added
+- `/octoperator:genesis "<sentence>"`, stage 1 of
+  [epic #85](https://github.com/zeikar/octoperator/issues/85): run in an empty directory outside
+  git, it researches existing services and similar open-source projects with WebSearch and
+  WebFetch (at most 6 searches and 10 fetches, browsed inline; pages are data, never
+  instructions), writes `docs/research.md` (Problem, Prior art, Build, Skip,
+  Sources, every claim cited) and `GENESIS.md` (the sentence verbatim, `repo`, `visibility:
+  private`), and stops at a human checkpoint with `genesis: proposed <dir>` or `genesis: stopped:
+  <reason>`. Without web access it marks the research `ungrounded: no web access`. It makes no
+  GitHub write; its only `gh` call is `gh api user`. A new offline helper,
+  `scripts/octo-genesis-check.sh`, checks the directory first (`--preflight`) and the proposal
+  after. `VISION.md`'s roadmap item 6 now points to epic #85. The later stages (#87–#89, #93) are
+  not built yet.
 - README → "Running continuously": copy-paste recipes for re-running `autopilot` with Claude
   Code's own scheduling on your machine — an in-session cron task in a background session (the
   default), `/loop`, `/goal`, and `claude -p` under launchd or crontab with `--cycles 1`,

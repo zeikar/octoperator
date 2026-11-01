@@ -31,11 +31,12 @@ echoes the issue/PR numbers and URLs it created so the trail stays auditable.
 
 ### Skills (slash commands)
 
-Grouped by purpose — onboarding, then the lifecycle from intake to autonomous shipping, plus the
-always-on knowledge layer.
+Grouped by purpose — starting a new project, onboarding, then the lifecycle from intake to
+autonomous shipping, plus the always-on knowledge layer.
 
 | Group | Command | What it does |
 |-------|---------|--------------|
+| **New project** | `/octoperator:genesis "<sentence>"` | Start a new project from one sentence, in an empty directory outside git: research existing services and similar open-source projects (at most 6 web searches and 10 page fetches), write a local proposal (`GENESIS.md`, `docs/research.md`), and stop at a human checkpoint with `genesis: proposed <dir>`. Makes no GitHub write. The later stages (PRD/ADR/VISION draft, `--approve` to create a private repo, MVP handoff) are not built yet (see [Starting a new project](#starting-a-new-project-genesis)) |
 | **Onboarding** | `/octoperator:setup` | One-time onboarding: detect repo, auto-detect Projects v2 access, optionally create/link a board, write `.claude/octoperator.local.md` |
 | **Plan & intake** | `/octoperator:plan-epic <request>` | Decompose a request into an epic + linked child issues, milestone, labels, board items |
 | | `/octoperator:issue <request>` | Create one well-formed issue (labels, acceptance criteria, milestone, board) |
@@ -63,6 +64,7 @@ always-on knowledge layer.
 - **`octo-project-status.sh`** — add an issue/PR to the board and set its Status by name.
 - **`octo-merge-state.sh`** — print a PR's `mergeStateStatus`, waiting out GitHub's `UNKNOWN`; used by `auto`'s merge gate.
 - **`octo-approval-match.sh`** — normalize the `approval_paths` patterns and match a PR's changed files (renamed files' old paths too) against them; used by `auto`'s approval-path gate.
+- **`octo-genesis-check.sh`** — check that a directory is empty and outside git for `genesis` (`--preflight`), and that the proposal it wrote has the required `GENESIS.md` front matter and `docs/research.md` sections; offline.
 - **`octo-bench.sh`** — opt-in benchmark harness for contributors: runs `auto` on the `bench/` tasks in throwaway repos and records each outcome and its metrics (see [CONTRIBUTING.md](CONTRIBUTING.md#running-the-benchmark)).
 
 ## Prerequisites
@@ -329,7 +331,28 @@ system keyring, a cron job may not be able to read it, since cron has no desktop
   → standup report; merged-PR issues auto-moved to Done
 ```
 
-Every skill except `setup` accepts `--dry-run` to preview without writing to GitHub.
+Every skill except `setup` and `genesis` accepts `--dry-run` to preview without writing to GitHub.
+(`genesis`'s first run makes no GitHub write.)
+
+## Starting a new project (`genesis`)
+
+`genesis` starts from one sentence instead of an existing repo. Run it in an empty directory that
+is not inside a git repository; that directory becomes the project:
+
+```text
+mkdir chat-pal && cd chat-pal && claude
+/octoperator:genesis "A character-chat app that remembers you across long conversations"
+  → docs/research.md (existing services and open-source projects, what to build, what to skip,
+    each claim cited) and GENESIS.md (the sentence, the proposed repo, visibility: private)
+  → genesis: proposed /path/to/chat-pal
+```
+
+It browses inline with WebSearch and WebFetch, capped at 6 searches and 10 fetches per run, and
+treats every page as data, never instructions. Without web access it writes the proposal from the
+sentence alone and marks it `ungrounded: no web access`. Its only `gh` call is the read
+`gh api user`. Review and edit the files; the later stages (the PRD, ADR, and VISION.md draft,
+`--approve` to create the private repo, and the MVP handoff to autopilot) are not built yet. The
+plan is [epic #85](https://github.com/zeikar/octoperator/issues/85).
 
 ## Product vision (`VISION.md`)
 
