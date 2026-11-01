@@ -7,6 +7,10 @@ All notable changes to Octoperator are documented in this file. The format is ba
 ## [Unreleased]
 
 ### Added
+- `VISION.md`, a product constitution: goal, target users, quality bar, immutable constraints, and
+  an evidence-revised roadmap. `research` reads a target repo's `VISION.md` when present — dropping
+  (and listing) proposals that break an immutable constraint or fall outside the goal, and ranking the
+  rest by roadmap fit — and `autopilot` never builds a change to its immutable constraints.
 - `scripts/octo-bench.sh`, an opt-in benchmark harness. `setup` creates a throwaway private repo
   from a task's seed and files its issue, `solve` runs `claude -p "/octoperator:auto <n>"` in a
   clone (time-bounded; optional, since the session's own agent can run `auto` instead), `check`
