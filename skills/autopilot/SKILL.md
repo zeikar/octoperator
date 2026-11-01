@@ -132,8 +132,9 @@ Parse and validate flags:
 
 If `--dry-run`, print the plan and STOP with no mutation: the mode, the resolved cycle cap, and the
 current actionable-issue set it would discover (per step 3a's filters, listing issues skipped for an
-open PR and the gated issues as `#<issue> gated: needs-approval`), noting that each batch would run
-through `auto` (implement → review → merge) with `research` refilling the backlog per the mode. Defer the merge-gate specifics to `auto`.
+open PR and the gated issues as `#<issue> gated: needs-approval`, with any reason step 3a gives),
+noting that each batch would run through `auto` (implement → review → merge) with `research`
+refilling the backlog per the mode. Defer the merge-gate specifics to `auto`.
 
 Also print the **convergence state**, using only the read commands in Run ledger: the ledger issue
 (or "none yet — the first real run creates it"), the valid entries since the last reset, any
@@ -226,8 +227,16 @@ gh api --paginate "repos/$REPO/issues/<issue>/events" \
 ```
 
 `approved` is valid only when its latest line is strictly later than the latest `needs-approval`
-line (if any) and its actor type is `User`. Otherwise — or if the call fails — the issue stays
-gated. Then filter by mode:
+line (if any) and its actor type is `User`. Otherwise the issue stays gated, and its report line
+says why, so the human knows what to redo:
+- actor type not `User` → `gated: needs-approval (approved invalid: added by a bot — a human must
+  remove and re-add it)`;
+- not strictly later — e.g. both labels added in one call share a timestamp → `gated:
+  needs-approval (approved invalid: not after needs-approval — remove and re-add it)`;
+- the call fails → `gated: needs-approval (approved unverified: label events unreadable)`.
+
+In semi mode append `; also needs ready` inside the parentheses when `ready` is missing. Then
+filter by mode:
 - **semi:** keep only issues labeled **`ready`**.
 - **full:** keep everything else — `ready`, `proposed`, and unlabeled issues alike (full mode applies no
   `ready` gate, exactly as the Modes section states).
@@ -240,7 +249,7 @@ Finally, of the issues still kept, skip any an open PR already holds — the PR 
 `branch_pattern`). These are `implement`'s own rejection rules, so picking one would only burn a
 `--max` slot. Record each as `#<issue> → PR #<pr>` for the report; only issues that passed the filters
 above are recorded, so semi mode never lists a non-`ready` issue it would not have picked anyway
-(gated issues are the one exception, marked `(also needs ready)` as above).
+(gated issues are the one exception, marked `also needs ready` as above).
 
 **(b) If actionable issues exist → ship a batch with `auto`.**
 
@@ -304,9 +313,10 @@ print the entry in the report so a human can add it by hand.
 Then print a per-cycle summary and an overall result:
 - per cycle: issues attempted, `merged` vs `held: <reason>`, issues skipped because an open PR already
   holds them (closes them or uses their branch; `#<issue> → PR #<pr>`), issues excluded by the
-  approval gate (`#<issue> gated: needs-approval`), any `research` proposals filed (URLs), and
-  research's **Unevidenced (not filed)** and **Evidence not found** lists — a defect found only by
-  reading code is never filed, so this is the only place it surfaces;
+  approval gate (`#<issue> gated: needs-approval`, with step 3a's reason when `approved` was
+  rejected), any `research` proposals filed (URLs), and research's **Unevidenced (not filed)** and
+  **Evidence not found** lists — a defect found only by reading code is never filed, so this is the
+  only place it surfaces;
 - overall: total merged, total held (with reasons), gated issues awaiting a human's `approved`
   label (and `ready`, where marked `also needs ready`), proposed issues awaiting triage, cycles consumed vs the cap, and the **next action** (semi: "relabel proposed → ready, then re-run autopilot"; full:
   "re-run to continue, or inspect held PRs"). When the next run will enter observe mode, add
@@ -341,4 +351,5 @@ Never silently drop an issue; every issue touched appears in the summary.
   `skipped: human-only (control-loop skill)` or `skipped: human-only (VISION.md immutable
   constraints)` — never drop it silently.
 - Autopilot never adds `approved`, never removes `needs-approval`, and never builds a gated issue
-  (see Modes → Approval gate). A human approves by adding `approved`; the next run can build it.
+  (see Modes → Approval gate). A human approves by adding `approved` after `needs-approval`; the
+  next run can build it. An `approved` that does not count is reported with the reason (step 3a).

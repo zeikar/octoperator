@@ -52,10 +52,10 @@ Two independent gates keep deploy, spend, and delete changes in front of a human
 - **Issue gate (`autopilot`).** Discovery skips every `needs-approval` issue without `approved` and
   reports it as `gated: needs-approval`. It relies on the label, so an issue nobody labeled is not
   caught.
-- **Path gate (`auto`).** Before merging, `auto` compares the PR's changed files with the
-  `approval_paths` setting (see `settings.md`) and holds any PR that touches a match with the reason
-  `needs human approval: <path>`. A human merges it by hand. This is the backstop for sensitive
-  files, whatever the issue's labels.
+- **Path gate (`auto`).** Before merging, `auto` matches the PR's changed files against the
+  `approval_paths` setting (see `settings.md`) with `scripts/octo-approval-match.sh`, and holds
+  any PR that touches a match with the reason `needs human approval: <path>`. A human merges it by
+  hand. This is the backstop for sensitive files, whatever the issue's labels.
 
 ### Run ledger
 

@@ -36,8 +36,10 @@ convergence_runs: 3
 
 # Approval paths: glob patterns (relative to the repo root) for files a human must
 # approve. `auto` holds any PR that touches a match instead of merging it.
-# `*` matches within one path segment, `**` across segments. Patterns are anchored at
-# the repo root: `*.tf` is root-only; use `**/*.tf` for any depth. Default: [] (no gate).
+# `*` matches within one path segment, `**` across segments. A pattern with a `/` is
+# anchored at the repo root (`/infra/` is the top-level `infra/` only); one with no `/`
+# matches at any depth (`*.tf` is every `.tf` file). A pattern also covers everything
+# under a directory it matches. Default: [] (no gate).
 approval_paths: []
 ---
 

@@ -10,10 +10,14 @@ All notable changes to Octoperator are documented in this file. The format is ba
 - Approval gates for deploy, spend, and delete work. `research --create` labels such proposals
   `needs-approval` (creating that label and `approved` if missing). `autopilot` never builds a
   `needs-approval` issue, in either mode, until a human adds `approved` — Octoperator never adds
-  it — and lists each skipped issue as `gated: needs-approval`, including under `--dry-run`. A new
-  `approval_paths` setting (glob patterns, default empty) makes `auto` hold any PR whose changed
-  files match, with the reason `needs human approval: <path>`; it is the backstop for risky work
-  nobody labeled. `VISION.md`'s approval constraint now names this enforcement.
+  it — and lists each skipped issue as `gated: needs-approval`, including under `--dry-run`, with
+  the reason when an `approved` label does not count (added by a bot, or not after
+  `needs-approval`). A new `approval_paths` setting (glob patterns, default empty) makes `auto`
+  hold any PR whose changed files match, with the reason `needs human approval: <path>`; it is the
+  backstop for risky work nobody labeled. A pattern with no `/` matches at any depth, and a pattern
+  also covers everything under a directory it matches. The new `scripts/octo-approval-match.sh`
+  helper does the normalization and matching. `VISION.md`'s approval constraint now names this
+  enforcement.
 - `autopilot` keeps a run ledger on GitHub: one open issue labeled `octoperator-ledger`, created on
   the first run, gets one comment per run with a fenced JSON entry (time, mode, cycles used, merged,
   held, proposals filed, metric, cost, kind). After `convergence_runs` entries in a row (a new
