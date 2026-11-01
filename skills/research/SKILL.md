@@ -90,8 +90,9 @@ excluded).
 - **Drop** any proposal that conflicts with an immutable constraint (e.g. a squash-merge option, a
   stored token, an unbounded loop) or that falls outside the goal and target users. Keep each dropped
   proposal with a one-line reason naming the clause it hits.
-- **Rank** what remains by roadmap fit as well as value-to-effort: work that advances the current
-  roadmap stage ranks above equally valuable work that doesn't. Roadmap fit never outranks a critical
+- **Rank** what remains by roadmap fit as well as value-to-effort: work that advances the earliest
+  roadmap item not yet done (skipping any marked on hold) ranks above equally valuable work that
+  doesn't. Roadmap fit never outranks a critical
   bug or blocker.
 
 Without the file, skip this — research behaves exactly as it does today.

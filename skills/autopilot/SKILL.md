@@ -171,3 +171,7 @@ Never silently drop an issue; every issue touched appears in the summary.
   for human review rather than building and merging a change to the loop that is currently running.
 - The same holds for the **Immutable constraints** section of the target repo's `VISION.md`: autopilot
   never builds an issue that changes it. Only a human edits that section.
+- For an issue of either kind (one asking to change a control-loop skill or the `VISION.md`
+  immutable constraints), skip it, mark it attempted, and list it in the report as
+  `skipped: human-only (control-loop skill)` or `skipped: human-only (VISION.md immutable
+  constraints)` — never drop it silently.
