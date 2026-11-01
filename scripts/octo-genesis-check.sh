@@ -197,7 +197,7 @@ check_research_md() {
       k = tolower(trim($3))
       if (k != "service" && k != "oss")
         print "FAIL: docs/research.md: prior-art row \"" trim($2) "\" needs kind service or OSS"
-      if (trim($4) !~ /^<?https?:\/\//)
+      if (trim($4) !~ /^<?https?:\/\/[A-Za-z0-9[]/)
         print "FAIL: docs/research.md: prior-art row \"" trim($2) "\" needs an http(s) URL" }
     END { if (!seen || bad)
             print "FAIL: docs/research.md: ## Prior art needs a table with columns " \
@@ -211,9 +211,9 @@ check_research_md() {
     FAILS=$((FAILS + $(printf '%s\n' "$body" | grep -c '')))
   fi
 
-  # An http(s) URL: the scheme and at least one host character, so "http:// to https://" in
-  # prose is not one.
-  url='https\{0,1\}://[^[:space:]<>()|]'
+  # An http(s) URL: the scheme and a host's first character (`[` opens an IPv6 host), so
+  # "http:// to https://" in prose, bare or backticked, is not one.
+  url='https\{0,1\}://[A-Za-z0-9[]'
   # Only Build items must cite a URL; a Skip item needs its reason, and may cite one.
   for s in Build Skip; do
     if [ "$s" = Build ]; then body="$(items "$build")"; else body="$(items "$skip")"; fi
@@ -236,7 +236,7 @@ check_research_md() {
     fail "docs/research.md: ## Sources has no items"
   else
     n="$(printf '%s\n' "$body" \
-      | grep -cvE '^- <?https?://[^ >]+>?.*accessed [0-9]{4}-[0-9]{2}-[0-9]{2}' || true)"
+      | grep -cvE '^- <?https?://[A-Za-z0-9[][^ >]*>?.*accessed [0-9]{4}-[0-9]{2}-[0-9]{2}' || true)"
     [ "$n" -eq 0 ] \
       || fail "docs/research.md: $n ## Sources item(s) are not '- <URL> … accessed YYYY-MM-DD'"
   fi

@@ -105,7 +105,7 @@ Read `${CLAUDE_PLUGIN_ROOT}/skills/genesis/references/proposal.md` for the forma
    decisions the human owns (repo, visibility, scope, grounding).
 5. **Check.**
    ```bash
-   bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-genesis-check.sh" <dir>
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-genesis-check.sh" "<dir>"
    ```
    Exit 0 → the checkpoint. Exit 1 → fix each `FAIL:` line by rewriting the file with Write, and
    re-run. In an ungrounded run, never add a URL, row, or source to clear a `FAIL:` line; fix the

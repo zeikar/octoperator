@@ -355,11 +355,24 @@ docs/research.md: ungrounded, but ## Sources has 2 item(s)"$'\n'"FAIL: docs/rese
 ungrounded, but 7 line(s) cite an http(s) URL"
 # A bare scheme in prose is not a URL, so an ungrounded file may mention one.
 genesis_fixture "$g/ungscheme"
-sed 's|^- Long-term memory per user$|- Follow http:// to https:// redirects|' \
-  "$g/ungrounded/docs/research.md" >"$g/ungscheme/docs/research.md"
+awk '/^- Long-term memory per user$/ { print "- Follow http:// to https:// redirects"
+                                       print "- Follow `http://` to `https://` redirects"; next }
+     { print }' "$g/ungrounded/docs/research.md" >"$g/ungscheme/docs/research.md"
 genesis_check "$g/ungscheme"
-expect 0 "ungrounded, a bare http:// in a Build item: exits 0" \
+expect 0 "ungrounded, a bare or backticked http:// in a Build item: exits 0" \
   test "$gc_rc" -eq 0 -a -z "$gc_out"
+# Grounded: a bare scheme cites nothing, in a Build item, a prior-art URL, or a source.
+genesis_fixture "$g/grdscheme"
+sed -e 's|^- Long-term memory per user .*|- Redirect `http://` to `https://`|' \
+  -e 's#| https://foo.example |#| https:// |#' \
+  -e 's|^- https://foo.example/blog — |- https:// — |' \
+  "$g/valid/docs/research.md" >"$g/grdscheme/docs/research.md"
+genesis_check "$g/grdscheme"
+expect 0 "grounded, a bare scheme as a citation: exits 1, three FAIL lines" \
+  test "$gc_rc" -eq 1 -a "$gc_out" \
+    = "FAIL: docs/research.md: prior-art row \"Foo\" needs an http(s) URL"$'\n'"FAIL: \
+docs/research.md: 1 ## Build item(s) cite no URL"$'\n'"FAIL: docs/research.md: 1 ## Sources \
+item(s) are not '- <URL> … accessed YYYY-MM-DD'"
 genesis_fixture "$g/ungbold"
 sed 's|^ungrounded: no web access$|**ungrounded: no web access**|' \
   "$g/ungrounded/docs/research.md" >"$g/ungbold/docs/research.md"
