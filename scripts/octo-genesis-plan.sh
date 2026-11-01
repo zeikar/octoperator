@@ -224,5 +224,5 @@ done
 for l in p0 p1 p2 p3; do step "gh label create $l --repo $REPO --color ededed --force"; done
 step "bash $(q "$HERE/octo-genesis-epic.sh") $D"
 step "plan the MVP epic with plan-epic (skills/plan-epic/SKILL.md): only if the lookup printed" \
-  "\`epic: none\`, then the lookup again"
+  "\`epic: none\`, with the lookup again once the epic exists, before any child"
 step "print the handoff (skills/genesis/SKILL.md → Handoff)"

@@ -317,17 +317,19 @@ plan-epic's procedure reads them as written and files everything in `<repo>`.
     - **The command rule** holds for plan-epic's steps: each `gh issue create` and
       `gh issue edit` is one plain call whose body is one literal `--body` argument, never
       `$(cat <<EOF …)`, and each sub-issue link is one `bash …/octo-subissue.sh` call. Read each
-      issue's number from the URL `gh issue create` prints.
+      issue's number from the URL `gh issue create` prints. For plan-epic's step 4, setup
+      already created the cookbook labels; create any other label the plan uses as one
+      `gh label create … --force` call each.
+    - **The lookup again, once the epic exists**: right after plan-epic's step 5, before any
+      child, run the epic lookup again. Go on only when it prints `epic: <N>` for the epic just
+      created. Anything else on exit 0 → stop with `epic misses the sentence`: a re-run would
+      file a second epic, so ask the human to quote the sentence in epic #N's body. Any other
+      exit → `epic lookup failed`.
 
     A failed plan-epic step → stop with `plan-epic failed`, with plan-epic's report of the step
     and what it had already created. Once the epic exists, the next `--approve` finds it and
     skips planning: add the missing children with `/octoperator:issue`, or close the epic and its
     children to plan again.
-
-    Then run the epic lookup again. Go on only when it prints `epic: <N>` for the epic just
-    created. Anything else on exit 0 → stop with `epic misses the sentence`: a re-run would file
-    a second epic, so ask the human to quote the sentence in epic #N's body. Any other exit →
-    `epic lookup failed`.
 11. **Handoff.** Print, in this order:
     - the repo's URL (`https://github.com/<repo>`) and visibility, the stage the run started
       from, and the settings file's path; when this run committed (stage `scaffold` or

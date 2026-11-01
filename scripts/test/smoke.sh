@@ -30,8 +30,9 @@
 #                            has included), the epic lookup, plan-epic, and handoff tail; it
 #                            writes nothing and never calls gh (stub `gh`)
 #   - octo-genesis-epic.sh : the open-epic lookup's match (a wrapped `> ` quote, the lowest of
-#                            two, a near miss, another case), a gh failure, and an invalid
-#                            proposal (no gh call), against a stub `gh` running its jq filter
+#                            two, a near miss, another case, glob characters taken literally), a
+#                            gh failure, and an invalid proposal (no gh call), against a stub
+#                            `gh` running its jq filter
 #   - octo-bench.sh        : the --live gate and --dry-run make no gh / claude call; preflight,
 #                            check's metrics, run's cost cap, and cleanup, against a stub `gh`
 #                            and `claude`
@@ -899,7 +900,7 @@ expect 0 "origin is the repo and HEAD is pushed: stage setup, nothing created ag
   test "$pl_rc" -eq 0 -a "$pl_steps" = "$preflight"$'\n'"$setup_tail"
 expect 0 "stage setup: plan-epic runs only when the lookup finds no epic" \
   test -n "$(pl_line 'plan the MVP epic with plan-epic .*: only if the lookup printed '\
-'`epic: none`, then the lookup again$')"
+'`epic: none`, with the lookup again once the epic exists, before any child$')"
 git -C "$p/commit" remote set-url origin https://github.com/someone/else.git
 genesis_plan "$p/commit"
 expect 0 "origin is another repo: exits 1, one FAIL: git: line" test "$pl_rc" -eq 1 \
@@ -998,6 +999,18 @@ if command -v jq >/dev/null 2>&1; then
 'long conversations."}]'
   expect 0 "nested > markers at a line start are ignored too: epic: 7" \
     test "$ep_rc/$ep_out" = "0/epic: 7"
+  # A sentence with glob characters matches only as written: epic 2 would match if `*`, `?` and
+  # `[x]` acted as wildcards.
+  genesis_fixture "$g/glob"
+  sed 's/^  A character-chat app: .*/  A chat app *for* you? It [x] remembers./' \
+    "$g/valid/GENESIS.md" >"$g/glob/GENESIS.md"
+  genesis_epic '[{"number":2,"body":"A chat app +for+ you! It x remembers."},
+    {"number":8,"body":"> A chat app *for* you? It [x] remembers."}]' "$g/glob"
+  expect 0 "a sentence with * ? [x]: matched literally, not as a glob: epic: 8" \
+    test "$ep_rc/$ep_out" = "0/epic: 8"
+  genesis_epic '[{"number":2,"body":"A chat app +for+ you! It x remembers."}]' "$g/glob"
+  expect 0 "a body that matches only if * ? [x] are wildcards: epic: none" \
+    test "$ep_rc/$ep_out" = "0/epic: none"
 else
   echo "  - skipped the jq filter cases: no jq on PATH"
 fi
