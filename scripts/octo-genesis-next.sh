@@ -297,14 +297,14 @@ if [ "$vision" -eq 1 ]; then
   fi
   # The section checks above key on a literal `## `, but CommonMark also reads `##<tab>x` or
   # ` ## x` as a heading: a Roadmap line like that would render as a new Immutable constraints.
-  g diff -U0 "$mb" HEAD -- VISION.md >"$tmp/vision.diff" || exit 3
+  g diff --no-color --no-ext-diff --no-textconv --text -U0 "$mb" HEAD -- VISION.md >"$tmp/vision.diff" || exit 3
   awk '/^@@/ { h = 1; next } h && /^\+/ { l = substr($0, 2); sub(/\r$/, "", l); print l }' \
     "$tmp/vision.diff" | grep -Eq '^ {0,3}#{1,2}([[:blank:]]|$)' \
     && fail "VISION.md: a milestone adds no level-1 or level-2 heading, only Roadmap items"
   section_of Roadmap "$tmp/vision.head" | grep -Eq "Milestone $N([^0-9]|$)" \
     || fail "VISION.md: ## Roadmap needs an item for Milestone $N"
   [ "$ungrounded" -eq 0 ] \
-    || { g diff "$mb" HEAD -- VISION.md | grep -E '^\+[^+]' | grep -Eq 'https?://' \
+    || { g diff --no-color --no-ext-diff --no-textconv --text "$mb" HEAD -- VISION.md | grep -E '^\+[^+]' | grep -Eq 'https?://' \
          && fail "VISION.md: an ungrounded milestone read no source, so it cites no URL"; }
 fi
 
