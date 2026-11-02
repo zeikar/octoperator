@@ -94,13 +94,14 @@ Build an evidence base before proposing — read, do not write:
     ```
     A valid entry counts only when `held` is above 0 (its summary line names the held issues and
     reasons) or it is part of a no-gain streak: one of `convergence_runs` (the setting in
-    `.claude/octoperator.local.md`, default `3`) consecutive entries since the last `reset` with
-    `merged` at 0.
+    `.claude/octoperator.local.md`, default `3`) consecutive entries, none of which gains, by the
+    gain rule and walk in that Run ledger section (a merge, or with an evals metric, more evals
+    passing; counted since the last `reset` or all-pass entry).
     Cite the PR or the entry's comment URL. Both are narrow evidence. A held PR is in-flight work,
     so it supports a root-cause or tooling proposal (why such PRs get held) — never a re-proposal of
     the held PR's own issue (step 3 dedupes that away). A ledger entry supports only a proposal
-    about why the issues it names were held, or, for a no-merge streak, about why runs stopped
-    merging (the loop or its tooling). Neither is ever evidence for an unrelated proposal: an entry
+    about why the issues it names were held, or, for a no-gain streak, about why runs stopped
+    gaining (the loop or its tooling). Neither is ever evidence for an unrelated proposal: an entry
     exists after every quiet run, so citing it elsewhere would let any lead pass as evidenced.
   - **user-feedback** — an issue or comment a person wrote, not one Octoperator generated. The author
     can't tell them apart (Octoperator posts as the same GitHub user), so exclude: issues labeled

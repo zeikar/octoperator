@@ -57,6 +57,8 @@
 #                            and `claude`
 #
 # The eval templates genesis copies (run.sh, guard.sh) have their own tests: scripts/test/evals.sh.
+# The helpers behind autopilot's run ledger (octo-evals-metric.sh, octo-ledger-state.sh) have
+# their own tests too: scripts/test/autopilot.sh.
 #
 # It deliberately never invokes a helper in a way that reaches the real gh / the network.
 # Exits 0 when every check passes, 1 when any check fails.
@@ -124,6 +126,10 @@ expect 2 "octo-evals-guard.sh --sha exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-evals-guard.sh" --repo o/n --pr 1 --sha
 expect 2 "octo-evals-guard.sh a short --sha exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-evals-guard.sh" --repo o/n --pr 1 --sha abc123
+expect 2 "octo-evals-metric.sh --repo exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-evals-metric.sh" --repo
+expect 2 "octo-ledger-state.sh --metric exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-ledger-state.sh" --repo o/n --runs 3 --metric
 expect 2 "octo-approval-match.sh --pr exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-approval-match.sh" --pattern a --repo o/n --pr
 expect 2 "octo-approval-match.sh with no --pattern exits 2" \
