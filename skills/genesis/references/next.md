@@ -237,7 +237,10 @@ in literally. Stop at the first failure with the reason given; nothing is create
    with a `FAIL:` line per problem: fix each in a file this run wrote (Edit), then `git add` and
    commit again, and re-check. Never clear a line by touching an existing eval or another
    VISION.md section. After two failed fixes, stop with `milestone invalid`, quoting the lines;
-   nothing is pushed. Any other exit → `milestone check failed`; a failed commit → `git commit
+   nothing is pushed. A `VISION.md` `FAIL:` line that names the merge base (its `## Roadmap`
+   body, or its lines that are exactly `'## Roadmap'`) is about the default branch's file, which
+   no fix on this branch can change: stop with `milestone invalid` at once, quoting it, with no
+   fix attempt. Any other exit → `milestone check failed`; a failed commit → `git commit
    failed`.
 
    **A stop after `add` succeeded** (`milestone invalid`, `milestone check failed`, `git commit

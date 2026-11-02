@@ -25,6 +25,9 @@
 #     (`vision.md`, `viſion.md`, a directory, also with no VISION.md) when it is new or changed;
 #   - --milestone: a Roadmap item passes; a change outside the Roadmap, a heading, a bare CR, and
 #     a Roadmap without the milestone fail;
+#   - --plain-roadmap on one file: a plain body passes (a code span, a link, a column-0 heading
+#     ending it); a `<placeholder>`, `Result<T>`, a line opening with `#`, an indented heading, a
+#     comment, two `## Roadmap` lines, and none exactly `## Roadmap` fail;
 #   - bad arguments exit 2; a commit missing here, or a directory outside git, exits 3.
 #
 # Nothing here calls gh or the network. Git config is isolated (GIT_CONFIG_GLOBAL=/dev/null).
@@ -481,6 +484,42 @@ same "a --base missing here exits 3" "3|" "$?|$out"
 mkdir -p "$tmp/nogit"
 out="$(bounded 10 bash "$GUARD" --base main --head HEAD "$tmp/nogit" 2>/dev/null)"
 same "a directory outside git exits 3" "3|" "$?|$out"
+echo "• octo-vision-guard.sh --plain-roadmap"
+mkdir -p "$tmp/plain"
+P="$tmp/plain/VISION.md"
+# plain_run : the guard on $P alone; sets out (lines joined by |) and rc.
+plain_run() {
+  out="$(bounded 10 bash "$GUARD" --plain-roadmap "$P" 2>/dev/null)"; rc=$?
+  out="$(printf '%s' "$out" | paste -sd '|' -)"
+}
+PLAINOK="0|ok: VISION.md: the ## Roadmap body is plain text"
+LATER="so auto's vision check would hold every later change to it"
+vision >"$P"; plain_run
+same "a plain Roadmap passes" "$PLAINOK" "$rc|$out"
+{ vision; printf '2. Sync, as `npm test` shows ([run](https://x.example/1)).\n'
+  printf '\n# Notes\n\n<b>x</b>\n'; } >"$P"
+plain_run
+same "a code span and a link pass, and the body ends at a column-0 heading" "$PLAINOK" \
+  "$rc|$out"
+for l in '2. <the next milestone>' '2. errors as `Result<T>`' '#74 next' '  ## Later' \
+    '<!-- draft -->'; do
+  { vision; printf '%s\n' "$l"; } >"$P"; plain_run
+  same "a Roadmap line '$l' fails" "1|FAIL: VISION.md: line 17 of the ## Roadmap body is not plain \
+text (${NOTEXT%%): a human merges it}; a template <placeholder> too), $LATER" "$rc|$out"
+done
+{ vision; printf '\n## Roadmap\n\n1. again\n'; } >"$P"; plain_run
+same "two '## Roadmap' lines fail" "1|FAIL: VISION.md: it has 2 lines that are exactly \
+'## Roadmap'; keep one, or auto's vision check holds every later change to it" "$rc|$out"
+vision | sed 's/^## Roadmap$/## Roadmap /' >"$P"; plain_run
+same "no line that is exactly '## Roadmap' fails" "1|FAIL: VISION.md: it has no line that is \
+exactly '## Roadmap', $LATER" "$rc|$out"
+for args in "--plain-roadmap" "--plain-roadmap $tmp/plain" "--plain-roadmap $P --base main" \
+    "--plain-roadmap $P $c"; do
+  # shellcheck disable=SC2086 # each case is several words on purpose
+  out="$(bounded 10 bash "$GUARD" $args 2>/dev/null)"; rc=$?
+  label="${args//$tmp\//}"
+  same "bad arguments ($label) exit 2" "2|" "$rc|$out"
+done
 
 echo
 echo "vision: $pass passed, $fail failed"

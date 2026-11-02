@@ -5,6 +5,7 @@
 #
 # Usage:
 #   octo-vision-guard.sh --base REV --head REV [--milestone N] DIR
+#   octo-vision-guard.sh --plain-roadmap FILE
 #
 # DIR is a git repository that holds both commits, such as auto's clone. The guard reads git's
 # objects (ls-tree, cat-file), never the work tree, so it needs no checkout, and no diff, color,
@@ -46,41 +47,125 @@
 # With --milestone N (genesis --next's check, octo-genesis-next.sh --check), also: the Roadmap
 # body names `Milestone N`.
 #
+# --plain-roadmap FILE checks one VISION.md file, outside git, as the merge base above: FAIL when
+# it has no line that is exactly `## Roadmap`, more than one, or a Roadmap body line that isn't
+# plain text by the rule above. The genesis proposal check (octo-genesis-check.sh) runs it, so a
+# Roadmap the guard would hold at every later merge base fails at the human checkpoint instead.
+#
 # Prints one `FAIL: VISION.md: <problem>` line per problem, or one `ok: VISION.md: …` line.
 # Offline: git and perl only, never gh; writes nothing.
 #
-# Exit codes: 0 ok, 1 `FAIL:` lines (hold the PR), 2 bad arguments or DIR is not a directory,
-# 3 git failed (not a repository, a commit missing here, no merge base; git's output on stderr).
+# Exit codes: 0 ok, 1 `FAIL:` lines (hold the PR), 2 bad arguments, DIR is not a directory, or
+# FILE is not a regular file, 3 git failed (not a repository, a commit missing here, no merge
+# base; git's output on stderr), or FILE could not be read.
 set -uo pipefail
 export LC_ALL=C
 
-BASE="" HEADREV="" MILESTONE="" DIR=""
+BASE="" HEADREV="" MILESTONE="" DIR="" PLAIN=""
 need_value() { [ $# -ge 2 ] || { echo "Missing value for $1" >&2; exit 2; }; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --base) need_value "$@"; BASE="$2"; shift 2 ;;
     --head) need_value "$@"; HEADREV="$2"; shift 2 ;;
     --milestone) need_value "$@"; MILESTONE="$2"; shift 2 ;;
+    --plain-roadmap) need_value "$@"; PLAIN="$2"; shift 2 ;;
     -h|--help) sed -n '2,/^[^#]/s/^# \{0,1\}//p' "$0"; exit 0 ;;
     -*) echo "Unknown argument: $1" >&2; exit 2 ;;
     *) [ -z "$DIR" ] || { echo "Only one DIR may be given" >&2; exit 2; }
        DIR="$1"; shift ;;
   esac
 done
-[ -n "$BASE" ] && [ -n "$HEADREV" ] && [ -n "$DIR" ] || {
-  echo "Usage: octo-vision-guard.sh --base REV --head REV [--milestone N] DIR" >&2; exit 2; }
+USAGE="Usage: octo-vision-guard.sh --base REV --head REV [--milestone N] DIR | --plain-roadmap FILE"
+if [ -n "$PLAIN" ]; then
+  [ -z "$BASE$HEADREV$MILESTONE$DIR" ] || { echo "$USAGE" >&2; exit 2; }
+  [ -f "$PLAIN" ] || { echo "Not a regular file: $PLAIN" >&2; exit 2; }
+else
+  [ -n "$BASE" ] && [ -n "$HEADREV" ] && [ -n "$DIR" ] || { echo "$USAGE" >&2; exit 2; }
+fi
 # A rev that starts with `-` would reach git as an option.
 case "$BASE" in -*) echo "--base must be a revision" >&2; exit 2 ;; esac
 case "$HEADREV" in -*) echo "--head must be a revision" >&2; exit 2 ;; esac
 [ -z "$MILESTONE" ] || [[ "$MILESTONE" =~ ^[1-9][0-9]*$ ]] \
   || { echo "--milestone must be a positive number" >&2; exit 2; }
-[ -d "$DIR" ] || { echo "Not a directory: $DIR" >&2; exit 2; }
+[ -n "$PLAIN" ] || [ -d "$DIR" ] || { echo "Not a directory: $DIR" >&2; exit 2; }
 
 FAILS=0
 fail() { echo "FAIL: VISION.md: $*"; FAILS=$((FAILS + 1)); }
 g() { git -C "$DIR" --literal-pathspecs "$@"; }
 tmp="$(mktemp -d)" && [ -n "$tmp" ] || { echo "mktemp failed" >&2; exit 3; }
 trap 'rm -rf "$tmp"' EXIT
+
+# Split at the merge base's Roadmap body (tmp/base; tmp/head is --head's file): base.pre (up to
+# and including its `## Roadmap` line) and base.suf (from its next column-0 level-1 or level-2
+# heading line, or empty); head.pre and head.suf are --head's bytes in the same places, head.mid
+# what lies between, its first line's number in head.line (base.mid and base.line likewise).
+# Prints `noroadmap`, `outside` (--head can't hold both around whole lines), or `ok`. The
+# Immutable constraints section of each side goes to imm.base and imm.head, for the reason.
+split_roadmap() {
+  perl -e 'use strict; my $d = shift;
+    sub slurp { local $/; open my $f, "<:raw", $_[0] or die "$_[0]: $!"; my $s = <$f>; $s // "" }
+    sub put { open my $f, ">:raw", "$d/$_[0]" or die "$d/$_[0]: $!"; print $f $_[1]; close $f }
+    my $heading = qr/^##?(?:[ \t]|\r?\n|\r?\z)/m;
+    my ($bs, $h) = (slurp("$d/base"), slurp("$d/head"));
+    for (["base", $bs], ["head", $h]) {
+      my ($side, $s) = @$_; my $sec = "";
+      if ($s =~ /^## Immutable constraints\r?(?:\n|\z)/mg) {
+        my $from = pos $s; $sec = substr $s, $from;
+        $sec = substr $sec, 0, $-[0] if $sec =~ $heading;
+      }
+      put("imm.$side", $sec);
+    }
+    unless ($bs =~ /^## Roadmap(?:\r?\n|\z)/mg) { print "noroadmap"; exit 0 }
+    my $pre = substr $bs, 0, pos $bs; my $rest = substr $bs, pos $bs;
+    my $suf = $rest =~ $heading ? substr($rest, $-[0]) : "";
+    put("base.pre", $pre); put("base.suf", $suf);
+    put("base.mid", substr $rest, 0, length($rest) - length $suf);
+    put("base.line", 1 + ($pre =~ tr/\n//));
+    if (length $h < length($pre) + length $suf) { print "outside"; exit 0 }
+    put("head.pre", substr $h, 0, length $pre);
+    put("head.suf", length $suf ? substr($h, -length $suf) : "");
+    my $mid = substr $h, length $pre, length($h) - length($pre) - length $suf;
+    my $line = 1 + ($pre =~ tr/\n//);
+    # A Roadmap line at the end of the file with no LF: the body starts after the one --head adds.
+    if ($pre !~ /\n\z/ && length $mid) {
+      if ($mid =~ s/\A\r?\n//) { $line++ } else { print "outside"; exit 0 }
+    }
+    # The body ends at a line end, so the heading after it stays a line of its own.
+    if (length $suf && length $mid && $mid !~ /\n\z/) { print "outside"; exit 0 }
+    put("head.mid", $mid); put("head.line", $line); print "ok"' "$tmp"
+}
+# plain <first line's number> <file> : the number of the file's first line that isn't plain text
+# (the header lists what isn't), or nothing.
+plain() {
+  perl -ne 'BEGIN { $n = shift; $n-- }
+    $n++; chomp; s/\r\z//;
+    next unless /^[ \t]*(?:<|#|>|```|~~~)/ || /^[ \t]*(?:=+|-+)[ \t]*$/
+      || /<!--|-->|\?>|\]\]>|<[A-Za-z\/!?]|\]:/;
+    print "$n"; exit 0' "$1" "$2"
+}
+# What plain text excludes, for the reasons.
+NOTPLAIN="a heading or any line opening with #, even an issue ref; HTML, or < before a letter,
+even in a code span; a quote, a fence, an = or - underline, or a link definition"
+NOTPLAIN="${NOTPLAIN//$'\n'/ }"
+# roadmaps : how many lines of tmp/base are exactly `## Roadmap`.
+roadmaps() { perl -0777 -ne 'print scalar(() = /^## Roadmap(?:\r?\n|\z)/mg)' "$tmp/base"; }
+
+# One file, no git: the merge base's checks, so a Roadmap the guard would hold at every later
+# merge base fails before it is committed.
+if [ -n "$PLAIN" ]; then
+  cp -- "$PLAIN" "$tmp/base" && cp -- "$PLAIN" "$tmp/head" || exit 3
+  split="$(split_roadmap)" || exit 3
+  [ "$split" = ok ] || { fail "it has no line that is exactly '## Roadmap', so auto's vision" \
+    "check would hold every later change to it"; exit 1; }
+  n="$(roadmaps)" || exit 3
+  [ "$n" -le 1 ] || { fail "it has $n lines that are exactly '## Roadmap'; keep one, or auto's" \
+    "vision check holds every later change to it"; exit 1; }
+  notext="$(plain "$(<"$tmp/base.line")" "$tmp/base.mid")" || exit 3
+  [ -z "$notext" ] || { fail "line $notext of the ## Roadmap body is not plain text ($NOTPLAIN;" \
+    "a template <placeholder> too), so auto's vision check would hold every later change to it"
+    exit 1; }
+  echo "ok: VISION.md: the ## Roadmap body is plain text"; exit 0
+fi
 
 head="$(g rev-parse --verify -q "$HEADREV^{commit}")" \
   || { echo "--head $HEADREV is not a commit in $DIR" >&2; exit 3; }
@@ -145,42 +230,7 @@ bad="$(perl -0777 -ne 'my $what;
 [ -z "$bad" ] || { fail "$bad: a reader may not see the text checked here, so a human merges it"
   exit 1; }
 
-# Split at the merge base's Roadmap body: base.pre (up to and including its `## Roadmap` line)
-# and base.suf (from its next level-1 or level-2 heading line, or empty); head.pre and head.suf
-# are --head's bytes in the same places, head.mid what lies between, its first line's number in
-# head.line. Prints `noroadmap`, `outside` (--head can't hold both around whole lines), or `ok`.
-# The Immutable constraints section of each side goes to imm.base and imm.head, for the reason.
-split="$(perl -e 'use strict; my $d = shift;
-    sub slurp { local $/; open my $f, "<:raw", $_[0] or die "$_[0]: $!"; my $s = <$f>; $s // "" }
-    sub put { open my $f, ">:raw", "$d/$_[0]" or die "$d/$_[0]: $!"; print $f $_[1]; close $f }
-    my $heading = qr/^##?(?:[ \t]|\r?\n|\r?\z)/m;
-    my ($bs, $h) = (slurp("$d/base"), slurp("$d/head"));
-    for (["base", $bs], ["head", $h]) {
-      my ($side, $s) = @$_; my $sec = "";
-      if ($s =~ /^## Immutable constraints\r?(?:\n|\z)/mg) {
-        my $from = pos $s; $sec = substr $s, $from;
-        $sec = substr $sec, 0, $-[0] if $sec =~ $heading;
-      }
-      put("imm.$side", $sec);
-    }
-    unless ($bs =~ /^## Roadmap(?:\r?\n|\z)/mg) { print "noroadmap"; exit 0 }
-    my $pre = substr $bs, 0, pos $bs; my $rest = substr $bs, pos $bs;
-    my $suf = $rest =~ $heading ? substr($rest, $-[0]) : "";
-    put("base.pre", $pre); put("base.suf", $suf);
-    put("base.mid", substr $rest, 0, length($rest) - length $suf);
-    put("base.line", 1 + ($pre =~ tr/\n//));
-    if (length $h < length($pre) + length $suf) { print "outside"; exit 0 }
-    put("head.pre", substr $h, 0, length $pre);
-    put("head.suf", length $suf ? substr($h, -length $suf) : "");
-    my $mid = substr $h, length $pre, length($h) - length($pre) - length $suf;
-    my $line = 1 + ($pre =~ tr/\n//);
-    # A Roadmap line at the end of the file with no LF: the body starts after the one --head adds.
-    if ($pre !~ /\n\z/ && length $mid) {
-      if ($mid =~ s/\A\r?\n//) { $line++ } else { print "outside"; exit 0 }
-    }
-    # The body ends at a line end, so the heading after it stays a line of its own.
-    if (length $suf && length $mid && $mid !~ /\n\z/) { print "outside"; exit 0 }
-    put("head.mid", $mid); put("head.line", $line); print "ok"' "$tmp")" || exit 3
+split="$(split_roadmap)" || exit 3
 
 OUTSIDE="only the ## Roadmap body may change without a human"
 case "$split" in
@@ -192,21 +242,11 @@ case "$split" in
   *) echo "could not split VISION.md" >&2; exit 3 ;;
 esac
 
-# plain <first line's number> <file> : the number of the file's first line that isn't plain text
-# (the header lists what isn't), or nothing.
-plain() {
-  perl -ne 'BEGIN { $n = shift; $n-- }
-    $n++; chomp; s/\r\z//;
-    next unless /^[ \t]*(?:<|#|>|```|~~~)/ || /^[ \t]*(?:=+|-+)[ \t]*$/
-      || /<!--|-->|\?>|\]\]>|<[A-Za-z\/!?]|\]:/;
-    print "$n"; exit 0' "$1" "$2"
-}
 # Where the merge base's Roadmap body ends is only as sure as that body is plain: a comment or
 # fence the base opened there, or a heading-like line, lets a plain edit recast what follows.
 if [ "$be" != "$he" ]; then
-  roadmaps="$(perl -0777 -ne 'print scalar(() = /^## Roadmap(?:\r?\n|\z)/mg)' "$tmp/base")" \
-    || exit 3
-  [ "$roadmaps" -le 1 ] || { fail "the merge base has $roadmaps lines that are exactly" \
+  n="$(roadmaps)" || exit 3
+  [ "$n" -le 1 ] || { fail "the merge base has $n lines that are exactly" \
     "'## Roadmap', so which is the Roadmap can't be trusted: a human merges it"; exit 1; }
   notext="$(plain "$(<"$tmp/base.line")" "$tmp/base.mid")" || exit 3
   [ -z "$notext" ] || { fail "line $notext of the merge base's ## Roadmap body is not plain" \
@@ -219,9 +259,8 @@ if [ "$split" = outside ]; then
 fi
 
 notext="$(plain "$(<"$tmp/head.line")" "$tmp/head.mid")" || exit 3
-[ -z "$notext" ] || fail "line $notext of the ## Roadmap body is not plain text (a heading or" \
-  "any line opening with #, even an issue ref; HTML, or < before a letter, even in a code span;" \
-  "a quote, a fence, an = or - underline, or a link definition): a human merges it"
+[ -z "$notext" ] || fail "line $notext of the ## Roadmap body is not plain text ($NOTPLAIN):" \
+  "a human merges it"
 if [ -n "$MILESTONE" ]; then
   grep -Eq "Milestone $MILESTONE([^0-9]|$)" "$tmp/head.mid" \
     || fail "## Roadmap needs an item for Milestone $MILESTONE"

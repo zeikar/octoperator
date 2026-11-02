@@ -28,7 +28,9 @@
 #                            marker), the PRD, ADR, and VISION.md checks (missing sections, an
 #                            altered or explained baseline constraint, an undetectable,
 #                            mismatched, contradicted, or wrapped test command, quoted and
-#                            commented front-matter values, a URL in an ungrounded PRD), the
+#                            commented front-matter values, a URL in an ungrounded PRD, a
+#                            Roadmap with a template <placeholder> or `Result<T>`, and one
+#                            filled), the
 #                            PRD's ## Scenarios (missing, empty, no script judge, a bad id,
 #                            requirement, or judge, a duplicate, no text), bad arguments,
 #                            --preflight's git, empty-dir, and repo-name checks, --values, and
@@ -648,6 +650,36 @@ sed 's/^1\. \*\*MVP\*\*/1. **Launch**/' "$g/valid/VISION.md" >"$g/noroadmvp/VISI
 genesis_check "$g/noroadmvp"
 expect 0 "VISION.md roadmap item 1 not the MVP: exits 1" test "$gc_rc" -eq 1 \
   -a "$gc_out" = "FAIL: VISION.md: ## Roadmap item 1. must be the MVP"
+# The Roadmap body must pass the vision guard's plain-text rule: once committed, the guard holds
+# every later change at that merge base.
+notplain="FAIL: VISION.md: line 27 of the ## Roadmap body is not plain text ("
+genesis_fixture "$g/roadtmpl"
+# The template's literal item 1., its placeholder unfilled.
+tline='1. **MVP** — <the PRD'\''s MVP scope, in one line> (`docs/prd.md`)'
+awk -v t="$tline" '/^1\. \*\*MVP\*\*/ { print t; next } { print }' "$g/valid/VISION.md" \
+  >"$g/roadtmpl/VISION.md"
+genesis_check "$g/roadtmpl"
+expect 0 "VISION.md Roadmap with the template's <placeholder>: exits 1, names the line" \
+  test "$gc_rc" -eq 1 -a "$(printf '%s\n' "$gc_out" | grep -c '')" -eq 1 \
+  -a "${gc_out#"$notplain"}" != "$gc_out" -a -z "${gc_out##*a template <placeholder> too*}"
+genesis_fixture "$g/roadfill"
+# The template's Roadmap, filled: its evidence line, item 1., and an item 2. with a code span
+# and a link.
+awk '/^Revisable/ { print "Revisable — but every change to this section cites evidence (an eval"
+    print "or CI failure, a failure log, or user feedback)."; next }
+  { print } /^1\. \*\*MVP\*\*/ {
+    print "2. Group chats, from the PRD'\''s Out of scope: `npm test` covers them"
+    print "   ([prior art](https://foo.example/blog))." }' "$g/valid/VISION.md" \
+  >"$g/roadfill/VISION.md"
+genesis_check "$g/roadfill"
+expect 0 "VISION.md with the template's Roadmap filled: exits 0" test "$gc_rc" -eq 0 -a -z "$gc_out"
+genesis_fixture "$g/roadcode"
+sed 's/^1\. \*\*MVP\*\* — .*/& — errors as `Result<T>`/' "$g/valid/VISION.md" \
+  >"$g/roadcode/VISION.md"
+genesis_check "$g/roadcode"
+expect 0 "VISION.md Roadmap with \`Result<T>\` in a code span: exits 1, names the line" \
+  test "$gc_rc" -eq 1 -a "${gc_out#"$notplain"}" != "$gc_out" \
+  -a "$(printf '%s\n' "$gc_out" | grep -c '')" -eq 1
 genesis_fixture "$g/notest"
 grep -v '^test_command:' "$g/valid/GENESIS.md" >"$g/notest/GENESIS.md"
 genesis_check "$g/notest"

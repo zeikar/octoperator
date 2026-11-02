@@ -35,7 +35,10 @@
 #     after "found by" (continuation lines included).
 #   - VISION.md has ## Goal, ## Target users, ## Quality bar, ## Immutable constraints, and
 #     ## Roadmap. Immutable constraints holds the four baseline constraints as `- ` lines, each
-#     exact up to its end or a space after it, and Roadmap item `1.` is the MVP.
+#     exact up to its end or a space after it, and Roadmap item `1.` is the MVP. Its Roadmap
+#     body passes the vision guard's plain-text rule (octo-vision-guard.sh --plain-roadmap), so
+#     no `<placeholder>` is left, no line opens with `#`, and no `<` comes before a letter, even
+#     in a code span: the guard holds every later change to a VISION.md whose merge base fails it.
 #   - When docs/research.md is ungrounded, the PRD, the ADR, and VISION.md cite no http(s) URL.
 #
 # --preflight checks DIR before genesis writes anything: it is outside any git work tree, it
@@ -81,6 +84,7 @@ set -euo pipefail
 # git prints its messages untranslated, so --preflight can match them.
 export LC_ALL=C
 
+HERE="$(cd "$(dirname "$0")" && pwd)"
 # The files genesis copies into the new repo for its scenario evals.
 TEMPLATES="$(cd "$(dirname "$0")/../skills/genesis/templates" && pwd)"
 
@@ -502,7 +506,7 @@ check_adr() {
 }
 
 check_vision() {
-  local f="$ABS/VISION.md" s body b
+  local f="$ABS/VISION.md" s body b out rc
   [ -f "$f" ] || { fail "VISION.md is missing"; return 0; }
   for s in Goal 'Target users' 'Quality bar' 'Immutable constraints' Roadmap; do
     if ! body="$(section "$f" "$s")"; then
@@ -522,7 +526,14 @@ check_vision() {
         done ;;
       Roadmap)
         printf '%s\n' "$body" | grep -Eq '^1\. .*MVP' \
-          || fail "VISION.md: ## Roadmap item 1. must be the MVP" ;;
+          || fail "VISION.md: ## Roadmap item 1. must be the MVP"
+        # The guard's own rule: once committed, a body it holds can't be fixed unattended.
+        rc=0; out="$(bash "$HERE/octo-vision-guard.sh" --plain-roadmap "$f")" || rc=$?
+        case "$rc" in
+          0) ;;
+          1) report "$out" ;;
+          *) fail "VISION.md: octo-vision-guard.sh --plain-roadmap exited $rc" ;;
+        esac ;;
     esac
   done
   no_urls "$f" VISION.md

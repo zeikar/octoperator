@@ -150,7 +150,8 @@ once, in this order, in the formats of `references/proposal.md`:
    `issue-implementer` detects; the Decision names it and the file that finds it.
 3. **`<dir>/VISION.md`.** The five constitution sections. Immutable constraints opens with the four
    baseline lines copied verbatim from proposal.md, then any product-specific constraints the PRD
-   implies. Roadmap item 1 is the MVP.
+   implies. Roadmap item 1 is the MVP, and every Roadmap line is plain text, every template
+   `<placeholder>` filled (proposal.md).
 4. **`<dir>/GENESIS.md`.** `sentence` verbatim, `repo: <login>/<basename of dir>`, `visibility:
    private`, `stack` and `test_command` as in the ADR, and a body listing the proposal files and
    the decisions the human owns.
