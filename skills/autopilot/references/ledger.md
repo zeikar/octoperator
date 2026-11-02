@@ -42,13 +42,19 @@ needs one of those roles. A local run under your own login has it; a bot account
 
 A metric is **numeric** when it is an object whose `passed` and `total` are whole numbers with
 0 ≤ `passed` ≤ `total` and `total` ≥ 1, and **all-pass** when `passed` equals
-`total`; any other value counts as no metric. Compare each valid entry with the previous valid
-entry (the next older one, of any kind). The entry **gains**:
+`total`; any other value counts as no metric. Compare each valid entry with its **high-water
+mark**: the highest numeric `passed` among the older valid entries of the walk (below) and the
+entry that ends it, of any kind. A `reset` entry's or all-pass entry's own `passed` is where the
+mark restarts; with no numeric value among them there is no mark. The entry **gains**:
 - never, when it is an `observe` entry;
-- when both have a numeric metric, only if `passed` rose. The count, not the ratio: a new
-  must-fail eval lowers the ratio without being a regression, and a merge that moves no eval is
-  no progress;
-- otherwise (no evals, or a metric on one side only), when `merged` is at least 1.
+- when it has a numeric metric and there is a mark, only if `passed` exceeds the mark. Matching
+  it is no gain, so P oscillating (one PR breaks an eval, the next fixes it) never counts as
+  progress. The count, not the ratio: a new must-fail eval lowers the ratio without being a
+  regression, and a merge that moves no eval is no progress;
+- otherwise (no evals, a `null` metric, or no mark yet), when `merged` is at least 1.
+
+`octo-ledger-state.sh` prints the mark this run's entry would have to exceed as `high-water:`
+(`none` without one, and with `--resume`).
 
 Walk the valid entries newest first, stopping at the first `reset` or all-pass entry. Autopilot is
 **converged** when the walk finds at least N entries before it stops and none of the newest N

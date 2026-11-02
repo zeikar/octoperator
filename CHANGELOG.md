@@ -142,13 +142,16 @@ All notable changes to Octoperator are documented in this file. The format is ba
   setup code on a run where `run.sh` never printed can't claim every eval passes. Otherwise (no
   evals workflow, no completed run, no annotation, more than one, a malformed one, a conclusion
   that disagrees, or a gh error) `metric` stays `null`, the reason is reported, and the run goes
-  on. It also prints `rate: P/T` (or `none`) for the ledger helper's `--metric`. Convergence now uses the metric: when an entry and the previous
-  valid one both have it, the entry gains only if P rose, so merges that move no eval no longer
-  count; otherwise `merged ≥ 1` still decides. `observe` entries never gain, and the count restarts
-  at a `reset` or all-pass entry. The new `scripts/octo-ledger-state.sh` applies these rules and
-  prints whether every eval passes and the build/observe decision. An entry where every eval
-  passes (P == T) restarts the count; what such a run does is next-milestone planning (#93,
-  below). `--dry-run` prints the metric's source run and P/T, `no evals workflow`, or why the
+  on. It also prints `rate: P/T` (or `none`) for the ledger helper's `--metric`. Convergence now
+  uses the metric: an entry with it gains only if P exceeds the high-water mark, the highest P
+  since the count last restarted, the entry that restarted it included (#104). Matching the mark
+  is no gain, so merges that move no eval no longer count, and neither does P oscillating as one
+  PR breaks an eval and the next fixes it. Without a metric, or with no earlier P, `merged ≥ 1`
+  still decides. `observe` entries never gain, and the count and the mark restart at a `reset` or
+  all-pass entry. The new `scripts/octo-ledger-state.sh` applies these rules and prints the mark
+  (`high-water:`), whether every eval passes, and the build/observe decision. An entry where
+  every eval passes (P == T) restarts the count; what such a run does is next-milestone planning
+  (#93, below). `--dry-run` prints the metric's source run and P/T, `no evals workflow`, or why the
   rate is unreadable. A repo without the workflow, Octoperator's own included, behaves as before.
   New offline tests in `scripts/test/autopilot.sh`, which CI runs.
 - `/octoperator:genesis --next [--dry-run]` plans the next milestone once every eval passes, the
