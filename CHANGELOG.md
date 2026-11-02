@@ -98,8 +98,7 @@ All notable changes to Octoperator are documented in this file. The format is ba
   scenarios and, with `--skeleton`, the eval files; the plan's `git add` names them. The handoff
   asks the human to confirm the first `Evals` run on `main` is red. New
   reference `skills/genesis/references/evals.md`, and new offline tests `scripts/test/evals.sh`,
-  which CI runs; shellcheck now covers `skills/genesis/templates/**/*.sh`. The eval metric and the
-  next milestone (#92, #93) are not built yet.
+  which CI runs; shellcheck now covers `skills/genesis/templates/**/*.sh`.
 - `genesis` model-judged evals (#91): for a PRD with a `judge: model` scenario, `--approve` also
   writes `.github/workflows/evals-model.yml`, whose only trigger is `workflow_dispatch`, in two
   jobs with `timeout-minutes: 30` each, so the model key never shares a machine with the repo's
@@ -131,6 +130,25 @@ All notable changes to Octoperator are documented in this file. The format is ba
   self-hosted runner that reuses a machine, a dispatch from an unread branch), the
   deterministic/model split, and the caveat that a failing dispatch run stays the latest `eval`
   evidence until the next dispatch.
+- `autopilot` records the eval pass rate as the ledger `metric` (#92). In a repo whose default
+  branch has `.github/workflows/evals.yml` (detected by that path, not the workflow's name), the
+  new `scripts/octo-evals-metric.sh` reads the latest completed default-branch run of that
+  workflow, its jobs, and their check runs' annotations. It trusts exactly one annotation titled
+  `evals-metric` whose message is exactly `passed=<P> total=<T>`, with P ≤ T and T ≥ 1, and the
+  entry records `{"passed": P, "total": T}`. Otherwise (no evals workflow, no completed run, no
+  annotation, more than one, a malformed one, or a gh error) `metric` stays `null`, the reason is
+  reported, and the run goes on. Convergence now uses the metric: when an entry and the previous
+  valid one both have it, the entry gains only if P rose, so merges that move no eval no longer
+  count; otherwise `merged ≥ 1` still decides. `observe` entries never gain, and the count restarts
+  at a `reset` or all-pass entry. The new `scripts/octo-ledger-state.sh` applies these rules and
+  prints the decision. When every eval passes (P == T), the run prints `autopilot: all evals pass →
+  planning next milestone` and hands off to next-milestone planning. That planning (#93) isn't
+  built yet, so for now the run observes and ends with `autopilot: stopped: next-milestone planning
+  not built yet (#93)`. If a next-milestone PR (an open `milestone-*` branch from this repo) is
+  already open, it observes and ends with `stopped: next-milestone PR #<pr> open`. Neither ends a
+  schedule. `--dry-run` prints the metric's source run and P/T, `no evals workflow`, or why the
+  rate is unreadable. A repo without the workflow, Octoperator's own included, behaves as before.
+  New offline tests in `scripts/test/autopilot.sh`, which CI runs.
 - README → "Running continuously": copy-paste recipes for re-running `autopilot` with Claude
   Code's own scheduling on your machine — an in-session cron task in a background session (the
   default), `/loop`, `/goal`, and `claude -p` under launchd or crontab with `--cycles 1`,

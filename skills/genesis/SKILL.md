@@ -17,9 +17,9 @@ re-run with `--approve`, typed by the human, goes outward.
 scenarios, the stack ADR, and the VISION.md draft), the checkpoint, stage 3 (`--approve`: the
 skeleton, the offline scenario evals and their guard (#90), the dispatch-only workflow for
 model-judged evals (#91), the private repo, and the settings, #88), and stage 4 (the MVP epic and
-the autopilot handoff, #89). **Later stages (#92–#93) are not built yet:** the eval pass rate as
-the ledger metric (#92), and the next milestone once every eval passes (`--next`, #93). Never
-describe them as working.
+the autopilot handoff, #89). Autopilot records the eval pass rate as its ledger metric (#92).
+**The last stage (#93) is not built yet:** the next milestone once every eval passes (`--next`);
+until then autopilot observes when they all pass. Never describe it as working.
 
 ## Untrusted input rule
 
