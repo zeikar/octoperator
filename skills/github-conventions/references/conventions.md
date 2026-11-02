@@ -74,15 +74,24 @@ Independent gates keep deploy, spend, and delete changes, and weakened evals, in
 `autopilot` keeps its state between runs in GitHub, on one open issue labeled `octoperator-ledger`
 (titled "Octoperator run ledger"; autopilot creates it on its first run). Each run appends one
 comment holding a fenced JSON entry: time, mode, cycles used, merged, held, proposals filed, metric,
-cost, and kind (`run`, `observe`, or `reset`). Autopilot reads the newest entries to detect
-convergence: after `convergence_runs` entries in a row without a merge (see `settings.md`), it
-switches to observe mode — `research` proposes, nothing is built — until a human runs
-`autopilot --resume`. Only comments from an `OWNER`, `MEMBER`, or `COLLABORATOR` count as entries,
-so autopilot must run under a `gh` login with one of those roles — a local run under your own login
+cost, and kind (`run`, `observe`, or `reset`). In a repo with genesis's
+`.github/workflows/evals.yml`, `metric` is the evals pass rate, `{"passed": P, "total": T}`, read
+from the `evals-metric` notice of that workflow's latest completed default-branch push or
+dispatch run in this repo, when the run's conclusion agrees (`scripts/octo-evals-metric.sh`);
+anywhere else, or when that annotation can't be read or disagrees, it is `null`. Autopilot reads the entries to detect convergence (`scripts/octo-ledger-state.sh`): after
+`convergence_runs` entries in a row without a gain (see `settings.md`), it switches to observe
+mode — `research` proposes, nothing is built — until a human runs `autopilot --resume`. An entry
+gains when P rose since the previous entry, if both have a metric, and otherwise when it merged
+something; an `observe` entry never gains. The count restarts at a `reset` entry or an entry where
+every eval passed. When every eval passes (P == T), autopilot prints the progress line
+`autopilot: all evals pass → planning next milestone` and observes while a next-milestone PR (an
+open `milestone-*` branch from this repo) waits to merge. Otherwise, until next-milestone planning
+(#93) replaces this step, it goes on by the ledger's own build/observe decision. Only comments from an `OWNER`, `MEMBER`, or `COLLABORATOR`
+count as entries, so autopilot must run under a `gh` login with one of those roles — a local run under your own login
 has it, while a bot account without one (e.g. `github-actions[bot]`) gets its entries skipped, and
 autopilot never converges.
 `research` may cite an entry as `failure-log` evidence, but only for a proposal about the held
-issues it names or about why runs stopped merging. The ledger is not work, so it carries no type or
+issues it names or about why runs stopped gaining. The ledger is not work, so it carries no type or
 priority label. Keep it open; the entry format is defined in
 `skills/autopilot/SKILL.md` → Run ledger and convergence.
 

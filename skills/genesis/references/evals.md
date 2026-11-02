@@ -157,8 +157,20 @@ evals: <passed>/<total> passed (<skipped> skipped)
 ```
 
 `<total>` counts the script evals. The notice is printed only under GitHub Actions
-(`GITHUB_ACTIONS=true`), and never with `--evidence` or `--judge`. Skipped evals never change the
-exit code: it
+(`GITHUB_ACTIONS=true`), and never with `--evidence` or `--judge`. Autopilot reads it from the
+latest completed `evals.yml` push or dispatch run of this repo on the default branch as its ledger
+`metric`, and a run gains only when `<passed>` rose (`skills/autopilot/SKILL.md` → Run ledger). It
+trusts only a run with exactly one such annotation, so one that setup code forged beside the real
+one leaves the metric `null`. The run's conclusion must also agree, `success` for passed == total
+and `failure` otherwise, so a forged notice on a run where `run.sh` never printed its own (setup
+failed, or dirtied `evals/` so `run.sh` aborted) can't claim every eval passes, and a forged
+lower count on a passing run is rejected. Three gaps remain: a forged passed < total in a run that
+`run.sh` aborted (or that setup failed) is still trusted, since that run fails either way; an
+annotation carries no step id, so autopilot can't tell which step printed it; and setup runs in
+the same job as `run.sh`, so it can inject code into the `run.sh` step (a fake `bash` through
+`GITHUB_PATH`, or `BASH_ENV` through `GITHUB_ENV`) that prints one forged passed == total and
+exits 0. So the metric, like the run's own result, is only as honest as the code setup runs.
+Skipped evals never change the exit code: it
 exits 1 when any script eval fails, so the workflow run fails, and 0 otherwise. Under
 GitHub Actions a failed check's output is printed between `::stop-commands::<token>` and
 `::<token>::`, with a random token, so a check (or product code it runs) can't print a

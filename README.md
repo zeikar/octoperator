@@ -43,7 +43,7 @@ autonomous shipping, plus the always-on knowledge layer.
 | | `/octoperator:issue <request>` | Create one well-formed issue (labels, acceptance criteria, milestone, board) |
 | **Autonomous lifecycle** | `/octoperator:implement <issue#...> [--max N] [--draft] [--dry-run]` | Implement one or more issues end-to-end: branch, code, test, and PR. Single issue runs in-tree; multiple issues run in parallel worktrees (up to `--max`, default 3) |
 | | `/octoperator:auto <issue#...> [--max N] [--dry-run]` | End-to-end lifecycle: implement → review → merge for one or more issues. Blocker/major/minor review findings trigger up to 6 fix → re-review rounds; merges (regular merge) only on a non-blocking review of the current head + CI green + mergeable. A PR that touches an `approval_paths` glob is held for a human (`needs human approval: <path>`) |
-| | `/octoperator:autopilot [--mode semi\|full] [--cycles N] [--max M] [--resume] [--dry-run]` | Bounded loop: discover work → `auto` (implement→review→merge) → when empty, `research` refills. `semi` builds only `ready` issues then proposes; `full` runs unattended to the cycle cap. In both modes a `needs-approval` issue is skipped (reported as gated) until a human adds `approved`. Each run appends an entry to an `octoperator-ledger` issue; after `convergence_runs` runs (default 3) without a merge it switches to observe mode (propose only, no builds) until `--resume`. Every run ends with an `autopilot: …` status line, and a run started by an in-session cron task or `/loop` ends that schedule once there is nothing left to do (see [Running continuously](#running-continuously)) |
+| | `/octoperator:autopilot [--mode semi\|full] [--cycles N] [--max M] [--resume] [--dry-run]` | Bounded loop: discover work → `auto` (implement→review→merge) → when empty, `research` refills. `semi` builds only `ready` issues then proposes; `full` runs unattended to the cycle cap. In both modes a `needs-approval` issue is skipped (reported as gated) until a human adds `approved`. Each run appends an entry to an `octoperator-ledger` issue; after `convergence_runs` runs (default 3) without a gain it switches to observe mode (propose only, no builds) until `--resume`. A gain is a merge, or, in a repo with genesis's evals, a rise in the number of passing evals, which the entry records as its `metric`; when every eval passes, it reports `all evals pass → planning next milestone` and observes while a next-milestone PR is open (the planning itself, #93, is not built yet: until then the run otherwise goes on as usual). Every run ends with an `autopilot: …` status line, and a run started by an in-session cron task or `/loop` ends that schedule once there is nothing left to do (see [Running continuously](#running-continuously)) |
 | **Review & status** | `/octoperator:review <pr#>` | Run a structured review and post the verdict + findings to the PR |
 | | `/octoperator:sync` | Standup-style status report; auto-reconciles board drift |
 | **What's next** | `/octoperator:research [--create] [--count N] [--focus <feature\|refactor\|debt\|tests\|docs\|dx\|all>] [--dry-run]` | Analyze the repo and produce a ranked list of proposals balanced across features, refactoring, tech debt, tests, docs, and DX; with `--create`, file the top ones as `proposed` issues — only proposals backed by verifiable evidence (a benchmark result, failing CI, a held PR or autopilot ledger entry, or user feedback). Proposals that would deploy, spend money, or delete data also get `needs-approval` |
@@ -65,6 +65,8 @@ autonomous shipping, plus the always-on knowledge layer.
 - **`octo-project-status.sh`** — add an issue/PR to the board and set its Status by name.
 - **`octo-merge-state.sh`** — print a PR's `mergeStateStatus`, waiting out GitHub's `UNKNOWN`; used by `auto`'s merge gate.
 - **`octo-evals-guard.sh`** — in a repo with genesis's evals guard, check that both guard jobs of the PR's own guard run passed on its reviewed commit, against the base branch's current tip when the PR changes `evals/` (`pass`, `none`, or why to hold: a `[skip ci]` head has no checks); read-only; used by `auto`'s merge gate.
+- **`octo-evals-metric.sh`** — in a repo with genesis's `evals.yml`, read the pass rate from the `evals-metric` notice of its latest completed default-branch push or dispatch run in this repo, as the ledger's `metric` (`{"passed":P,"total":T}` and `rate: P/T`, or `null` with the reason: no evals workflow, no completed run, a missing, malformed, or ambiguous annotation, or one the run's conclusion disagrees with); read-only; used by `autopilot`.
+- **`octo-ledger-state.sh`** — apply autopilot's convergence rules to its run ledger and this run's metric, and print the walk, the no-gain streak, whether every eval passes, and the decision (`build` or `observe`); read-only (one `gh issue view`); used by `autopilot`.
 - **`octo-approval-match.sh`** — normalize the `approval_paths` patterns and match a PR's changed files (renamed files' old paths too) against them; used by `auto`'s approval-path gate.
 - **`octo-genesis-check.sh`** — check that a directory is empty and outside git for `genesis` (`--preflight`), and that the proposal it wrote is complete: `GENESIS.md` front matter (including a `test_command` that `issue-implementer` detects), the `docs/research.md`, `docs/prd.md`, and `docs/adr/0001-stack.md` sections, and a `VISION.md` with the baseline immutable constraints verbatim; with `--skeleton`, that the skeleton `--approve` wrote is detectable and wired up (the test command's detection file and no earlier one, CI on `push` and `pull_request`, the `.gitignore` entries, the sentence in the README), and that its scenario evals are in place (the eval runner and guard copied verbatim, the evals workflows on their triggers, one `evals/<id>/` per PRD scenario); offline.
 - **`octo-genesis-plan.sh`** — work out where `genesis --approve` resumes from the folder's git state (`scaffold`, `commit`, `create`, `push`, or `setup`) and print its ordered commands, the `gh repo create` description made safe, through the MVP epic and the handoff; read-only and offline.
@@ -172,7 +174,11 @@ observe`, a run started by an in-session cron task or a `/loop` ends that schedu
 the one recurring task whose prompt exactly matches the run's, says which one, and deletes nothing
 when it can't tell. A run you type by hand with that same prompt, in that session, ends it too. In
 semi mode that happens once a run finds no `ready` issue to build, so start the schedule again
-after you triage.
+after you triage. When every eval of a genesis repo passes, the run also prints `autopilot: all
+evals pass → planning next milestone` (a progress line, not the status line). While a
+next-milestone PR is open, it observes, ends with `autopilot: stopped: next-milestone PR #<pr>
+open`, and leaves the schedule running. Until #93 builds the planning itself, a run with no such
+PR goes on as usual, so it can end the schedule the same way.
 
 **Permissions.** Nobody is there to answer a prompt, so first add the allow rules from
 [Unattended runs](#unattended-runs). That applies to every mode below.
@@ -429,8 +435,9 @@ repo secrets, so keep the key in a GitHub Environment restricted to `main` where
 Octoperator's own CI never calls a model. A failing dispatch
 run stays the latest `eval` evidence until the next dispatch, so dispatch again after a fix
 merges. Format and rules:
-[`skills/genesis/references/evals.md`](skills/genesis/references/evals.md). The eval metric and
-the next milestone (#92, #93) are not built yet. The plan is
+[`skills/genesis/references/evals.md`](skills/genesis/references/evals.md). Autopilot records
+the number passing as its ledger `metric` and counts a run as progress only when that number
+rose; planning the next milestone once every eval passes (#93) is not built yet. The plan is
 [epic #85](https://github.com/zeikar/octoperator/issues/85).
 
 ## Product vision (`VISION.md`)

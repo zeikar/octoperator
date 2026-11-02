@@ -33,6 +33,9 @@ jobs:
         # throwaway git repos; run.sh --evidence/--judge and judge.sh against a fake curl, so
         # no model is ever called.
         run: bash scripts/test/evals.sh
+      - name: Autopilot ledger helper tests
+        # Offline: the evals metric read and the convergence decision against a stub gh.
+        run: bash scripts/test/autopilot.sh
       - name: Benchmark task validation
         # Offline: each task's hidden check must fail on its seed and pass with its reference patch.
         run: bash bench/validate.sh
