@@ -40,7 +40,8 @@ All notable changes to Octoperator are documented in this file. The format is ba
   reason, and the name), runs
   `gh repo create --private` (`--public` only for `visibility: public`) with the sentence as the
   description, and runs setup with fixed answers: no board, the labels, and settings with
-  `approval_paths: [".github/workflows/"]`. A failing
+  `approval_paths: [".github/workflows/", ".claude/", "/GENESIS.md", "CLAUDE.md",
+  "CLAUDE.local.md", "/.mcp.json"]` (all but the first since #102). A failing
   test stops before any git or `gh` write; a missing `workflow` scope stops with the
   `gh auth refresh -s workflow` hint. A re-run resumes from the folder's git state and creates
   nothing twice. `--dry-run` prints the ordered commands and writes nothing. New offline helper
@@ -281,6 +282,38 @@ All notable changes to Octoperator are documented in this file. The format is ba
   fix loop use it.
 
 ### Fixed
+- `auto`'s merge gate now holds, for a human, any PR that changes `VISION.md` outside its
+  Roadmap body, or adds a Roadmap line that isn't plain text, not only `milestone-*` PRs (#102).
+  New offline helper `scripts/octo-vision-guard.sh` compares the root `VISION.md` at the merge
+  base with the reviewed commit, from git's objects, so no checkout is needed and the user's diff
+  settings don't apply. It parses no Markdown; it allows instead of blocking. Everything before
+  the Roadmap body (its `## Roadmap` line included) and from the next column-0 `#` or `##`
+  heading on must keep the merge base's bytes, so Goal, Target users, Quality bar, and Immutable
+  constraints change only through a human merge. Each Roadmap body line must not open with `<`,
+  `#`, `>`, or a fence, be only `=` or `-` marks, or hold HTML (`<!--`, `-->`, `?>`, `]]>`, a
+  tag) or a link definition, and the merge base must have one `## Roadmap` line and a body that
+  passes the same rule, so where the body ends can be trusted. The file may hold no NUL, bare
+  CR, other control byte, or Unicode line break, and must not be deleted, new, made a symlink,
+  given another mode, or joined by a new or changed root name such as `vision.md`, which would
+  replace it on a case-insensitive checkout. A repo with no `VISION.md`, one the PR leaves
+  alone, and a plain Roadmap item pass. The hold reason is
+  `VISION.md changed outside its Roadmap: a human merges this`. It applies to Octoperator's own
+  repo too. `octo-genesis-next.sh --check` now runs its VISION.md rules through the same helper
+  (`--milestone <n>`, which also needs a Roadmap item for the milestone). The genesis proposal
+  check runs the guard's rule on the proposed `VISION.md` too (`--plain-roadmap <file>`), so a
+  template `<placeholder>` or a `Result<T>` code span left in the Roadmap, or a NUL, bare CR,
+  control byte, or Unicode line break anywhere in the file, fails at the human checkpoint
+  rather than holding every later change; `genesis --next` stops with `milestone invalid` at
+  once on a merge-base Roadmap it can't fix. Genesis's
+  `approval_paths` adds `.claude/`, whose committed settings decide whether `genesis --next` may
+  use the web under autopilot, `/GENESIS.md`, whose `test_command` drives the skeleton check, and
+  `CLAUDE.md` and `CLAUDE.local.md` (at any depth) and `/.mcp.json`, which shape what an
+  unattended Claude Code run does. `--approve` adds the missing ones to an existing settings file
+  too. `docs/adr/` stays out: an issue may rightly add an ADR. A milestone PR touches none of
+  these paths, so it still merges unattended. `octo-approval-match.sh` now ignores case
+  (Unicode case folding, as macOS's file system does), so `.Claude/settings.local.json` matches
+  `.claude/`.
+  New offline tests in `scripts/test/vision.sh`, which CI runs.
 - Lifecycle steps no longer stop unattended runs on permission prompts: every command `implement`,
   `auto`, `review`, `autopilot`, and `research` tell the agent to run is one plain `gh` / `git` /
   `bash` call. Shell `if [ … ]` board guards, `VAR=… gh` prefixes, `|| true`, and `echo`/`sleep`

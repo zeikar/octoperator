@@ -40,6 +40,9 @@ jobs:
       - name: Genesis next-milestone helper tests
         # Offline: milestone numbering and the milestone diff check against throwaway git repos.
         run: bash scripts/test/genesis-next.sh
+      - name: VISION.md guard tests
+        # Offline: auto's VISION.md check (only the Roadmap body changes) against throwaway repos.
+        run: bash scripts/test/vision.sh
       - name: Benchmark task validation
         # Offline: each task's hidden check must fail on its seed and pass with its reference patch.
         run: bash bench/validate.sh

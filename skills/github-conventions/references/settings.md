@@ -55,9 +55,12 @@ convergence_runs: 3
 # (`infra/` or `/infra/` means the top-level `infra/` only); one with no `/`
 # matches at any depth (`*.tf` matches every `.tf` file, `infra` every `infra`
 # directory). A pattern also covers everything under a directory it matches.
+# Matching ignores case (`.Claude/x` matches `.claude/`), as macOS's file
+# system does.
 # `?`, `[...]`, `{...}`, `!`, and a backslash are unsupported; a pattern using
 # them holds every PR. `scripts/octo-approval-match.sh` applies these rules.
-# Default: empty (no gate).
+# Default: empty (no gate). Genesis writes `.github/workflows/`, `.claude/`,
+# `/GENESIS.md`, `CLAUDE.md`, `CLAUDE.local.md`, and `/.mcp.json`.
 approval_paths:
   - ".github/workflows/"
   - "/infra/"
@@ -67,6 +70,16 @@ approval_paths:
 # Notes
 Free-form project notes for humans; Octoperator ignores this section.
 ```
+
+`.claude/` is worth listing in any repo that commits Claude Code settings there, Octoperator's
+own included (its `.claude/settings.json` registers the plugin marketplace): those settings
+decide what an unattended run may do, such as whether `genesis --next` may use the web under
+autopilot (`scripts/octo-web-allowed.sh`), so a PR that changes them should wait for a human.
+`CLAUDE.md` and `CLAUDE.local.md` (no `/`, so every one at any depth) and `/.mcp.json` are worth
+listing for the same reason: Claude Code follows the first two and loads the MCP servers the
+third names.
+This file itself is git-ignored, so no PR changes it. VISION.md needs no pattern: `auto` holds
+any change outside its Roadmap body on every PR (`conventions.md` → Approval gates).
 
 ## Reading settings
 

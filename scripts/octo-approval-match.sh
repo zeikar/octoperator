@@ -9,8 +9,11 @@
 # repo root), a trailing `/` becomes `/**`, and any other pattern with no `/` matches at any
 # depth (`*.tf` → `**/*.tf`). Every pattern also covers all paths under a directory it matches
 # (`infra` → also `infra/**`). `*` matches within one path segment and `**` matches zero or more
-# whole segments; matching is case-sensitive and anchored at the repo root. `?` `[` `]` `{` `}` `!`, a backslash, an empty pattern or segment, a `.` or
-# `..` segment, and a `**` that is not a whole segment are malformed.
+# whole segments; matching is anchored at the repo root and ignores case (Unicode case folding
+# and normalization, as macOS's default file system compares names), so `.Claude/x` matches
+# `.claude/`: a checkout there writes both to one directory. Ignoring case only holds more.
+# `?` `[` `]` `{` `}` `!`, a backslash, an empty pattern or segment, a `.` or `..` segment, and
+# a `**` that is not a whole segment are malformed.
 #
 # --normalize prints each normalized pattern, one per line, and makes no gh call. Otherwise lists
 # every path the PR touches (a renamed file's old path too) and prints each match as
@@ -144,16 +147,26 @@ if LC_ALL=C grep -qvE $'^[^\t]*\t[^\t]*$' "$tmp/files"; then
   exit 3
 fi
 tr '\t' '\n' <"$tmp/files" | { LC_ALL=C grep -v '^$' || true; } >"$tmp/paths"
+# fold : each line case-folded and normalized (NFD, fc, NFD), so equal names under macOS's
+# comparison come out the same bytes; a line that is not valid UTF-8 folds as Latin-1.
+fold() {
+  LC_ALL=C perl -MUnicode::Normalize -Mfeature=fc -ne \
+    'chomp; utf8::decode($_); $_ = NFD(fc(NFD($_))); utf8::encode($_); print "$_\n"'
+}
+fold <"$tmp/paths" >"$tmp/folded" || { echo "Could not fold the changed paths" >&2; exit 3; }
 
 found=0
 for i in "${!NORMALIZED[@]}"; do
-  re="$(to_regex "${NORMALIZED[i]}")"
+  re="$(printf '%s\n' "${NORMALIZED[i]}" | fold)" && re="$(to_regex "$re")" \
+    || { echo "Could not fold '${PATTERNS[i]}'" >&2; exit 2; }
   # C locale: match bytes, so a path that is not valid UTF-8 cannot make grep skip or fail on it.
+  # Match the folded paths, then print the original line of each.
   rc=0
-  LC_ALL=C grep -E -e "$re" "$tmp/paths" >"$tmp/match" || rc=$?
+  LC_ALL=C grep -n -E -e "$re" "$tmp/folded" >"$tmp/match" || rc=$?
   case "$rc" in
     0) found=1
-       while IFS= read -r path; do printf '%s\t%s\n' "$path" "${PATTERNS[i]}"; done <"$tmp/match" ;;
+       cut -d: -f1 "$tmp/match" | awk 'NR == FNR { want[$1]; next } FNR in want' - "$tmp/paths" \
+         | while IFS= read -r path; do printf '%s\t%s\n' "$path" "${PATTERNS[i]}"; done ;;
     1) ;;
     *) echo "grep failed on the regex for '${PATTERNS[i]}'" >&2; exit 2 ;;
   esac

@@ -48,7 +48,8 @@ a `needs-approval` proposal).
 
 ### Approval gates
 
-Independent gates keep deploy, spend, and delete changes, and weakened evals, in front of a human:
+Independent gates keep deploy, spend, and delete changes, weakened evals, and changes to the
+constitution outside its Roadmap in front of a human:
 - **Issue gate (`autopilot`).** Discovery skips every `needs-approval` issue without `approved` and
   reports it as `gated: needs-approval`. It relies on the label, so an issue nobody labeled is not
   caught.
@@ -58,11 +59,32 @@ Independent gates keep deploy, spend, and delete changes, and weakened evals, in
   hand. This is the backstop for sensitive files, whatever the issue's labels. In a repo genesis
   created, its `.github/workflows/` entry covers the evals guard and `evals-model.yml`, so a
   `schedule:` trigger (unattended model spend), a higher call cap, or a longer timeout there needs
-  a human to merge. It holds only the merge: a workflow pushed on a branch runs, with the repo's
-  secrets, before any PR exists. Keep a secret such as the model key in a GitHub Environment
+  a human to merge; its `.claude/` entry covers the committed Claude Code settings, which decide
+  whether `genesis --next` may use the web under autopilot, and its `/GENESIS.md`, `CLAUDE.md`,
+  and `/.mcp.json` entries cover the files that shape the skeleton check and an unattended run
+  (`skills/genesis/references/skeleton.md` → Settings). Matching ignores case, so `.Claude/`
+  counts as `.claude/`. It holds only the merge: a workflow pushed on a branch runs, with the
+  repo's secrets, before any PR exists. Keep a secret such as the model key in a GitHub Environment
   restricted to the default branch, named by the job that uses it (`environment:`), and use a
   repo secret only where environments aren't available (a private repo on GitHub Free);
   `skills/genesis/references/evals.md` → Model-judged evals has the steps.
+- **Vision check (`auto`).** For every PR, in any repo with a root `VISION.md`, `auto` merges
+  only when `scripts/octo-vision-guard.sh` finds the reviewed commit changed that file, if at
+  all, only in its Roadmap body and only in plain text. The whole constitution outside the
+  Roadmap body (Goal, Target users, Quality bar, Immutable constraints, every heading) must keep
+  the merge base's bytes; each Roadmap body line must not open with `<`, `#`, `>`, or a fence,
+  be only `=` or `-` marks, or hold HTML or a link definition; the body ends only at a column-0
+  `#` or `##` heading, and the merge base must have one `## Roadmap` line and a body that passes
+  the same rule, so where the body ends can be trusted; the file may hold no NUL, bare CR, other
+  control byte, or Unicode line break; and it must not be deleted, new, made a symlink, given
+  another mode, or joined by a new or changed root name that differs only in case (`vision.md`,
+  which a macOS checkout writes over it). The guard parses no Markdown: anything that isn't
+  plainly text waits for a human, which shuts out the constructs known to hide, recast, or
+  re-link a section, though it renders nothing and so can't prove every renderer agrees.
+  Otherwise it holds with `VISION.md changed outside its Roadmap: a human merges this`. That
+  holds Octoperator's own PRs too. A milestone's Roadmap item still merges unattended. The
+  check can't judge meaning: Roadmap text that argues against a constraint passes it, and only
+  review catches that.
 - **Evals guard (`auto`).** Where the base branch has `.github/workflows/evals-guard.yml` (a repo
   genesis created), `auto` merges only when `scripts/octo-evals-guard.sh` finds both guard checks
   passed on the reviewed commit (against the base branch's tip, when the PR changes `evals/` or
@@ -192,9 +214,10 @@ re-review loop; leftover minors never block), that review covered the current he
 with `--match-head-commit`), and the PR is `OPEN`, not draft, with `mergeStateStatus` **`CLEAN`**
 (GitHub's "ready to merge" — no conflicts, all required checks green, not blocked by protection,
 not behind). Any other state (`DIRTY` / `BLOCKED` / `BEHIND` / `UNSTABLE` / `UNKNOWN`) → do not
-merge; report the reason. A PR that touches an `approval_paths` pattern is never merged by `auto`
-either (Approval gates above). Never force-merge. The PR's `Closes #N` auto-closes the issue; move
-its board item to the mapped `done` status afterward with
+merge; report the reason. A PR that touches an `approval_paths` pattern, or changes `VISION.md`
+outside its Roadmap body, is never merged by `auto` either (Approval gates above). Never
+force-merge. The PR's `Closes #N` auto-closes the issue; move its board item to the mapped `done`
+status afterward with
 `octo-project-status.sh ... --status "<statuses.done>"`.
 
 ## Traceability matrix

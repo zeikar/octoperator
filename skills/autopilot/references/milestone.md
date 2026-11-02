@@ -24,8 +24,10 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-web-allowed.sh" <root>
 ```
 
 It reads the repo's `.claude/settings.json` and `.claude/settings.local.json`, and
-`~/.claude/settings.json`; a missing file allows nothing. It prints `web: allowed` only when, for
-each of WebSearch and WebFetch, both of these hold:
+`~/.claude/settings.json`; a missing file allows nothing. Genesis's `approval_paths` lists
+`.claude/`, and matching ignores case (`.Claude/` counts), so in a repo that keeps that entry no
+PR that `auto` merges unattended can add an allow entry there. It prints
+`web: allowed` only when, for each of WebSearch and WebFetch, both of these hold:
 - a bare entry for it (`"WebSearch"`, `"WebFetch"`) is in a `permissions.allow`;
 - no `deny` or `ask` entry in any of those files names it, bare or scoped (such as
   `WebFetch(domain:x)`), since either one wins over an allow.
@@ -96,8 +98,9 @@ is reported, never fatal. The report's `evals:` line says either `dispatched eva
 On `plan`, read next.md and follow it by reference. Run its step 1, then step 3 on with the gate's
 `tip:`; its step 2 is the gate just run. Ground or not by [Web access](#web-access). Then, in both
 modes, run the `auto` procedure with `--pr <M>` on the PR it opened (never `--dry-run`). auto's
-merge gate holds a `milestone-*` PR unless both the evals guard and the milestone check
-(`octo-genesis-next.sh --check --head`) pass on the reviewed commit. Then append a `kind: run`
+merge gate holds a `milestone-*` PR unless the vision check, the evals guard, and the milestone
+check (`octo-genesis-next.sh --check --head`) all pass on the reviewed commit. The vision check
+lets VISION.md change only in its Roadmap body, in plain text. Then append a `kind: run`
 entry (SKILL.md step 5: `cycles_used` 1, and `merged` or `held` 1 by auto's result, else 0),
 report, and STOP.
 

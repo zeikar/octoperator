@@ -18,14 +18,19 @@
 #                            file list is cut short), another workflow's or PR's run, and a gh
 #                            error, against a stub `gh` that runs the helper's --jq filters with jq
 #   - octo-approval-match.sh : pattern normalization, malformed patterns, matching (renames
-#                            included, genesis's entry holding the evals guard but not evals/),
+#                            included, case ignored, Unicode folding too, genesis's entries
+#                            holding the evals guard, .claude/ (`.Claude/` too), GENESIS.md,
+#                            every CLAUDE.md and CLAUDE.local.md, and the root .mcp.json, but
+#                            not evals/ or a milestone's files),
 #                            and the incomplete-file-list hold, against a stub `gh`
 #   - octo-genesis-check.sh : a valid proposal, a missing section or front-matter key, an
 #                            ungrounded proposal (and one with URLs or a misplaced or misspelled
 #                            marker), the PRD, ADR, and VISION.md checks (missing sections, an
 #                            altered or explained baseline constraint, an undetectable,
 #                            mismatched, contradicted, or wrapped test command, quoted and
-#                            commented front-matter values, a URL in an ungrounded PRD), the
+#                            commented front-matter values, a URL in an ungrounded PRD, a
+#                            Roadmap with a template <placeholder> or `Result<T>`, and one
+#                            filled), the
 #                            PRD's ## Scenarios (missing, empty, no script judge, a bad id,
 #                            requirement, or judge, a duplicate, no text), bad arguments,
 #                            --preflight's git, empty-dir, and repo-name checks, --values, and
@@ -60,7 +65,8 @@
 # The helpers behind autopilot's run ledger, its P == T decision, and its web access
 # (octo-evals-metric.sh, octo-ledger-state.sh, octo-milestone-gate.sh, octo-web-allowed.sh) have
 # their own tests too: scripts/test/autopilot.sh;
-# and so does genesis --next's offline helper, octo-genesis-next.sh: scripts/test/genesis-next.sh.
+# and so does genesis --next's offline helper, octo-genesis-next.sh: scripts/test/genesis-next.sh,
+# and auto's VISION.md check, octo-vision-guard.sh: scripts/test/vision.sh.
 # The proposal fixture the genesis tests share is in scripts/test/genesis-fixture.sh.
 #
 # It deliberately never invokes a helper in a way that reaches the real gh / the network.
@@ -137,6 +143,8 @@ expect 2 "octo-milestone-gate.sh --head exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-milestone-gate.sh" --repo o/n --rate none --head
 expect 2 "octo-genesis-next.sh --branch exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-genesis-next.sh" --check --base main --branch
+expect 2 "octo-vision-guard.sh --head exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-vision-guard.sh" --base main --head
 expect 2 "octo-approval-match.sh --pr exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-approval-match.sh" --pattern a --repo o/n --pr
 expect 2 "octo-approval-match.sh with no --pattern exits 2" \
@@ -460,15 +468,55 @@ matches '**/*.tf' 'main.tf modules/net/vpc.tf infra/main.tf'
 matches '.github/workflows/' '.github/workflows/ci.yml'
 matches 'modules/**/vpc.tf' 'modules/net/vpc.tf'
 matches '/infra' 'infra/main.tf'
-# Genesis's approval_paths entry holds a PR that changes the evals guard, not one adding an eval.
+# Genesis's approval_paths (skeleton.md → Settings) holds a PR that changes the evals guard, the
+# Claude Code settings (they decide whether genesis --next may use the web), GENESIS.md, a
+# CLAUDE.md or CLAUDE.local.md at any depth, or the root .mcp.json, in any case, not one adding
+# an eval or a milestone's own files, so milestone PRs still merge unattended.
+gen_paths="$(awk '/^approval_paths:$/ { on = 1; next } on && /^  - "/ { print; next } on { exit }' \
+  "$SCRIPTS_DIR/../skills/genesis/references/skeleton.md" | sed 's/^  - "//; s/"$//' \
+  | paste -sd ' ' -)"
+expect 0 "genesis's approval_paths are the six skeleton.md lists" \
+  test "$gen_paths" = ".github/workflows/ .claude/ /GENESIS.md CLAUDE.md CLAUDE.local.md /.mcp.json"
 printf '%s\t\n' .github/workflows/evals-guard.yml evals/recall/check.sh evals/guard.sh \
-  >"$STUB_FILES"
-matches '.github/workflows/' '.github/workflows/evals-guard.yml'
+  .claude/settings.json .claude/settings.local.json .Claude/settings.local.json docs/prd.md \
+  docs/research.md VISION.md evals/export-200-turns/scenario.md evals/export-200-turns/check.sh \
+  src/.claude/x GENESIS.md docs/GENESIS.md CLAUDE.md src/claude.md CLAUDE.local.md \
+  src/claude.LOCAL.md .mcp.json src/.mcp.json docs/adr/0002-cache.md >"$STUB_FILES"
+# shellcheck disable=SC2086 # one pattern per word, as genesis writes them
+approval $gen_paths
+expect 0 "genesis's approval_paths match only the guard, .claude/, GENESIS.md, CLAUDE.md, CLAUDE.local.md, .mcp.json" \
+  test "$am_rc" -eq 1 -a "$am_out" = ".github/workflows/evals-guard.yml$tab.github/workflows/
+.claude/settings.json$tab.claude/
+.claude/settings.local.json$tab.claude/
+.Claude/settings.local.json$tab.claude/
+GENESIS.md$tab/GENESIS.md
+CLAUDE.md${tab}CLAUDE.md
+src/claude.md${tab}CLAUDE.md
+CLAUDE.local.md${tab}CLAUDE.local.md
+src/claude.LOCAL.md${tab}CLAUDE.local.md
+.mcp.json$tab/.mcp.json"
+printf '%s\t\n' docs/prd.md docs/research.md VISION.md evals/export-200-turns/scenario.md \
+  evals/export-200-turns/check.sh >"$STUB_FILES"
+# shellcheck disable=SC2086
+approval $gen_paths
+expect 0 "a milestone's files match none of genesis's approval_paths" \
+  test "$am_rc" -eq 0 -a -z "$am_out"
 printf '%s\t\n' README.md main.tf main.tfvars modules/net/vpc.tf infra/main.tf infra-old/x \
   infrastructure/x deploy/infra/run.sh .github/workflows/ci.yml xgithub/workflows/ci.yml \
   >"$STUB_FILES"
-approval 'docs/**' 'secrets/**' 'Infra'
+approval 'docs/**' 'secrets/**' 'Infrastructures'
 expect 0 "no match: exits 0, prints nothing" test "$am_rc" -eq 0 -a -z "$am_out"
+# Matching ignores case, as macOS's file system does: a pattern's case and a path's both fold.
+matches 'Infra' 'infra/main.tf deploy/infra/run.sh'
+matches '.GitHub/Workflows/' '.github/workflows/ci.yml'
+# Unicode folding and normalization: ſ folds to s, and a decomposed é equals a composed É.
+printf '%s\t\n' "$(printf '.github/workflow\xc5\xbf/x.yml')" "$(printf 'cafe\xcc\x81/x')" README.md \
+  >"$STUB_FILES"
+matches '.github/workflows/' "$(printf '.github/workflow\xc5\xbf/x.yml')"
+matches "$(printf 'CAF\xc3\x89')" "$(printf 'cafe\xcc\x81/x')"
+printf '%s\t\n' README.md main.tf main.tfvars modules/net/vpc.tf infra/main.tf infra-old/x \
+  infrastructure/x deploy/infra/run.sh .github/workflows/ci.yml xgithub/workflows/ci.yml \
+  >"$STUB_FILES"
 printf 'docs/ci.yml%s.github/workflows/ci.yml\n' "$tab" >"$STUB_FILES"
 approval '.github/workflows/'
 expect 0 "rename: the old path alone matches" \
@@ -602,6 +650,42 @@ sed 's/^1\. \*\*MVP\*\*/1. **Launch**/' "$g/valid/VISION.md" >"$g/noroadmvp/VISI
 genesis_check "$g/noroadmvp"
 expect 0 "VISION.md roadmap item 1 not the MVP: exits 1" test "$gc_rc" -eq 1 \
   -a "$gc_out" = "FAIL: VISION.md: ## Roadmap item 1. must be the MVP"
+# The Roadmap body must pass the vision guard's plain-text rule: once committed, the guard holds
+# every later change at that merge base.
+notplain="FAIL: VISION.md: line 27 of the ## Roadmap body is not plain text ("
+genesis_fixture "$g/roadtmpl"
+# The template's literal item 1., its placeholder unfilled.
+tline='1. **MVP** — <the PRD'\''s MVP scope, in one line> (`docs/prd.md`)'
+awk -v t="$tline" '/^1\. \*\*MVP\*\*/ { print t; next } { print }' "$g/valid/VISION.md" \
+  >"$g/roadtmpl/VISION.md"
+genesis_check "$g/roadtmpl"
+expect 0 "VISION.md Roadmap with the template's <placeholder>: exits 1, names the line" \
+  test "$gc_rc" -eq 1 -a "$(printf '%s\n' "$gc_out" | grep -c '')" -eq 1 \
+  -a "${gc_out#"$notplain"}" != "$gc_out" -a -z "${gc_out##*a template <placeholder> too*}"
+genesis_fixture "$g/roadfill"
+# The template's Roadmap, filled: its evidence line, item 1., and an item 2. with a code span
+# and a link.
+awk '/^Revisable/ { print "Revisable — but every change to this section cites evidence (an eval"
+    print "or CI failure, a failure log, or user feedback)."; next }
+  { print } /^1\. \*\*MVP\*\*/ {
+    print "2. Group chats, from the PRD'\''s Out of scope: `npm test` covers them"
+    print "   ([prior art](https://foo.example/blog))." }' "$g/valid/VISION.md" \
+  >"$g/roadfill/VISION.md"
+genesis_check "$g/roadfill"
+expect 0 "VISION.md with the template's Roadmap filled: exits 0" test "$gc_rc" -eq 0 -a -z "$gc_out"
+genesis_fixture "$g/roadcode"
+sed 's/^1\. \*\*MVP\*\* — .*/& — errors as `Result<T>`/' "$g/valid/VISION.md" \
+  >"$g/roadcode/VISION.md"
+genesis_check "$g/roadcode"
+expect 0 "VISION.md Roadmap with \`Result<T>\` in a code span: exits 1, names the line" \
+  test "$gc_rc" -eq 1 -a "${gc_out#"$notplain"}" != "$gc_out" \
+  -a "$(printf '%s\n' "$gc_out" | grep -c '')" -eq 1
+genesis_fixture "$g/roadcr"
+perl -pe 's/^(A companion)/$1\r/' "$g/valid/VISION.md" \
+  >"$g/roadcr/VISION.md"
+genesis_check "$g/roadcr"
+expect 0 "VISION.md with a bare CR outside the Roadmap: exits 1, names the byte" \
+  test "$gc_rc" -eq 1 -a -n "$(printf '%s\n' "$gc_out" | grep -F 'a CR not followed by LF')"
 genesis_fixture "$g/notest"
 grep -v '^test_command:' "$g/valid/GENESIS.md" >"$g/notest/GENESIS.md"
 genesis_check "$g/notest"
