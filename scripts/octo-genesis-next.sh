@@ -36,8 +36,9 @@
 #     `- requirement: R<k>` naming one of the section's requirements, `- judge: script` or
 #     `- judge: model`, and text, at least one judged by script; each new eval's scenario.md
 #     front matter has the same `id:`, `judge:`, and `requirement:` lines;
-#   - VISION.md changes only inside ## Roadmap, so ## Immutable constraints never changes, and
-#     its Roadmap names `Milestone <n>`;
+#   - VISION.md changes only inside ## Roadmap, so ## Immutable constraints never changes, it
+#     gains no level-1 or level-2 heading line (CommonMark's: up to 3 spaces, then `#` or `##`,
+#     then a space, a tab, or the line's end), and its Roadmap names `Milestone <n>`;
 #   - grounding: when the new section holds the line `ungrounded: no web access` before its
 #     first `### ` heading, docs/research.md is unchanged, and neither the section nor the lines
 #     VISION.md gained cite an http(s) URL; otherwise docs/research.md changed (refreshed);
@@ -294,6 +295,12 @@ if [ "$vision" -eq 1 ]; then
   elif [ "$(without Roadmap "$tmp/vision.base")" != "$(without Roadmap "$tmp/vision.head")" ]; then
     fail "VISION.md: only ## Roadmap may change"
   fi
+  # The section checks above key on a literal `## `, but CommonMark also reads `##<tab>x` or
+  # ` ## x` as a heading: a Roadmap line like that would render as a new Immutable constraints.
+  g diff -U0 "$mb" HEAD -- VISION.md >"$tmp/vision.diff" || exit 3
+  awk '/^@@/ { h = 1; next } h && /^\+/ { l = substr($0, 2); sub(/\r$/, "", l); print l }' \
+    "$tmp/vision.diff" | grep -Eq '^ {0,3}#{1,2}([[:blank:]]|$)' \
+    && fail "VISION.md: a milestone adds no level-1 or level-2 heading, only Roadmap items"
   section_of Roadmap "$tmp/vision.head" | grep -Eq "Milestone $N([^0-9]|$)" \
     || fail "VISION.md: ## Roadmap needs an item for Milestone $N"
   [ "$ungrounded" -eq 0 ] \

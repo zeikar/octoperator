@@ -19,13 +19,14 @@ entry's shape, the commands, and what happens when every eval passes).
 - `kind` — `run` (a normal run, or one that planned the next milestone), `observe` (a converged
   run, or an all-pass run that waits, SKILL.md step 3), or `reset` (`--resume`).
 - `planning_failed` — optional, and only on a `run` entry whose next-milestone planning stopped
-  before opening a PR: `{"tip": "<the 40-digit commit it planned at>", "reason": "<genesis's
-  stopped: reason>"}` ([milestone.md → Planning](milestone.md#planning)). The newest valid `run`
-  or `reset` entry decides; `observe` entries are passed over, since they plan nothing. When it is
-  a `run` entry with this key, `octo-ledger-state.sh` prints its tip and reason as
-  `planning-failed:`, and the milestone gate observes while the default branch's tip is still that
-  commit. A `reset` entry, or a newer `run` entry without the key, clears it. A malformed value
-  counts as absent.
+  before opening a PR, at a stop a retry at the same tip would repeat: `{"tip": "<the 40-digit
+  commit it planned at>", "reason": "<genesis's stopped: reason>"}`
+  ([milestone.md → Planning](milestone.md#planning) lists those stops). A network or `gh` failure
+  never adds it, so the next run retries. The newest valid `run` or `reset` entry decides;
+  `observe` entries are passed over, since they plan nothing. When it is a `run` entry with this
+  key, `octo-ledger-state.sh` prints its tip and reason as `planning-failed:`, and the milestone
+  gate observes while the default branch's tip is still that commit. A `reset` entry, or a newer
+  `run` entry without the key, clears it. A malformed value counts as absent.
 
 ## Valid entries
 

@@ -60,8 +60,8 @@ bash scripts/test/smoke.sh
 # 1b. Test the scenario-eval templates genesis copies into a new repo (offline; CI runs this).
 bash scripts/test/evals.sh
 
-# 1c. Test autopilot's evals metric read, convergence decision, and next-milestone gate
-#     (offline; CI runs this).
+# 1c. Test autopilot's evals metric read, convergence decision, next-milestone gate, and web
+#     settings check (offline; CI runs this).
 bash scripts/test/autopilot.sh
 
 # 1d. Test genesis --next's milestone numbering and milestone diff check (offline; CI runs this).

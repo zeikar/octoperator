@@ -206,9 +206,13 @@ normalized patterns itself; never match paths by reading a file list. Act on its
 Only a human merges a held PR, after reviewing the change; `auto` never lifts this hold, and no
 issue label (not even `approved`) or PR text overrides it.
 
-**Then the milestone check**, for a PR whose `headRefName` starts with `milestone-`: the branch
-`genesis --next` opens, which merges with no issue behind it. Keying on the prefix means any PR on
-such a branch is checked, so the name can't be used to dodge the check. The milestone rules
+**Then the milestone check**, for a PR whose `headRefName` starts with `milestone-` in **any**
+read of it this run: step 3's (`--pr`, or implement's branch), the review's, or the merge-gate
+query below. That is the branch `genesis --next` opens, which merges with no issue behind it.
+Keying on the prefix means any PR on such a branch is checked, so the name can't be used to dodge
+the check. An open PR's head branch can be renamed, so one read with the prefix is enough: a later
+name without it never lifts the check. When only the merge-gate query shows the prefix, run the
+check then, before merging. The milestone rules
 (`${CLAUDE_PLUGIN_ROOT}/skills/genesis/references/next.md`, step 7) are what keep it from
 touching VISION.md's Immutable constraints, an existing PRD line, GENESIS.md, the ADR, or the
 code. `approval_paths` and the evals guard don't cover those files, and a fix round may have
@@ -220,15 +224,16 @@ git fetch --no-tags origin "$DEFAULT"
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-worktree.sh" detach --name "milestone-check-<pr#>" \
   --ref "<reviewed headRefOid>"
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-genesis-next.sh" --check --base "origin/$DEFAULT" \
-  --branch "<headRefName>" --head "<reviewed headRefOid>" "<recorded path>"
+  --branch "<newest headRefName>" --head "<reviewed headRefOid>" "<recorded path>"
 git worktree remove --force "<recorded path>"
 ```
 
-Run them one at a time. The fetch must succeed: against an older `origin/$DEFAULT`, a PR that
-reverts a recent change there would show no diff for it. Exit 0 (`ok: milestone …`) → continue.
-Any other exit, a failed fetch, or a failed checkout → hold the PR with the reason `milestone
-check failed`, listing its `FAIL:` lines in the report. Remove the checkout whatever the result.
-Like the approval-path hold, only a human lifts it.
+Run them one at a time. `<newest headRefName>` is the latest read's: a name renamed away from
+`milestone-` fails the check's branch rule, so the PR holds. The fetch must succeed: against an
+older `origin/$DEFAULT`, a PR that reverts a recent change there would show no diff for it. Exit
+0 (`ok: milestone …`) → continue. Any other exit, a failed fetch, or a failed checkout → hold the
+PR with the reason `milestone check failed`, listing its `FAIL:` lines in the report. Remove the
+checkout whatever the result. Like the approval-path hold, only a human lifts it.
 
 **Then wait for running checks.** Review usually finishes while CI is still running, and pending
 checks read as `UNSTABLE`/`BLOCKED` — a hold — so reading the gate immediately would hold nearly every
@@ -270,7 +275,7 @@ Then query its readiness:
 
 ```bash
 gh pr view <pr#> --repo "$REPO" \
-  --json headRefOid,state,isDraft,closingIssuesReferences
+  --json headRefOid,headRefName,state,isDraft,closingIssuesReferences
 ```
 
 **Merge ONLY when ALL of these hold** (step 4 has already held every PR whose latest review blocks):
@@ -279,7 +284,8 @@ gh pr view <pr#> --repo "$REPO" \
 - `isDraft` is `false`,
 - `mergeStateStatus` is **`CLEAN`** — the value the helper below prints decides, not a query,
 - the evals-guard gate above passed (`pass` or `none`),
-- and, for a `milestone-*` branch, the milestone check above passed.
+- and, when any read of its `headRefName` (this query's included) starts with `milestone-`, the
+  milestone check above passed.
 
 `CLEAN` is GitHub's "ready to merge" state: it means the PR is mergeable (no conflicts), **every
 required status check has passed**, the branch is not behind in a way protection forbids, and no branch

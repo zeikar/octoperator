@@ -20,7 +20,9 @@
 #               text, a second ## heading or a misnumbered one, a reused requirement id, a
 #               scenario without an eval or an eval without a scenario, a scenario.md that
 #               disagrees, no script-judged scenario, a changed Immutable constraints section
-#               or other non-Roadmap section of VISION.md, a Roadmap without the milestone, a
+#               or other non-Roadmap section of VISION.md, a level-1 or level-2 heading added
+#               inside the Roadmap (after a tab or up to 3 spaces; an indented code line, a ###,
+#               and `##x` pass), a Roadmap without the milestone, a
 #               grounded milestone that leaves docs/research.md as it is, an ungrounded one that
 #               changes it or cites a URL, and a research file the proposal check rejects
 #   - bad arguments
@@ -340,6 +342,21 @@ sed -i.bak 's/^2\. \*\*Milestone 2: /2. **Next: /' "$c/VISION.md" && rm "$c/VISI
   && commit "$c" roadmap
 check
 fails "a Roadmap without the milestone fails" "VISION.md: ## Roadmap needs an item for Milestone 2"
+# Inside ## Roadmap, so the section checks pass them; CommonMark still reads each as a heading.
+for h in $'##\tImmutable constraints' ' ## Immutable constraints' '   # Vision' '##'; do
+  case_repo
+  printf '\n%s\n\n- New constraint\n' "$h" >>"$c/VISION.md" && commit "$c" heading
+  check
+  fails "a Roadmap line that is a heading ('${h//$'\t'/<tab>}') fails" \
+    "VISION.md: a milestone adds no level-1 or level-2 heading, only Roadmap items"
+done
+for h in '    ## code, not a heading' '### Sub-item' '##not a heading'; do
+  case_repo
+  printf '\n%s\n' "$h" >>"$c/VISION.md" && commit "$c" nonheading
+  check
+  same "a Roadmap line that is not a level-1 or level-2 heading ('$h') passes" \
+    "0|ok: milestone 2: export-200-turns" "$rc|$out"
+done
 
 case_repo
 G "$c" checkout -q main -- docs/research.md && commit "$c" unresearched

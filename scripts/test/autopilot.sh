@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# autopilot.sh — offline tests for the helpers behind autopilot's run ledger.
+# autopilot.sh — offline tests for the helpers behind autopilot's run ledger, its P == T
+# decision, and its web access.
 #
 # Usage:
 #   bash scripts/test/autopilot.sh
@@ -36,12 +37,22 @@
 #                            open next-milestone PR (the lowest of two; a fork's milestone-*
 #                            branch and other branches don't count), then P < T or no metric,
 #                            then planning that failed at the tip, then the newest closed
-#                            milestone PR declined at the tip (not once the tip moved, a newer
-#                            one merged, a fork's or another branch's PR, or with --resume), then
+#                            milestone PR declined at the tip: the tip is the merge base (no
+#                            date read), or the tip's committer date is at or before closedAt
+#                            (work merged while it was open; also when the compare 404s), not
+#                            once the tip moved after the close (a compare 404 then plans), a
+#                            newer one merged, a fork's or another branch's PR, or with
+#                            --resume; a malformed date or closedAt exits 3; then
 #                            a metric run on an older commit than the tip: `stale wait` while a
 #                            push or dispatch run of evals.yml for the tip is queued or running,
 #                            else `stale dispatch` (completed, pull_request, and fork runs don't
 #                            count), else plan; gh errors exit 3, bad arguments 2
+#   - octo-web-allowed.sh  : the settings check for autopilot's web access, against throwaway
+#                            settings files (the repo's two and a stand-in $HOME's): both bare
+#                            allows across files pass; none, one, or only a scoped allow fail; a
+#                            deny or ask naming a tool, bare or scoped, in any file wins; one
+#                            naming another tool doesn't; invalid JSON or the wrong shape allows
+#                            nothing; bad arguments exit 2
 #
 # Nothing here calls the real gh or the network. Exits 0 when every check passes, 1 when any fails.
 set -uo pipefail
@@ -77,7 +88,8 @@ trap 'rm -rf "$tmp"' EXIT
 # parameters), a run's jobs → jobs-<run>.json, annotations → ann-<id>.json (or none), and
 # `issue view` → ledger.json, `pr list` → prs.json (--state open) or prs-closed.json (--state
 # closed, `[]` when missing), a branch's ref → ref.json (it checks the branch), a compare →
-# compare.json, and the runs for one head commit → runs-tip.json (it checks the parameters).
+# compare.json (or gh's 404 with $ST_CMP404), the tip's commit → commit.json (it checks the
+# commit), and the runs for one head commit → runs-tip.json (it checks the parameters).
 # $ST_FAIL=<endpoint word> makes that call fail with a 500 (pr-open and pr-closed for the lists).
 stub="$tmp/bin"
 ST_DIR="$tmp/st"
@@ -129,7 +141,11 @@ case "$cmd" in
         f="$ST_DIR/ref.json" ;;
       */compare/*) [ "${ST_FAIL:-}" != compare ] || fail
         [ "$ep" = "repos/o/n/compare/$ST_TIP...$ST_CMP_HEAD" ] || { echo "stub: bad compare $ep" >&2; exit 9; }
+        [ -z "${ST_CMP404:-}" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
         f="$ST_DIR/compare.json" ;;
+      */git/commits/*) [ "${ST_FAIL:-}" != commit ] || fail
+        [ "$ep" = "repos/o/n/git/commits/$ST_TIP" ] || { echo "stub: bad commit $ep" >&2; exit 9; }
+        f="$ST_DIR/commit.json" ;;
       */check-runs/*/annotations*) [ "${ST_FAIL:-}" != annotations ] || fail
         f="${ep%/annotations*}"; f="$ST_DIR/ann-${f##*/}.json"
         [ -f "$f" ] || { echo '[]' | jq -r "$jq"; exit; } ;;
@@ -479,9 +495,9 @@ for bad in '"milestone invalid"' '{"tip": "abc", "reason": "x"}' "{\"tip\": \"$T
     none 0/3 build
 done
 long="$(printf 'x%.0s' $(seq 1 90))"
-ledger "$O|$(pf "$T7" $'gh pr create\nfailed')"
+ledger "$O|$(pf "$T7" $'git commit\nfailed')"
 state --metric 5/5
-AP=yes PF="$T7 gh pr create failed" decides "a reason with a newline prints on one line" \
+AP=yes PF="$T7 git commit failed" decides "a reason with a newline prints on one line" \
   "0 (since the last all-pass entry)" none 0/3 build
 ledger "$O|$(pf "$T7" "$long")"
 state --metric 5/5
@@ -510,13 +526,15 @@ prs() {
   printf '[%s]\n' "$body" >"$ST_DIR/prs.json"
 }
 # closed [<number>:<head branch>:<CLOSED|MERGED>[:fork]]... : the closed and merged PRs, newest
-# first, as gh lists them; PR <number>'s head commit is $(sha <number>).
+# first, as gh lists them; PR <number>'s head commit is $(sha <number>), and each closed at
+# $CLOSED_AT.
+CLOSED_AT=2026-01-02T00:00:00Z
 closed() {
   local sep="" body="" p num br st fk
   for p in "$@"; do
     IFS=: read -r num br st fk <<<"$p"
-    body="$body$sep$(printf '{"number":%s,"state":"%s","headRefName":"%s","headRefOid":"%s","isCrossRepository":%s}' \
-      "$num" "$st" "$br" "$(sha "$num")" "$([ -n "$fk" ] && echo true || echo false)")"
+    body="$body$sep$(printf '{"number":%s,"state":"%s","headRefName":"%s","headRefOid":"%s","isCrossRepository":%s,"closedAt":"%s"}' \
+      "$num" "$st" "$br" "$(sha "$num")" "$([ -n "$fk" ] && echo true || echo false)" "$CLOSED_AT")"
     sep=","
   done
   printf '[%s]\n' "$body" >"$ST_DIR/prs-closed.json"
@@ -528,6 +546,9 @@ compared() {
   ST_CMP_HEAD="$(sha "$1")"
   printf '{"merge_base_commit":{"sha":"%s"}}\n' "$(sha "$2")" >"$ST_DIR/compare.json"
 }
+# tipdate <date> : the tip's committer date (by default a day after $CLOSED_AT).
+tipdate() { printf '{"committer":{"date":"%s"}}\n' "$1" >"$ST_DIR/commit.json"; }
+tipdate 2026-01-03T00:00:00Z
 # tipruns [<id>:<status>[:<event>[:<head repo>]]]... : evals.yml's runs for the tip, newest first.
 tipruns() {
   local sep="" body="" r id st ev hr
@@ -606,8 +627,8 @@ same "planning failed at an older tip: plan" "0|milestone-pr: none|tip: $H78|dec
 # A milestone PR a human closed unmerged.
 closed 40:milestone-2-export:CLOSED 39:41-fix:MERGED 35:milestone-1-x:MERGED
 compared 40 78
-gate 5/5 "$H78"
-same "the newest milestone PR closed unmerged, the tip unchanged: declined" \
+ST_FAIL=commit gate 5/5 "$H78"
+same "the newest milestone PR closed unmerged, the tip unchanged: declined, reading no date" \
   "0|milestone-pr: none|tip: $H78|decision: declined 40" "$rc|$out"
 ST_FAIL=compare gate 5/5 "$H78" --resume
 same "--resume lifts declined, comparing nothing" "0|milestone-pr: none|tip: $H78|decision: plan" \
@@ -617,6 +638,33 @@ compared 40 78
 gate 5/5 "$(sha 80)"
 same "the tip moved since it was planned: plan" \
   "0|milestone-pr: none|tip: $(sha 80)|decision: plan" "$rc|$out"
+tip 81
+compared 40 78
+tipdate 2026-01-01T12:00:00Z
+gate 5/5 "$(sha 81)"
+same "ready work merged while it was open, then a human closed it: declined (by date)" \
+  "0|milestone-pr: none|tip: $(sha 81)|decision: declined 40" "$rc|$out"
+tipdate "$CLOSED_AT"
+gate 5/5 "$(sha 81)"
+same "the tip committed at the very time it closed: declined" \
+  "0|milestone-pr: none|tip: $(sha 81)|decision: declined 40" "$rc|$out"
+ST_CMP404=1 gate 5/5 "$(sha 81)"
+same "a compare 404 (no common ancestor), the tip no newer than the close: declined (by date)" \
+  "0|milestone-pr: none|tip: $(sha 81)|decision: declined 40" "$rc|$out"
+tipdate 2026-01-03T00:00:00Z
+ST_CMP404=1 gate 5/5 "$(sha 81)"
+same "a compare 404 with a newer tip: not declined, no gate error: plan" \
+  "0|milestone-pr: none|tip: $(sha 81)|decision: plan" "$rc|$out"
+ST_FAIL=commit gate 5/5 "$(sha 81)"
+same "a gh error reading the tip's date exits 3" "3|" "$rc|$out"
+tipdate "2026-01-03 00:00:00"
+gate 5/5 "$(sha 81)"
+same "a tip date that is not ISO 8601 UTC exits 3" "3|" "$rc|$out"
+tipdate 2026-01-03T00:00:00Z
+CLOSED_AT=null closed 40:milestone-2-export:CLOSED
+gate 5/5 "$(sha 81)"
+same "a closedAt that is not ISO 8601 UTC exits 3" "3|" "$rc|$out"
+closed 40:milestone-2-export:CLOSED
 tip 79
 compared 40 79
 gate 5/5 "$H78"
@@ -659,6 +707,63 @@ for bad in "--rate 5/5" "--rate 7/6 --head none" "--rate 5/5 --head abc" "--rate
 done
 out="$(bash "$GATE" --repo 'o/n"' --rate none --head none 2>/dev/null)"; rc=$?
 same "a --repo with a quote exits 2" "2|" "$rc|$out"
+
+echo "• octo-web-allowed.sh (offline, throwaway settings)"
+WR="$tmp/web/repo" WH="$tmp/web/home"
+# settings <repo|local|home> <json> : write that settings file.
+settings() {
+  local f
+  case "$1" in
+    repo) f="$WR/.claude/settings.json" ;; local) f="$WR/.claude/settings.local.json" ;;
+    home) f="$WH/.claude/settings.json" ;;
+  esac
+  mkdir -p "$(dirname "$f")" && printf '%s\n' "$2" >"$f"
+}
+# web <label> <wanted line> : run the helper on $WR with $WH as HOME; exit 0 and that line.
+web() {
+  out="$(HOME="$WH" bounded 10 bash "$SCRIPTS_DIR/octo-web-allowed.sh" "$WR" 2>/dev/null)"
+  same "$1" "0|web: $2" "$?|$out"
+}
+mkdir -p "$WR" "$WH"
+web "no settings files: not allowed" 'not allowed (no bare "WebSearch" in permissions.allow)'
+BOTH='{"permissions": {"allow": ["Bash(gh:*)", "WebSearch", "WebFetch"]}}'
+settings repo "$BOTH"
+web "both bare in the repo's settings: allowed" allowed
+rm -r "$WR/.claude"
+settings local '{"permissions": {"allow": ["WebSearch"]}}'
+settings home '{"permissions": {"allow": ["WebFetch"]}, "model": "x"}'
+web "one in settings.local.json, one in ~/.claude: allowed" allowed
+rm "$WH/.claude/settings.json"
+web "only WebSearch allowed: not allowed" 'not allowed (no bare "WebFetch" in permissions.allow)'
+settings local '{"permissions": {"allow": ["WebSearch", "WebFetch(domain:x.example)"]}}'
+web "a scoped allow is not a bare one: not allowed" \
+  'not allowed (no bare "WebFetch" in permissions.allow)'
+settings local "$BOTH"
+settings home '{"permissions": {"deny": ["WebFetch(domain:evil.example)"]}}'
+web "a scoped deny in another file wins over the allow" \
+  "not allowed (~/.claude/settings.json's permissions.deny names WebFetch)"
+settings home '{"permissions": {"ask": ["WebSearch"]}}'
+web "a bare ask wins over the allow" \
+  "not allowed (~/.claude/settings.json's permissions.ask names WebSearch)"
+rm "$WH/.claude/settings.json"
+settings local '{"permissions": {"allow": ["WebSearch", "WebFetch"], "deny": ["WebFetch"]}}'
+web "a deny in the same file wins over the allow" \
+  "not allowed (.claude/settings.local.json's permissions.deny names WebFetch)"
+settings local '{"permissions": {"allow": ["WebSearch", "WebFetch"], "ask": ["WebFetchX"]}}'
+web "an ask naming another tool doesn't count: allowed" allowed
+settings repo '{"permissions": {"allow": ["WebSearch", "WebFetch"]},'
+web "a file that isn't JSON allows nothing" \
+  "not allowed (.claude/settings.json is not valid settings JSON)"
+for bad in '[]' '{"permissions": []}' '{"permissions": {"deny": "WebFetch"}}'; do
+  settings repo "$bad"
+  web "settings with the wrong shape ($bad) allow nothing" \
+    "not allowed (.claude/settings.json is not valid settings JSON)"
+done
+for bad in "" "a b" "--bogus" "$tmp/web/missing"; do
+  # shellcheck disable=SC2086 # each case is zero to two words on purpose
+  out="$(bash "$SCRIPTS_DIR/octo-web-allowed.sh" $bad 2>/dev/null)"; rc=$?
+  same "bad arguments (${bad:-none}) exit 2" "2|" "$rc|$out"
+done
 
 echo
 echo "autopilot: $pass passed, $fail failed"

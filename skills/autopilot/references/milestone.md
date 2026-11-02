@@ -16,11 +16,28 @@ to the rest of the turn in the same way, so autopilot follows next.md by referen
 
 So under autopilot, `genesis --next` plans **ungrounded** (next.md step 5's fallback): no web call,
 `ungrounded: no web access` in the section and the PR. The one exception is when the user's own
-permission settings already allow both tools. That means bare `"WebSearch"` and `"WebFetch"`
-entries in `permissions.allow` of the repo's `.claude/settings.json` or
-`.claude/settings.local.json`, or of `~/.claude/settings.json`. Read those files first; a missing
-file allows nothing. Then it may ground, under next.md step 5's caps and rules. Never call a web
-tool those settings don't allow: an unattended run would stop on the prompt. A grounded milestone
+permission settings already allow both tools. One call checks them, with next.md step 1's
+`<root>`:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-web-allowed.sh" <root>
+```
+
+It reads the repo's `.claude/settings.json` and `.claude/settings.local.json`, and
+`~/.claude/settings.json`; a missing file allows nothing. It prints `web: allowed` only when, for
+each of WebSearch and WebFetch, both of these hold:
+- a bare entry for it (`"WebSearch"`, `"WebFetch"`) is in a `permissions.allow`;
+- no `deny` or `ask` entry in any of those files names it, bare or scoped (such as
+  `WebFetch(domain:x)`), since either one wins over an allow.
+
+Only then may it ground, under next.md step 5's caps and rules. A `web: not allowed (<reason>)`
+line, or any other exit, means ungrounded. The check doesn't read the CLI's `--allowedTools` or
+managed settings. That is the safe direction: an allow there goes unseen, so the run plans
+ungrounded more often.
+
+Never call a web tool the check doesn't allow. An in-session schedule would stop on an `ask`
+prompt and wait for a human. A `claude -p --permission-prompts none` run gets a denial instead,
+which next.md step 5's **Web denied** fallback turns into an ungrounded plan. A grounded milestone
 comes from a human running `/octoperator:genesis --next` by hand, under genesis's own
 `allowed-tools`.
 
@@ -45,7 +62,7 @@ whose head branch starts with `milestone-`, the branch `genesis --next` opens.
 | `plan` | nothing below holds | [Planning](#planning) | `all evals pass → planning next milestone` |
 | `open <pr>` | a next-milestone PR waits for its guard and merge | observe, so no second milestone is filed | `stopped: next-milestone PR #<pr> open` |
 | `failed` | the last run's planning failed at this tip | observe: the same failure would repeat | `stopped: milestone planning failed at this tip` |
-| `declined <pr>` | a human closed the newest milestone PR unmerged, and nothing landed since it was planned | observe | `stopped: next-milestone PR #<pr> declined` |
+| `declined <pr>` | a human closed the newest milestone PR unmerged, and nothing landed since it was planned, or since it was closed | observe | `stopped: next-milestone PR #<pr> declined` |
 | `stale dispatch` | the metric's run judged an older commit than the tip, and no evals run for the tip is queued or running | [dispatch](#dispatching-evalsyml) once, then observe | `stopped: evals metric stale` |
 | `stale wait <run>` | the same, with run `<run>` for the tip queued or running | observe | `stopped: evals metric stale` |
 | exit 3 | a gh error | observe | `stopped: milestone gate unavailable` |
@@ -84,12 +101,17 @@ merge gate holds a `milestone-*` PR unless both the evals guard and the mileston
 entry (SKILL.md step 5: `cycles_used` 1, and `merged` or `held` 1 by auto's result, else 0),
 report, and STOP.
 
-If `--next` stops before opening a PR, the entry's counts are all 0. It adds the key
+If `--next` stops before opening a PR, the entry's counts are all 0. When the stop would recur on
+a retry at the same tip, the entry adds the key
 `"planning_failed": {"tip": "<the gate's tip>", "reason": "<the genesis: stopped: reason>"}`, so
 the next run observes at that tip rather than repeating the failure
-([ledger.md](ledger.md#entry-fields)). The report gives the reason, and the run ends
-`autopilot: stopped: milestone planning failed`. next.md removes its own worktree and local branch
-when it stops after creating them.
+([ledger.md](ledger.md#entry-fields)). Only these stops add it: `not a genesis repo`, `settings
+repo mismatch`, `milestone invalid`, `milestone check failed`, `milestone branch exists`, and `git
+commit failed`. Any other stop leaves the key out, so the next run retries. A network or `gh`
+failure (`git fetch failed`, `gh repo view failed`, `git push failed`, `milestone gate failed`,
+`gh pr create failed`) may well pass then. Either way the report gives the reason, and the run
+ends `autopilot: stopped: milestone planning failed`. next.md removes its own worktree and local
+branch when it stops after creating them.
 
 ## Reports
 

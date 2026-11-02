@@ -16,8 +16,12 @@
 #   4. The last run's planning did not fail at the default branch's current tip (--failed-tip):
 #      a failure that would repeat waits for a new commit or --resume.
 #   5. A human did not decline the last milestone at this tip: the newest closed or merged
-#      next-milestone PR from this repo was closed unmerged, and the tip is still the merge base
-#      of its head and the tip (nothing landed since it was planned). A new commit, or --resume,
+#      next-milestone PR from this repo was closed unmerged, and nothing landed since. That is,
+#      the tip is still the merge base of its head and the tip (nothing landed since it was
+#      planned), or the tip's committer date is no later than the PR's closedAt (ready work
+#      merged while it was open, before the human closed it). A compare that 404s (no common
+#      ancestor) shares no base, so only the date can decide it. (A commit pushed after the
+#      close with an older committer date also reads as declined.) A new commit, or --resume,
 #      lifts it. (--resume does not lift step 4: octo-ledger-state.sh prints no failed tip then.)
 #   6. The metric is fresh: the evals run it came from judged the tip (--head equals it). Right
 #      after a milestone PR merges, the latest completed run still says P == T for the commit
@@ -35,6 +39,8 @@
 #
 # Exit codes: 0 decided, 2 bad arguments, 3 a gh error (gh's output on stderr; nothing decided).
 set -uo pipefail
+# The dates compare as strings, byte by byte.
+export LC_ALL=C
 
 REPO="" RATE="" HEAD="" BUILDABLE=0 FAILED_TIP=none RESUME=false
 need_value() { [ $# -ge 2 ] || { echo "Missing value for $1" >&2; exit 2; }; }
@@ -101,19 +107,26 @@ tip="$(gh api "repos/$REPO/git/ref/heads/$branch" --jq .object.sha 2>"$err")" \
 if [ "$RESUME" = false ]; then
   # The newest closed or merged next-milestone PR (gh's closed state holds both).
   last="$(gh pr list --repo "$REPO" --state closed --limit 100 \
-    --json number,state,headRefName,headRefOid,isCrossRepository \
-    --jq ".[] | $mine | \"\(.number) \(.state) \(.headRefOid)\"" 2>"$err")" \
+    --json number,state,headRefName,headRefOid,isCrossRepository,closedAt \
+    --jq ".[] | $mine | \"\(.number) \(.state) \(.headRefOid) \(.closedAt)\"" 2>"$err")" \
     || gh_failed "gh pr list"
   last="$(printf '%s\n' "$last" | grep . | sort -n | tail -n 1)"
-  read -r num state sha <<EOF
+  read -r num state sha closed <<EOF
 $last
 EOF
   if [ "${state:-}" = CLOSED ]; then
     case "$num" in '' | *[!0-9]*) echo "unexpected gh output: $last" >&2; exit 3 ;; esac
     [[ "${sha:-}" =~ ^[0-9a-f]{40}$ ]] || { echo "unexpected head from gh: $last" >&2; exit 3; }
-    base="$(gh api "repos/$REPO/compare/$tip...$sha" --jq .merge_base_commit.sha 2>"$err")" \
-      || gh_failed "comparing PR #$num with $branch"
-    [ "$base" != "$tip" ] || decide none "$tip" "declined $num"
+    date_re='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+    [[ "${closed:-}" =~ $date_re ]] || { echo "unexpected closedAt from gh: $last" >&2; exit 3; }
+    if base="$(gh api "repos/$REPO/compare/$tip...$sha" --jq .merge_base_commit.sha 2>"$err")"
+    then [ "$base" != "$tip" ] || decide none "$tip" "declined $num"
+    else grep -q 'HTTP 404' "$err" || gh_failed "comparing PR #$num with $branch"
+    fi
+    when="$(gh api "repos/$REPO/git/commits/$tip" --jq .committer.date 2>"$err")" \
+      || gh_failed "reading the date of $branch's tip"
+    [[ "$when" =~ $date_re ]] || { echo "unexpected commit date from gh: $when" >&2; exit 3; }
+    [[ "$when" > "$closed" ]] || decide none "$tip" "declined $num"
   fi
 fi
 

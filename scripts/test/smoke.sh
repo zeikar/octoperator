@@ -57,8 +57,9 @@
 #                            and `claude`
 #
 # The eval templates genesis copies (run.sh, guard.sh) have their own tests: scripts/test/evals.sh.
-# The helpers behind autopilot's run ledger and its P == T decision (octo-evals-metric.sh,
-# octo-ledger-state.sh, octo-milestone-gate.sh) have their own tests too: scripts/test/autopilot.sh;
+# The helpers behind autopilot's run ledger, its P == T decision, and its web access
+# (octo-evals-metric.sh, octo-ledger-state.sh, octo-milestone-gate.sh, octo-web-allowed.sh) have
+# their own tests too: scripts/test/autopilot.sh;
 # and so does genesis --next's offline helper, octo-genesis-next.sh: scripts/test/genesis-next.sh.
 # The proposal fixture the genesis tests share is in scripts/test/genesis-fixture.sh.
 #

@@ -194,17 +194,20 @@ All notable changes to Octoperator are documented in this file. The format is ba
   → planning next milestone` (no longer a progress line). It observes instead, and a P == T run
   never ends a schedule, in four cases. While a milestone PR is open, it ends `stopped:
   next-milestone PR #<pr> open`. After a human closed the newest one unmerged at the same tip, it
-  ends `stopped: next-milestone PR #<pr> declined`. After planning failed at the same tip
-  (recorded in the entry's new optional `planning_failed` key), it ends `stopped: milestone
-  planning failed at this tip`. While the metric is stale, it ends `stopped: evals metric stale`,
+  ends `stopped: next-milestone PR #<pr> declined`. After planning failed at the same tip in a
+  way a retry would repeat (recorded in the entry's new optional `planning_failed` key; a network
+  or `gh` failure isn't, so the next run retries), it ends `stopped: milestone planning failed at
+  this tip`. While the metric is stale, it ends `stopped: evals metric stale`,
   first dispatching `evals.yml` once when no run for the tip is queued or running (never
   `evals-model.yml`). `--resume` or a new commit lifts the declined and failed cases. `autopilot`
   pre-allows no web tool: a skill's grant lasts the whole turn, which `research`, `implement`, and
   `auto` share. So it plans ungrounded unless your settings allow WebSearch and WebFetch, and
-  `research` never uses them. The all-pass procedure is in
-  `skills/autopilot/references/milestone.md`. The ledger's entry, validity, convergence, and
-  metric rules moved to `skills/autopilot/references/ledger.md`. New offline tests: the gate in
-  `scripts/test/autopilot.sh`, and `scripts/test/genesis-next.sh`, which CI runs.
+  `research` never uses them. The new `scripts/octo-web-allowed.sh` checks the settings: a bare
+  allow entry for each tool, and no deny or ask rule naming either, bare or scoped. The all-pass
+  procedure is in `skills/autopilot/references/milestone.md`. The ledger's entry, validity,
+  convergence, and metric rules moved to `skills/autopilot/references/ledger.md`. New offline
+  tests: the gate and the settings check in `scripts/test/autopilot.sh`, and
+  `scripts/test/genesis-next.sh`, which CI runs.
 - README → "Running continuously": copy-paste recipes for re-running `autopilot` with Claude
   Code's own scheduling on your machine — an in-session cron task in a background session (the
   default), `/loop`, `/goal`, and `claude -p` under launchd or crontab with `--cycles 1`,
