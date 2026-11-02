@@ -464,7 +464,8 @@ autopilot: stopped: <reason>
   for human review rather than building and merging a change to the loop that is currently running.
 - The same holds for the **Immutable constraints** section of the target repo's `VISION.md`: autopilot
   never builds an issue that changes it. Only a human edits that section, and `auto`'s merge gate
-  holds any PR that changes it (step 5's vision check), whatever issue it came from.
+  holds any PR that changes `VISION.md` outside its Roadmap body (step 5's vision check), whatever
+  issue it came from.
 - For an issue of either kind (one asking to change a control-loop skill or the `VISION.md`
   immutable constraints), skip it, mark it attempted, and list it in the report as
   `skipped: human-only (control-loop skill)` or `skipped: human-only (VISION.md immutable

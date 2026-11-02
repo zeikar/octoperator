@@ -98,8 +98,9 @@ is reported, never fatal. The report's `evals:` line says either `dispatched eva
 On `plan`, read next.md and follow it by reference. Run its step 1, then step 3 on with the gate's
 `tip:`; its step 2 is the gate just run. Ground or not by [Web access](#web-access). Then, in both
 modes, run the `auto` procedure with `--pr <M>` on the PR it opened (never `--dry-run`). auto's
-merge gate holds a `milestone-*` PR unless both the evals guard and the milestone check
-(`octo-genesis-next.sh --check --head`) pass on the reviewed commit. Then append a `kind: run`
+merge gate holds a `milestone-*` PR unless the vision check, the evals guard, and the milestone
+check (`octo-genesis-next.sh --check --head`) all pass on the reviewed commit. The vision check
+lets VISION.md change only in its Roadmap body, in plain text. Then append a `kind: run`
 entry (SKILL.md step 5: `cycles_used` 1, and `merged` or `held` 1 by auto's result, else 0),
 report, and STOP.
 

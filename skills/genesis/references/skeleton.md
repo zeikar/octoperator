@@ -126,14 +126,15 @@ statuses:
 # .github/workflows/evals-guard.yml and evals-model.yml (its trigger, call cap,
 # and timeout), .claude/'s Claude Code settings (they decide whether
 # genesis --next may use the web under autopilot), GENESIS.md (its test_command
-# drives the skeleton check), and the CLAUDE.md files and .mcp.json that shape
-# what an unattended run does; evals/ stays out, so PRs that only add must-fail
-# evals merge (the guard holds the rest).
+# drives the skeleton check), and the CLAUDE.md and CLAUDE.local.md files and
+# .mcp.json that shape what an unattended run does; evals/ stays out, so PRs that
+# only add must-fail evals merge (the guard holds the rest).
 approval_paths:
   - ".github/workflows/"
   - ".claude/"
   - "/GENESIS.md"
   - "CLAUDE.md"
+  - "CLAUDE.local.md"
   - "/.mcp.json"
 ---
 
@@ -150,15 +151,18 @@ The entries are the paths whose change grants an unattended run more than review
 - `CLAUDE.md`, at any depth, is instructions every unattended Claude Code run follows: the
   root one at the start, a nested one once the run reads a file under it. So the entry has no
   `/` and matches all of them, not only the root's.
+- `CLAUDE.local.md`, at any depth, is read the same way as `CLAUDE.md`. It is usually
+  git-ignored, but a PR that commits one would steer every later run.
 - `/.mcp.json` (root only, where Claude Code reads the project's MCP servers) adds tools to the
   run.
 
 Matching ignores case, so `.Claude/` or `claude.md` is held too: on macOS's default file system
 it lands on the same file. Nothing genesis or an autonomous step writes matches: the skeleton has
-no `CLAUDE.md` or `.mcp.json`, `--approve` writes `GENESIS.md` before the repo exists, and a
-milestone PR touches none of these paths (`references/next.md` step 7), so it still merges
-unattended. An issue that asks for a change to one of them is held for a human, which is the
-point. `docs/adr/` stays out: an issue may rightly add an ADR, and `auto`'s review reads it like
-any change; a human who wants it held adds `docs/adr/`. VISION.md's Immutable constraints need no
-entry: `auto` checks that section on every PR (`scripts/octo-vision-guard.sh`), and the rest of
-VISION.md stays open, so a milestone can add its Roadmap item.
+no `CLAUDE.md`, `CLAUDE.local.md`, or `.mcp.json`, `--approve` writes `GENESIS.md` before the
+repo exists, and a milestone PR touches none of these paths (`references/next.md` step 7), so it
+still merges unattended. An issue that asks for a change to one of them is held for a human,
+which is the point. `docs/adr/` stays out: an issue may rightly add an ADR, and `auto`'s review
+reads it like any change; a human who wants it held adds `docs/adr/`. VISION.md needs no entry:
+`auto` checks it on every PR (`scripts/octo-vision-guard.sh`) and holds any change outside its
+Roadmap body, or a Roadmap line that isn't plain text, so a milestone can still add its Roadmap
+item.

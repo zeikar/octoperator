@@ -67,7 +67,7 @@ bash scripts/test/autopilot.sh
 # 1d. Test genesis --next's milestone numbering and milestone diff check (offline; CI runs this).
 bash scripts/test/genesis-next.sh
 
-# 1e. Test auto's VISION.md Immutable constraints check (offline; CI runs this).
+# 1e. Test auto's VISION.md check (offline; CI runs this).
 bash scripts/test/vision.sh
 
 # 2. Validate the benchmark tasks (offline; CI runs these too). See bench/README.md.

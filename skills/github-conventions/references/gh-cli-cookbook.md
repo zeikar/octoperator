@@ -184,8 +184,8 @@ update), `UNSTABLE` (a check failing/pending), `UNKNOWN` (still computing) — m
 the reason. `gh pr checks <pr#>` is informational only (it conflates required and optional checks), not
 the gate — `--watch` uses it only to wait, so give that call a bounded timeout and, if checks are still
 pending when it expires, let the gate hold the PR. When `approval_paths` is set, `auto` first
-holds any PR whose changed files match it, and it holds any PR that changes `VISION.md`'s
-Immutable constraints (see `skills/auto/SKILL.md`, step 5). `--merge` keeps
+holds any PR whose changed files match it, and it holds any PR that changes `VISION.md` outside
+its Roadmap body (see `skills/auto/SKILL.md`, step 5). `--merge` keeps
 every commit; do not substitute `--squash` or `--rebase`. The PR's `Closes #N` auto-closes the
 issue.
 

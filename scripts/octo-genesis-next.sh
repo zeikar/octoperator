@@ -36,10 +36,10 @@
 #     `- requirement: R<k>` naming one of the section's requirements, `- judge: script` or
 #     `- judge: model`, and text, at least one judged by script; each new eval's scenario.md
 #     front matter has the same `id:`, `judge:`, and `requirement:` lines;
-#   - VISION.md changes only inside ## Roadmap, so ## Immutable constraints never changes, it
-#     gains no level-1 or level-2 heading (CommonMark's ATX or setext form), and its Roadmap
-#     names `Milestone <n>`: octo-vision-guard.sh --milestone <n>, the guard auto runs on every
-#     PR, checks these;
+#   - VISION.md changes only in its ## Roadmap body, every line of which is plain text (no
+#     heading, HTML, quote, fence, underline, or link definition), and that body names
+#     `Milestone <n>`: octo-vision-guard.sh --milestone <n>, the guard auto runs on every PR,
+#     checks these;
 #   - grounding: when the new section holds the line `ungrounded: no web access` before its
 #     first `### ` heading, docs/research.md is unchanged, and neither the section nor the lines
 #     VISION.md gained cite an http(s) URL; otherwise docs/research.md changed (refreshed);

@@ -60,7 +60,7 @@ convergence_runs: 3
 # `?`, `[...]`, `{...}`, `!`, and a backslash are unsupported; a pattern using
 # them holds every PR. `scripts/octo-approval-match.sh` applies these rules.
 # Default: empty (no gate). Genesis writes `.github/workflows/`, `.claude/`,
-# `/GENESIS.md`, `CLAUDE.md`, and `/.mcp.json`.
+# `/GENESIS.md`, `CLAUDE.md`, `CLAUDE.local.md`, and `/.mcp.json`.
 approval_paths:
   - ".github/workflows/"
   - "/infra/"
@@ -75,10 +75,11 @@ Free-form project notes for humans; Octoperator ignores this section.
 own included (its `.claude/settings.json` registers the plugin marketplace): those settings
 decide what an unattended run may do, such as whether `genesis --next` may use the web under
 autopilot (`scripts/octo-web-allowed.sh`), so a PR that changes them should wait for a human.
-`CLAUDE.md` (no `/`, so every one at any depth) and `/.mcp.json` are worth listing for the same
-reason: Claude Code follows the first and loads the MCP servers the second names.
-This file itself is git-ignored, so no PR changes it. VISION.md's Immutable constraints need no
-pattern: `auto` checks that section on every PR (`conventions.md` → Approval gates).
+`CLAUDE.md` and `CLAUDE.local.md` (no `/`, so every one at any depth) and `/.mcp.json` are worth
+listing for the same reason: Claude Code follows the first two and loads the MCP servers the
+third names.
+This file itself is git-ignored, so no PR changes it. VISION.md needs no pattern: `auto` holds
+any change outside its Roadmap body on every PR (`conventions.md` → Approval gates).
 
 ## Reading settings
 

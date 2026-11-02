@@ -20,8 +20,8 @@
 #   - octo-approval-match.sh : pattern normalization, malformed patterns, matching (renames
 #                            included, case ignored, Unicode folding too, genesis's entries
 #                            holding the evals guard, .claude/ (`.Claude/` too), GENESIS.md,
-#                            every CLAUDE.md, and the root .mcp.json, but not evals/ or a
-#                            milestone's files),
+#                            every CLAUDE.md and CLAUDE.local.md, and the root .mcp.json, but
+#                            not evals/ or a milestone's files),
 #                            and the incomplete-file-list hold, against a stub `gh`
 #   - octo-genesis-check.sh : a valid proposal, a missing section or front-matter key, an
 #                            ungrounded proposal (and one with URLs or a misplaced or misspelled
@@ -468,21 +468,21 @@ matches 'modules/**/vpc.tf' 'modules/net/vpc.tf'
 matches '/infra' 'infra/main.tf'
 # Genesis's approval_paths (skeleton.md → Settings) holds a PR that changes the evals guard, the
 # Claude Code settings (they decide whether genesis --next may use the web), GENESIS.md, a
-# CLAUDE.md at any depth, or the root .mcp.json, in any case, not one adding an eval or a
-# milestone's own files, so milestone PRs still merge unattended.
+# CLAUDE.md or CLAUDE.local.md at any depth, or the root .mcp.json, in any case, not one adding
+# an eval or a milestone's own files, so milestone PRs still merge unattended.
 gen_paths="$(awk '/^approval_paths:$/ { on = 1; next } on && /^  - "/ { print; next } on { exit }' \
   "$SCRIPTS_DIR/../skills/genesis/references/skeleton.md" | sed 's/^  - "//; s/"$//' \
   | paste -sd ' ' -)"
-expect 0 "genesis's approval_paths are the five skeleton.md lists" \
-  test "$gen_paths" = ".github/workflows/ .claude/ /GENESIS.md CLAUDE.md /.mcp.json"
+expect 0 "genesis's approval_paths are the six skeleton.md lists" \
+  test "$gen_paths" = ".github/workflows/ .claude/ /GENESIS.md CLAUDE.md CLAUDE.local.md /.mcp.json"
 printf '%s\t\n' .github/workflows/evals-guard.yml evals/recall/check.sh evals/guard.sh \
   .claude/settings.json .claude/settings.local.json .Claude/settings.local.json docs/prd.md \
   docs/research.md VISION.md evals/export-200-turns/scenario.md evals/export-200-turns/check.sh \
-  src/.claude/x GENESIS.md docs/GENESIS.md CLAUDE.md src/claude.md .mcp.json src/.mcp.json \
-  docs/adr/0002-cache.md >"$STUB_FILES"
+  src/.claude/x GENESIS.md docs/GENESIS.md CLAUDE.md src/claude.md CLAUDE.local.md \
+  src/claude.LOCAL.md .mcp.json src/.mcp.json docs/adr/0002-cache.md >"$STUB_FILES"
 # shellcheck disable=SC2086 # one pattern per word, as genesis writes them
 approval $gen_paths
-expect 0 "genesis's approval_paths match only the guard, .claude/, GENESIS.md, CLAUDE.md, .mcp.json" \
+expect 0 "genesis's approval_paths match only the guard, .claude/, GENESIS.md, CLAUDE.md, CLAUDE.local.md, .mcp.json" \
   test "$am_rc" -eq 1 -a "$am_out" = ".github/workflows/evals-guard.yml$tab.github/workflows/
 .claude/settings.json$tab.claude/
 .claude/settings.local.json$tab.claude/
@@ -490,6 +490,8 @@ expect 0 "genesis's approval_paths match only the guard, .claude/, GENESIS.md, C
 GENESIS.md$tab/GENESIS.md
 CLAUDE.md${tab}CLAUDE.md
 src/claude.md${tab}CLAUDE.md
+CLAUDE.local.md${tab}CLAUDE.local.md
+src/claude.LOCAL.md${tab}CLAUDE.local.md
 .mcp.json$tab/.mcp.json"
 printf '%s\t\n' docs/prd.md docs/research.md VISION.md evals/export-200-turns/scenario.md \
   evals/export-200-turns/check.sh >"$STUB_FILES"

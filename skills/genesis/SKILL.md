@@ -311,9 +311,9 @@ with the reason given here; the next `--approve` resumes from what exists.
    `.github/workflows/` covers `.github/workflows/evals-guard.yml` and `evals-model.yml`, so a
    change to the guard, or a schedule, cap, or timeout change to the model workflow, needs a
    human; so does a change under `.claude/`, whose settings decide whether `--next` may use the
-   web under autopilot, to `GENESIS.md`, to a `CLAUDE.md`, or to `.mcp.json` (skeleton.md says
-   why). `evals/` is not in it, so a PR that only adds must-fail evals merges once its guard
-   checks pass. Genesis adds no secret here or anywhere. A probe
+   web under autopilot, to `GENESIS.md`, to a `CLAUDE.md` or `CLAUDE.local.md`, or to `.mcp.json`
+   (skeleton.md says why). `evals/` is not in it, so a PR that only adds must-fail evals merges
+   once its guard checks pass. Genesis adds no secret here or anywhere. A probe
    `error`, a non-zero exit, or a failed label → stop with `setup failed`. A settings file whose
    `repo:` is not `<repo>` → stop with `settings repo mismatch`, before any label.
 

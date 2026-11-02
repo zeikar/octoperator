@@ -20,9 +20,10 @@
 #               text, a second ## heading or a misnumbered one, a reused requirement id, a
 #               scenario without an eval or an eval without a scenario, a scenario.md that
 #               disagrees, no script-judged scenario, a changed Immutable constraints section
-#               or other non-Roadmap section of VISION.md, a level-1 or level-2 heading added
-#               inside the Roadmap (after a tab or up to 3 spaces, or setext; an indented code
-#               line, a ###, and `##x` pass), a Roadmap without the milestone, a
+#               or other non-Roadmap section of VISION.md, a Roadmap line that is not plain text
+#               (a heading at any indent, `###`, `##x`, HTML, a quote, a fence, a setext
+#               underline; a continuation line, a sub-item, and a numbered item pass), a Roadmap
+#               without the milestone, a
 #               grounded milestone that leaves docs/research.md as it is, an ungrounded one that
 #               changes it or cites a URL, and a research file the proposal check rejects
 #   - bad arguments
@@ -336,21 +337,28 @@ case_repo
 sed -i.bak 's/^A companion that remembers you\.$/A companion./' "$c/VISION.md" \
   && rm "$c/VISION.md.bak" && commit "$c" goal
 check
-fails "a change outside ## Roadmap fails" "VISION.md: only ## Roadmap may change"
+fails "a change outside ## Roadmap fails" "VISION.md: only the ## Roadmap body may change without a human"
 case_repo
 sed -i.bak 's/^2\. \*\*Milestone 2: /2. **Next: /' "$c/VISION.md" && rm "$c/VISION.md.bak" \
   && commit "$c" roadmap
 check
 fails "a Roadmap without the milestone fails" "VISION.md: ## Roadmap needs an item for Milestone 2"
-# Inside ## Roadmap, so the section checks pass them; CommonMark still reads each as a heading.
+# Inside ## Roadmap, so only the plain-text rule sees them: a heading, HTML, a quote, a fence, or
+# an underline can recast what is around it, at any indent.
+NOTEXT="a heading, HTML, a quote, a fence, an = or - underline, or a link definition): a human merges it"
 for h in $'##\tImmutable constraints' ' ## Immutable constraints' '   # Vision' '##' \
-    $'Immutable constraints\n---'; do
+    '### Sub-item' '##not a heading' '    ## indented' '<details>' '> quoted' '```'; do
   case_repo
   printf '\n%s\n\n- New constraint\n' "$h" >>"$c/VISION.md" && commit "$c" heading
   check
-  fails "a Roadmap line that is a heading ('$(printf '%s' "${h//$'\t'/<tab>}" | paste -sd '/' -)') fails" \
-    "VISION.md: its level-1 or level-2 headings changed: only a human adds, removes, or renames one (a Roadmap change adds items, not headings)"
+  fails "a Roadmap line that is not plain text ('${h//$'\t'/<tab>}') fails" \
+    "VISION.md: line 30 of the ## Roadmap body is not plain text ($NOTEXT"
 done
+case_repo
+printf '\nImmutable constraints\n---\n' >>"$c/VISION.md" && commit "$c" setext
+check
+fails "a setext underline in the Roadmap fails" \
+  "VISION.md: line 31 of the ## Roadmap body is not plain text ($NOTEXT"
 # The check runs in auto's merge gate under the user's git config, so forced diff color or an
 # external diff must not blind it.
 case_repo
@@ -358,13 +366,13 @@ printf '\n## Immutable constraints\n\n- New constraint\n' >>"$c/VISION.md" && co
 GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=color.ui GIT_CONFIG_VALUE_0=always \
   GIT_CONFIG_KEY_1=diff.external GIT_CONFIG_VALUE_1=true check
 fails "a Roadmap heading still fails with color.ui=always and diff.external set" \
-  "VISION.md: its level-1 or level-2 headings changed: only a human adds, removes, or renames one (a Roadmap change adds items, not headings)"
-for h in '    ## code, not a heading' '### Sub-item' '##not a heading'; do
+  "VISION.md: line 30 of the ## Roadmap body is not plain text ($NOTEXT"
+for h in '   continued, with `code` and a [link](https://x.example/a)' '- a sub-item' \
+    '3. **Later** — more'; do
   case_repo
-  printf '\n%s\n' "$h" >>"$c/VISION.md" && commit "$c" nonheading
+  printf '%s\n' "$h" >>"$c/VISION.md" && commit "$c" plain
   check
-  same "a Roadmap line that is not a level-1 or level-2 heading ('$h') passes" \
-    "0|ok: milestone 2: export-200-turns" "$rc|$out"
+  same "a plain Roadmap line ('$h') passes" "0|ok: milestone 2: export-200-turns" "$rc|$out"
 done
 
 case_repo

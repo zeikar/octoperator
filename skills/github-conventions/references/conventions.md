@@ -49,7 +49,7 @@ a `needs-approval` proposal).
 ### Approval gates
 
 Independent gates keep deploy, spend, and delete changes, weakened evals, and changes to the
-constitution's Immutable constraints in front of a human:
+constitution outside its Roadmap in front of a human:
 - **Issue gate (`autopilot`).** Discovery skips every `needs-approval` issue without `approved` and
   reports it as `gated: needs-approval`. It relies on the label, so an issue nobody labeled is not
   caught.
@@ -69,17 +69,19 @@ constitution's Immutable constraints in front of a human:
   repo secret only where environments aren't available (a private repo on GitHub Free);
   `skills/genesis/references/evals.md` → Model-judged evals has the steps.
 - **Vision check (`auto`).** For every PR, in any repo with a root `VISION.md`, `auto` merges
-  only when `scripts/octo-vision-guard.sh` finds the reviewed commit leaves its
-  `## Immutable constraints` section as it was at the merge base: not changed or removed; the
-  file not deleted, made a symlink, given another mode, or shadowed by a root name that differs
-  only in case (`vision.md`, which a macOS checkout writes over it); the level-1 and level-2
-  headings the same (ATX, also after a tab or indented up to 3 spaces, or setext), so no heading
-  can render as a second section or recast the real one; and no HTML comment or code fence line
-  added or removed, since either can hide the section. Otherwise it holds with `VISION.md
-  immutable constraints changed: a human merges this`. That holds Octoperator's own PRs too:
-  its `VISION.md` says only a human edits that section. The rest of the file's text stays open,
-  so a milestone can add its Roadmap item. The check can't judge meaning: other text that argues
-  against a constraint passes it, and only review catches that.
+  only when `scripts/octo-vision-guard.sh` finds the reviewed commit changed that file, if at
+  all, only in its Roadmap body and only in plain text. The whole constitution outside the
+  Roadmap body (Goal, Target users, Quality bar, Immutable constraints, every heading) must keep
+  the merge base's bytes; each Roadmap body line must not open with `<`, `#`, `>`, or a fence,
+  be only `=` or `-` marks, or hold HTML or a link definition; the file may hold no NUL, bare
+  CR, or other control byte; and it must not be deleted, new, made a symlink, given another
+  mode, or joined by a new or changed root name that differs only in case (`vision.md`, which a
+  macOS checkout writes over it). The guard parses no Markdown: anything that isn't plainly text
+  waits for a human, so no construct can hide, recast, or re-link a section. Otherwise it holds
+  with `VISION.md changed outside its Roadmap: a human merges this`. That holds Octoperator's
+  own PRs too. A milestone's Roadmap item still merges unattended. The check can't judge
+  meaning: Roadmap text that argues against a constraint passes it, and only review catches
+  that.
 - **Evals guard (`auto`).** Where the base branch has `.github/workflows/evals-guard.yml` (a repo
   genesis created), `auto` merges only when `scripts/octo-evals-guard.sh` finds both guard checks
   passed on the reviewed commit (against the base branch's tip, when the PR changes `evals/` or
@@ -209,8 +211,8 @@ re-review loop; leftover minors never block), that review covered the current he
 with `--match-head-commit`), and the PR is `OPEN`, not draft, with `mergeStateStatus` **`CLEAN`**
 (GitHub's "ready to merge" — no conflicts, all required checks green, not blocked by protection,
 not behind). Any other state (`DIRTY` / `BLOCKED` / `BEHIND` / `UNSTABLE` / `UNKNOWN`) → do not
-merge; report the reason. A PR that touches an `approval_paths` pattern, or changes `VISION.md`'s
-Immutable constraints, is never merged by `auto` either (Approval gates above). Never
+merge; report the reason. A PR that touches an `approval_paths` pattern, or changes `VISION.md`
+outside its Roadmap body, is never merged by `auto` either (Approval gates above). Never
 force-merge. The PR's `Closes #N` auto-closes the issue; move its board item to the mapped `done`
 status afterward with
 `octo-project-status.sh ... --status "<statuses.done>"`.

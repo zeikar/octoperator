@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# octo-vision-guard.sh — tell auto's merge gate whether a PR leaves VISION.md's Immutable
-# constraints alone: VISION.md says only a human edits that section.
+# octo-vision-guard.sh — tell auto's merge gate whether a PR changes VISION.md only where an
+# agent may: VISION.md is the product constitution, and only its `## Roadmap` body is revisable
+# without a human.
 #
 # Usage:
 #   octo-vision-guard.sh --base REV --head REV [--milestone N] DIR
@@ -8,32 +9,35 @@
 # DIR is a git repository that holds both commits, such as auto's clone. The guard reads git's
 # objects (ls-tree, cat-file), never the work tree, so it needs no checkout, and no diff, color,
 # textconv, or pathspec setting in the user's git config changes what it reads. It compares the
-# root VISION.md at merge-base(--base, --head) with the one at --head:
+# root VISION.md at merge-base(--base, --head) with the one at --head, and allows a change only
+# in the Roadmap body, as plain text. It never parses Markdown: what a renderer does with a line
+# is not the guard's to guess, so anything that isn't plainly text holds the PR for a human.
 #   - a root entry at --head other than VISION.md whose name folds to it (`vision.md`,
 #     `Vision.md`, `viſion.md`: Unicode case folding, as macOS's default file system compares
-#     names): FAIL, even with no VISION.md. A case-insensitive checkout writes both to one file,
-#     so the reader could get the other one's text while the guard checks VISION.md;
-#   - no VISION.md on either side: ok;
-#   - VISION.md deleted, --head's not a regular file (a symlink, a submodule, a directory), or
-#     its mode changed: FAIL;
-#   - the `## Immutable constraints` section (from that exact heading line, trailing blanks
-#     aside, to the next `## ` line) differs: FAIL. A side with no such section has an empty
-#     one, so adding a section counts too;
-#   - the list of level-1 and level-2 headings differs (one added, removed, renamed, or moved):
-#     FAIL, so a heading that renders as a second Immutable constraints section, or as a parent
-#     that recasts it (`# Archive` above it), holds the PR whatever its name's spelling (`&#32;`,
-#     a no-break space). A heading is CommonMark's ATX form (up to 3 spaces, `#` or `##`, then a
-#     space, a tab, or the line's end, so `##<tab>x` and ` ## x` count) or a setext one (a
-#     paragraph underlined with `=` or `-`, up to 3 spaces before it); names compare without
-#     case, a closing `#` sequence, or extra blanks. A Roadmap change adds items, not headings;
-#   - the number of lines holding `<!--`, of lines holding `-->`, or of fence lines (up to 3
-#     spaces, then ``` or ~~~) differs: FAIL. Code fences and HTML aren't parsed, so wrapping the
-#     section in a comment or a fence would hide it from a reader while every check above still
-#     sees it; this check holds that instead. A fence, HTML, or blockquote line ends the open
-#     paragraph and starts the next one, so a setext underline after it counts as a heading, and
-#     a heading-like line inside a fence counts too: over-reading there only holds more.
-# With --milestone N (genesis --next's check, octo-genesis-next.sh --check), also: nothing outside
-# `## Roadmap` changes, and the Roadmap names `Milestone N`.
+#     names), new since the merge base or with another mode or object: FAIL, even with no
+#     VISION.md. A case-insensitive checkout writes both to one file, so the reader could get the
+#     other one's text while the guard checks VISION.md. One the merge base already had, as it
+#     was, is a human's and passes;
+#   - no VISION.md on either side: ok; one left as it was: ok;
+#   - VISION.md deleted, new, --head's not a regular file (a symlink, a submodule, a directory),
+#     or its mode changed: FAIL;
+#   - --head's file holds a NUL, a CR not followed by LF, or another C0 control character but a
+#     tab: FAIL. Tools and renderers split such a file differently, so a reader may not see
+#     what the guard checked;
+#   - the Roadmap body is everything after the merge base's line that is exactly `## Roadmap`
+#     (a trailing CR aside) up to its next level-1 or level-2 heading line (up to 3 spaces, `#`
+#     or `##`, then a blank or the line's end), or to the end. --head must keep the merge base's
+#     bytes before that body (its Roadmap line included) and from that heading on: otherwise
+#     FAIL, and with no `## Roadmap` line at the merge base any change does. So Goal, Target
+#     users, Quality bar, and Immutable constraints change only through a human merge;
+#   - each line of --head's Roadmap body, changed or not, must be plain text: FAIL for a line
+#     that, after any blanks, opens with `<`, `#`, `>`, ``` or ~~~, or is only a run of `=` or
+#     of `-`, or that holds `<!--`, `-->`, `?>`, `]]>`, `<` before a letter, `/`, `!`, or `?`
+#     (raw HTML), or `]:` (a link definition). Those open or close what can hide, recast, or
+#     re-link the sections around it. List items, indented continuation lines, code spans, and
+#     `[text](url)` links pass.
+# With --milestone N (genesis --next's check, octo-genesis-next.sh --check), also: the Roadmap
+# body names `Milestone N`.
 #
 # Prints one `FAIL: VISION.md: <problem>` line per problem, or one `ok: VISION.md: …` line.
 # Offline: git and perl only, never gh; writes nothing.
@@ -83,12 +87,18 @@ entry() {
   e="$(g ls-tree --full-tree "$1" -- VISION.md)" || return 1
   printf '%s' "${e%%$'\t'*}"
 }
-# Root names other than VISION.md that fold to it, each with any byte outside printable ASCII
-# shown as `?`. fc then NFD: macOS's file system ignores case and Unicode normalization.
-variants="$(g ls-tree -z --full-tree --name-only "$head" \
-  | perl -MUnicode::Normalize -Mfeature=fc -0 -ne 'chomp; my $n = $_; utf8::decode($n);
-      next if $_ eq "VISION.md" || NFD(fc(NFD($n))) ne "vision.md";
-      s/[^\x20-\x7e]/?/g; print "$_\n"')" || exit 3
+# Root names other than VISION.md that fold to it and are new or changed since the merge base,
+# each with any byte outside printable ASCII shown as `?`. fc then NFD: macOS's file system
+# ignores case and Unicode normalization.
+g ls-tree -z --full-tree "$mb" >"$tmp/tree.base" || exit 3
+g ls-tree -z --full-tree "$head" >"$tmp/tree.head" || exit 3
+variants="$(perl -MUnicode::Normalize -Mfeature=fc -0 -ne 'chomp;
+    my ($meta, $name) = split /\t/, $_, 2;
+    if ($ARGV =~ /base$/) { $was{$name} = $meta; next }
+    my $n = $name; utf8::decode($n);
+    next if $name eq "VISION.md" || NFD(fc(NFD($n))) ne "vision.md";
+    next if exists $was{$name} && $was{$name} eq $meta;
+    $name =~ s/[^\x20-\x7e]/?/g; print "$name\n"' "$tmp/tree.base" "$tmp/tree.head")" || exit 3
 [ -z "$variants" ] || fail "the root also holds $(printf '%s' "$variants" | paste -sd ' ' -)," \
   "which a case-insensitive checkout writes over VISION.md"
 be="$(entry "$mb")" || exit 3
@@ -101,76 +111,93 @@ fi
 read -r hmode htype hobj <<<"$he"
 case "$hmode" in
   100644 | 100755) ;;
-  *) fail "not a regular file (mode $hmode): its Immutable constraints can't be read"; exit 1 ;;
+  *) fail "not a regular file (mode $hmode): a reader may not get the text checked here"; exit 1 ;;
 esac
-: >"$tmp/base"
-if [ -n "$be" ]; then
-  read -r bmode btype bobj <<<"$be"
-  [ "$bmode" = "$hmode" ] || fail "its mode changed ($bmode to $hmode)"
-  if [ "$btype" = blob ]; then g cat-file blob "$bobj" >"$tmp/base" || exit 3; fi
+if [ "$be" = "$he" ] && [ -z "$MILESTONE" ]; then
+  [ "$FAILS" -eq 0 ] || exit 1
+  echo "ok: VISION.md: unchanged"; exit 0
 fi
+[ -n "$be" ] || { fail "new: only a human adds the constitution"; exit 1; }
+read -r bmode _ bobj <<<"$be"
+[ "$bmode" = "$hmode" ] || { fail "its mode changed ($bmode to $hmode)"; exit 1; }
+g cat-file blob "$bobj" >"$tmp/base" || exit 3
 [ "$htype" = blob ] && g cat-file blob "$hobj" >"$tmp/head" || exit 3
 
-# section_of <name> <file> : the body of each `## <name>` section, trailing blanks aside.
-section_of() {
-  awk -v s="## $1" '{ line = $0; sub(/[ \t\r]+$/, "", line) }
-    line ~ /^## / { on = (line == s); next } on' "$2"
-}
-# without <name> <file> : the file with that section's body left out.
-without() {
-  awk -v s="## $1" '{ line = $0; sub(/[ \t\r]+$/, "", line) }
-    line ~ /^## / { skip = (line == s); print; next } !skip' "$2"
-}
-# headings <file> : each level-1 or level-2 heading as `<level> <name>`, the name lowercased
-# with its blanks collapsed (CommonMark's ATX and setext forms, as the header says).
-headings() {
-  awk 'function name(s) { s = tolower(s); gsub(/[ \t]+/, " ", s); sub(/^ /, "", s)
-                          sub(/ $/, "", s); return s }
-    { line = $0; sub(/\r$/, "", line) }
-    line ~ /^[ \t]*$/ { para = ""; next }
-    line ~ /^(   |  | )?##?([ \t]|$)/ {
-      t = line; sub(/^ *#/, "", t); lvl = 1
-      if (t ~ /^#/) { t = substr(t, 2); lvl = 2 }
-      # A closing sequence: blanks, then only #s, to the end; a heading of only #s is empty.
-      if (t ~ /^[ \t#]*$/) t = ""; else sub(/[ \t]+#+[ \t]*$/, "", t)
-      print lvl, name(t); para = ""; next }
-    para != "" && line ~ /^(   |  | )?(=+|-+)[ \t]*$/ {
-      print (line ~ /=/ ? 1 : 2), name(para); para = ""; next }
-    # A fence, HTML, or blockquote line ends a paragraph and starts the next (the header says why).
-    line ~ /^(   |  | )?(```|~~~|<|>)/ { para = line; next }
-    # A thematic break ends a paragraph too, as do a blank and a heading.
-    line ~ /^(   |  | )?(\*[ \t]*\*[ \t]*\*[*\t ]*|_[ \t]*_[ \t]*_[_\t ]*|-[ \t]*-[ \t]*-[-\t ]*)$/ {
-      para = ""; next }
-    # An indented line opens no paragraph (it is code), though it may continue one.
-    para == "" && line ~ /^(    |\t)/ { next }
-    { para = (para == "" ? line : para " " line) }' "$1"
-}
+# Bytes first, with perl on the file: awk and $(...) drop or stop at a NUL, and a bare CR is a
+# line break to CommonMark but not to line tools.
+bad="$(perl -0777 -ne 'my $what;
+    if (/\x00/) { $what = "a NUL byte" }
+    elsif (/\r(?!\n)/) { $what = "a CR not followed by LF" }
+    elsif (/([\x01-\x08\x0b\x0c\x0e-\x1f])/) {
+      $what = sprintf "a control character (0x%02x)", ord $1 }
+    else { exit 0 }
+    printf "line %d holds %s", 1 + (substr($_, 0, $-[0]) =~ tr/\n//), $what' "$tmp/head")" || exit 3
+[ -z "$bad" ] || { fail "$bad: a reader may not see the text checked here, so a human merges it"
+  exit 1; }
 
-if [ "$(section_of 'Immutable constraints' "$tmp/base")" \
-    != "$(section_of 'Immutable constraints' "$tmp/head")" ]; then
-  fail "## Immutable constraints changed: only a human edits that section"
-elif [ -n "$MILESTONE" ] && [ "$(without Roadmap "$tmp/base")" != "$(without Roadmap "$tmp/head")" ]
-then
-  fail "only ## Roadmap may change"
+# Split at the merge base's Roadmap body: base.pre (up to and including its `## Roadmap` line)
+# and base.suf (from its next level-1 or level-2 heading line, or empty); head.pre and head.suf
+# are --head's bytes in the same places, head.mid what lies between, its first line's number in
+# head.line. Prints `noroadmap`, `outside` (--head can't hold both around whole lines), or `ok`.
+# The Immutable constraints section of each side goes to imm.base and imm.head, for the reason.
+split="$(perl -e 'use strict; my $d = shift;
+    sub slurp { local $/; open my $f, "<:raw", $_[0] or die "$_[0]: $!"; my $s = <$f>; $s // "" }
+    sub put { open my $f, ">:raw", "$d/$_[0]" or die "$d/$_[0]: $!"; print $f $_[1]; close $f }
+    my $heading = qr/^ {0,3}##?(?:[ \t]|\r?\n|\r?\z)/m;
+    my ($bs, $h) = (slurp("$d/base"), slurp("$d/head"));
+    for (["base", $bs], ["head", $h]) {
+      my ($side, $s) = @$_; my $sec = "";
+      if ($s =~ /^## Immutable constraints\r?(?:\n|\z)/mg) {
+        my $from = pos $s; $sec = substr $s, $from;
+        $sec = substr $sec, 0, $-[0] if $sec =~ $heading;
+      }
+      put("imm.$side", $sec);
+    }
+    unless ($bs =~ /^## Roadmap(?:\r?\n|\z)/mg) { print "noroadmap"; exit 0 }
+    my $pre = substr $bs, 0, pos $bs; my $rest = substr $bs, pos $bs;
+    my $suf = $rest =~ $heading ? substr($rest, $-[0]) : "";
+    put("base.pre", $pre); put("base.suf", $suf);
+    if (length $h < length($pre) + length $suf) { print "outside"; exit 0 }
+    put("head.pre", substr $h, 0, length $pre);
+    put("head.suf", length $suf ? substr($h, -length $suf) : "");
+    my $mid = substr $h, length $pre, length($h) - length($pre) - length $suf;
+    my $line = 1 + ($pre =~ tr/\n//);
+    # A Roadmap line at the end of the file with no LF: the body starts after the one --head adds.
+    if ($pre !~ /\n\z/ && length $mid) {
+      if ($mid =~ s/\A\r?\n//) { $line++ } else { print "outside"; exit 0 }
+    }
+    # The body ends at a line end, so the heading after it stays a line of its own.
+    if (length $suf && length $mid && $mid !~ /\n\z/) { print "outside"; exit 0 }
+    put("head.mid", $mid); put("head.line", $line); print "ok"' "$tmp")" || exit 3
+
+OUTSIDE="only the ## Roadmap body may change without a human"
+case "$split" in
+  noroadmap) fail "it has no line that is exactly '## Roadmap' at the merge base, so any change" \
+       "needs a human"; exit 1 ;;
+  outside) ;;
+  ok) cmp -s "$tmp/base.pre" "$tmp/head.pre" && cmp -s "$tmp/base.suf" "$tmp/head.suf" \
+        || split=outside ;;
+  *) echo "could not split VISION.md" >&2; exit 3 ;;
+esac
+if [ "$split" = outside ]; then
+  if cmp -s "$tmp/imm.base" "$tmp/imm.head"; then fail "$OUTSIDE"
+  else fail "## Immutable constraints changed: only a human edits that section"; fi
+  exit 1
 fi
-headings "$tmp/base" >"$tmp/h.base" || exit 3
-headings "$tmp/head" >"$tmp/h.head" || exit 3
-cmp -s "$tmp/h.base" "$tmp/h.head" \
-  || fail "its level-1 or level-2 headings changed: only a human adds, removes, or renames one" \
-       "(a Roadmap change adds items, not headings)"
-# marks <file> : how many lines hold `<!--`, hold `-->`, and open or close a code fence.
-marks() {
-  awk '{ sub(/\r$/, "") } /<!--/ { o++ } /-->/ { c++ } /^(   |  | )?(```|~~~)/ { f++ }
-    END { print o + 0, c + 0, f + 0 }' "$1"
-}
-[ "$(marks "$tmp/base")" = "$(marks "$tmp/head")" ] \
-  || fail "an HTML comment or code fence line was added or removed: one can hide the" \
-       "Immutable constraints section"
+
+# Each body line must be plain text (the header lists what isn't). Prints the first that isn't.
+notext="$(perl -ne 'BEGIN { open my $f, "<", shift or die; $n = <$f>; $n-- }
+    $n++; chomp; s/\r\z//;
+    next unless /^[ \t]*(?:<|#|>|```|~~~)/ || /^[ \t]*(?:=+|-+)[ \t]*$/
+      || /<!--|-->|\?>|\]\]>|<[A-Za-z\/!?]|\]:/;
+    print "$n"; exit 0' "$tmp/head.line" "$tmp/head.mid")" || exit 3
+[ -z "$notext" ] || fail "line $notext of the ## Roadmap body is not plain text (a heading, HTML," \
+  "a quote, a fence, an = or - underline, or a link definition): a human merges it"
 if [ -n "$MILESTONE" ]; then
-  section_of Roadmap "$tmp/head" | grep -Eq "Milestone $MILESTONE([^0-9]|$)" \
+  grep -Eq "Milestone $MILESTONE([^0-9]|$)" "$tmp/head.mid" \
     || fail "## Roadmap needs an item for Milestone $MILESTONE"
 fi
 
 [ "$FAILS" -eq 0 ] || exit 1
-if [ -n "$MILESTONE" ]; then echo "ok: VISION.md: only ## Roadmap changed"
-else echo "ok: VISION.md: Immutable constraints unchanged"; fi
+if cmp -s "$tmp/base" "$tmp/head"; then echo "ok: VISION.md: unchanged"
+else echo "ok: VISION.md: only the ## Roadmap body changed"; fi
