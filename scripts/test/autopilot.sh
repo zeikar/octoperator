@@ -17,6 +17,7 @@
 #                            conclusion that disagrees (a forged P == T on a failed run, a forged
 #                            P < T on a passing one, a cancelled run), and gh errors, each
 #                            printing `metric: null` and `rate: none` with the reason and exiting 0
+#                            (`head:` is the run's head commit, or `none` with no metric)
 #   - octo-ledger-state.sh : the convergence decision against a stub ledger: the merge rule
 #                            without a metric, the P-gain rule (an idle merge is no gain, P rising
 #                            is one without a merge, P falling or T rising is not, a metric on
@@ -27,6 +28,12 @@
 #                            ledger yet, the validity rules (author association, a malformed or
 #                            incomplete entry, an unknown kind, two blocks, a non-numeric metric),
 #                            a gh error, and bad arguments
+#   - octo-milestone-gate.sh : autopilot's P == T decision (and genesis --next's guards): an
+#                            open next-milestone PR (the lowest of two; a fork's milestone-*
+#                            branch and other branches don't count) wins over everything, then
+#                            P < T or no metric, then a metric run on an older commit than the
+#                            default branch's tip (stale), else plan; gh errors exit 3, bad
+#                            arguments 2
 #
 # Nothing here calls the real gh or the network. Exits 0 when every check passes, 1 when any fails.
 set -uo pipefail
@@ -35,6 +42,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPTS_DIR="$(cd "$HERE/.." && pwd)"
 METRIC="$SCRIPTS_DIR/octo-evals-metric.sh"
 STATE="$SCRIPTS_DIR/octo-ledger-state.sh"
+GATE="$SCRIPTS_DIR/octo-milestone-gate.sh"
 # Neither helper reads it, but pin it so nothing here depends on running under Actions or not.
 export GITHUB_ACTIONS=false
 
@@ -59,7 +67,8 @@ trap 'rm -rf "$tmp"' EXIT
 # filter (jq -r): `repo view` → repo.json, contents → a file or, with $ST_NOWF, gh's 404, a
 # workflow's runs → runs.json (or a 404 with $ST_NORUNS; it checks the branch and status
 # parameters), a run's jobs → jobs-<run>.json, annotations → ann-<id>.json (or none), and
-# `issue view` → ledger.json. $ST_FAIL=<endpoint word> makes that call fail with a 500.
+# `issue view` → ledger.json, `pr list` → prs.json, and a branch's ref → ref.json (it checks the
+# branch). $ST_FAIL=<endpoint word> makes that call fail with a 500.
 stub="$tmp/bin"
 ST_DIR="$tmp/st"
 mkdir -p "$stub" "$ST_DIR"
@@ -77,6 +86,7 @@ fail() { echo "gh: Server Error (HTTP 500)" >&2; exit 1; }
 case "$cmd" in
   repo) [ "${ST_FAIL:-}" != repo ] || fail; f="$ST_DIR/repo.json" ;;
   issue) [ "${ST_FAIL:-}" != issue ] || fail; f="$ST_DIR/ledger.json" ;;
+  pr) [ "${ST_FAIL:-}" != pr ] || fail; f="$ST_DIR/prs.json" ;;
   api)
     case "$ep" in
       */contents/.github/workflows/evals.yml)
@@ -92,6 +102,9 @@ case "$cmd" in
         f="$ST_DIR/runs.json" ;;
       */actions/runs/*/jobs*) [ "${ST_FAIL:-}" != jobs ] || fail
         f="${ep%/jobs*}"; f="$ST_DIR/jobs-${f##*/}.json" ;;
+      */git/ref/heads/*) [ "${ST_FAIL:-}" != ref ] || fail
+        [ "$ep" = "repos/o/n/git/ref/heads/$ST_BRANCH" ] || { echo "stub: bad ref $ep" >&2; exit 9; }
+        f="$ST_DIR/ref.json" ;;
       */check-runs/*/annotations*) [ "${ST_FAIL:-}" != annotations ] || fail
         f="${ep%/annotations*}"; f="$ST_DIR/ann-${f##*/}.json"
         [ -f "$f" ] || { echo '[]' | jq -r "$jq"; exit; } ;;
@@ -107,15 +120,17 @@ export ST_DIR ST_BRANCH=trunk
 echo "• octo-evals-metric.sh (offline, stub gh)"
 printf '{"defaultBranchRef":{"name":"trunk"}}\n' >"$ST_DIR/repo.json"
 URL=https://github.com/o/n/actions/runs/77
+# sha <n> : a 40-digit commit for <n>, the head of run <n>.
+sha() { printf '%040d' "$1"; }
 # runs [<id>:<conclusion>[:<event>[:<head repo>]]]... : the completed runs, newest first (event
-# push and head repo o/n unless given), or none.
+# push and head repo o/n unless given), or none. Run <id>'s head commit is $(sha <id>).
 runs() {
   local sep="" body="" r id c ev hr
   for r in "$@"; do
     IFS=: read -r id c ev hr <<<"$r"
-    body="$body$sep$(printf '{"id":%s,"conclusion":"%s","html_url":"%s","event":"%s",%s}' \
+    body="$body$sep$(printf '{"id":%s,"conclusion":"%s","html_url":"%s","event":"%s",%s,%s}' \
       "$id" "$c" "https://github.com/o/n/actions/runs/$id" "${ev:-push}" \
-      "\"head_repository\":{\"full_name\":\"${hr:-o/n}\"}")"
+      "\"head_repository\":{\"full_name\":\"${hr:-o/n}\"}" "\"head_sha\":\"$(sha "$id")\"")"
     sep=","
   done
   printf '{"total_count":%s,"workflow_runs":[%s]}\n' "$#" "$body" >"$ST_DIR/runs.json"
@@ -138,12 +153,13 @@ metric() {
 }
 # reads_null <label> <source line> : the helper exited 0 with no metric and that source.
 reads_null() {
-  same "$1" "0|metric: null|rate: none|source: $2" "$rc|$(printf '%s' "$out" | paste -sd '|' -)"
+  same "$1" "0|metric: null|rate: none|source: $2|head: none" \
+    "$rc|$(printf '%s' "$out" | paste -sd '|' -)"
 }
 # reads <label> <P> <T> <run id> <conclusion> : the helper exited 0 with that metric.
 reads() {
   same "$1" \
-    "0|metric: {\"passed\":$2,\"total\":$3}|rate: $2/$3|source: run $4 ($5) https://github.com/o/n/actions/runs/$4: $2/$3 evals pass" \
+    "0|metric: {\"passed\":$2,\"total\":$3}|rate: $2/$3|source: run $4 ($5) https://github.com/o/n/actions/runs/$4: $2/$3 evals pass|head: $(sha "$4")" \
     "$rc|$(printf '%s' "$out" | paste -sd '|' -)"
 }
 
@@ -241,6 +257,12 @@ for step in repo contents runs jobs annotations; do
   reads_null "a gh error reading $step: no metric, exit 0" \
     "unreadable: gh error: gh: Server Error (HTTP 500)"
 done
+runs 78:success
+jobs 78 503
+jq -c '.workflow_runs[0].head_sha = "abc"' "$ST_DIR/runs.json" >"$ST_DIR/r" && mv "$ST_DIR/r" "$ST_DIR/runs.json"
+metric
+reads_null "a run whose head commit is not 40 hex digits" \
+  "unreadable: unexpected head commit on run 78"
 out="$(bash "$METRIC" 2>/dev/null)"; rc=$?
 same "no --repo exits 2" "2|" "$rc|$out"
 out="$(bash "$METRIC" --repo 'o/n"' 2>/dev/null)"; rc=$?
@@ -404,6 +426,70 @@ for bad in "--runs 0" "--runs x" "--metric 7/6" "--metric 0/0" "--metric 04/6" "
   out="$(bash "$STATE" --repo o/n --runs 3 $bad 2>/dev/null)"; rc=$?
   same "bad argument $bad exits 2" "2|" "$rc|$out"
 done
+
+echo "• octo-milestone-gate.sh (offline, stub gh)"
+# prs [<number>:<head branch>[:fork]]... : the open PRs.
+prs() {
+  local sep="" body="" p num br fk
+  for p in "$@"; do
+    IFS=: read -r num br fk <<<"$p"
+    body="$body$sep$(printf '{"number":%s,"url":"https://github.com/o/n/pull/%s","headRefName":"%s","isCrossRepository":%s}' \
+      "$num" "$num" "$br" "$([ -n "$fk" ] && echo true || echo false)")"
+    sep=","
+  done
+  printf '[%s]\n' "$body" >"$ST_DIR/prs.json"
+}
+# tip <n> : the default branch's tip is $(sha <n>).
+tip() { printf '{"object":{"sha":"%s"}}\n' "$(sha "$1")" >"$ST_DIR/ref.json"; }
+# gate <rate> <head> : run the helper; sets out (lines joined by |) and rc.
+gate() {
+  out="$(PATH="$stub:$PATH" bounded 10 bash "$GATE" --repo o/n --rate "$1" --head "$2" 2>/dev/null)"
+  rc=$?
+  out="$(printf '%s' "$out" | paste -sd '|' -)"
+}
+H78="$(sha 78)"
+prs 12:42-fix-login 13:milestone-2-x:fork
+tip 78
+gate 5/5 "$H78"
+same "P == T, at the tip, no next-milestone PR: plan" \
+  "0|milestone-pr: none|tip: $H78|decision: plan" "$rc|$out"
+tip 79
+gate 5/5 "$H78"
+same "P == T on an older commit than the tip (a merge's run still going): stale" \
+  "0|milestone-pr: none|tip: $(sha 79)|decision: stale" "$rc|$out"
+prs 31:milestone-3-sync 12:42-fix-login 30:milestone-2-export
+gate 5/5 "$H78"
+same "a next-milestone PR open: open, the lowest of two, nothing else read" \
+  "0|milestone-pr: 30 https://github.com/o/n/pull/30|tip: unchecked|decision: open 30" "$rc|$out"
+gate 4/6 "$H78"
+same "a next-milestone PR open wins over P < T too" \
+  "0|milestone-pr: 30 https://github.com/o/n/pull/30|tip: unchecked|decision: open 30" "$rc|$out"
+prs 12:42-fix-login 14:xmilestone-2
+ST_FAIL=ref gate 4/6 "$H78"
+same "P < T: not all-pass, the tip not read" \
+  "0|milestone-pr: none|tip: unchecked|decision: not all-pass" "$rc|$out"
+ST_FAIL=ref gate none none
+same "no metric: not all-pass" "0|milestone-pr: none|tip: unchecked|decision: not all-pass" \
+  "$rc|$out"
+prs
+tip 78
+gate 5/5 "$H78"
+same "no open PR at all: plan" "0|milestone-pr: none|tip: $H78|decision: plan" "$rc|$out"
+for step in pr repo ref; do
+  ST_FAIL=$step gate 5/5 "$H78"
+  same "a gh error reading $step exits 3, deciding nothing" "3|" "$rc|$out"
+done
+printf '{"object":{"sha":"abc"}}\n' >"$ST_DIR/ref.json"
+gate 5/5 "$H78"
+same "a tip that is not a commit exits 3" "3|" "$rc|$out"
+for bad in "--rate 5/5" "--rate 7/6 --head none" "--rate 5/5 --head abc" "--rate x --head none" \
+    "--rate 0/0 --head none"; do
+  # shellcheck disable=SC2086 # each case is several words on purpose
+  out="$(bash "$GATE" --repo o/n $bad 2>/dev/null)"; rc=$?
+  same "bad argument $bad exits 2" "2|" "$rc|$out"
+done
+out="$(bash "$GATE" --repo 'o/n"' --rate none --head none 2>/dev/null)"; rc=$?
+same "a --repo with a quote exits 2" "2|" "$rc|$out"
 
 echo
 echo "autopilot: $pass passed, $fail failed"

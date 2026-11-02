@@ -15,12 +15,14 @@
 # no annotation, more than one, a malformed message, P > T, T = 0, a conclusion that disagrees,
 # or a gh error) is unreadable.
 #
-# Prints three lines:
+# Prints four lines:
 #   metric: {"passed":P,"total":T}   or   metric: null
 #   rate: P/T                        or   rate: none      (octo-ledger-state.sh's --metric value)
 #   source: run <id> (<conclusion>) <url>: P/T evals pass
 #           no evals workflow
 #           unreadable: <reason>
+#   head: <the run's head commit, 40 hex digits>   or   head: none   (when metric is null)
+# octo-milestone-gate.sh compares `head:` with the default branch's tip.
 # Read-only: `gh repo view` and `gh api` GETs.
 #
 # Exit codes: 0 whenever it printed a metric line (null included), 2 bad arguments.
@@ -42,7 +44,7 @@ done
 
 WF=evals.yml
 # none <source> : no metric, and why; the run goes on either way.
-none() { echo "metric: null"; echo "rate: none"; echo "source: $1"; exit 0; }
+none() { printf 'metric: null\nrate: none\nsource: %s\nhead: none\n' "$1"; exit 0; }
 err="$(mktemp)" && [ -n "$err" ] || none "unreadable: mktemp failed"
 trap 'rm -f "$err"' EXIT
 # gh_failed : no metric, with the first line gh wrote to $err. Called in this shell, never in a
@@ -68,16 +70,17 @@ if ! run="$(gh api -X GET "repos/$REPO/actions/workflows/$WF/runs" -f branch="$b
     --jq '[.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch")
             | select((.head_repository.full_name // "" | ascii_downcase)
                      == ("'"$REPO"'" | ascii_downcase))]
-          | .[0] // empty | [.id, (.conclusion // "none"), .html_url] | @tsv' \
+          | .[0] // empty | [.id, (.conclusion // "none"), .html_url, (.head_sha // "")] | @tsv' \
     2>"$err")"; then
   grep -q 'HTTP 404' "$err" && none "$nomatch"
   gh_failed
 fi
 [ -n "$run" ] || none "$nomatch"
-IFS=$'\t' read -r id conclusion url <<EOF
+IFS=$'\t' read -r id conclusion url head <<EOF
 $run
 EOF
 case "$id" in '' | *[!0-9]*) none "unreadable: unexpected run id from gh" ;; esac
+[[ "$head" =~ ^[0-9a-f]{40}$ ]] || none "unreadable: unexpected head commit on run $id"
 where="run $id ($conclusion) $url"
 
 checks="$(gh api --paginate "repos/$REPO/actions/runs/$id/jobs?filter=latest&per_page=100" \
@@ -113,3 +116,4 @@ want=failure
 echo "metric: {\"passed\":$p,\"total\":$t}"
 echo "rate: $p/$t"
 echo "source: $where: $p/$t evals pass"
+echo "head: $head"
