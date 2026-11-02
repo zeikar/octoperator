@@ -159,7 +159,7 @@ evals: <passed>/<total> passed (<skipped> skipped)
 `<total>` counts the script evals. The notice is printed only under GitHub Actions
 (`GITHUB_ACTIONS=true`), and never with `--evidence` or `--judge`. Autopilot reads it from the
 latest completed `evals.yml` push or dispatch run of this repo on the default branch as its ledger
-`metric`, and a run gains only when `<passed>` rose (`skills/autopilot/SKILL.md` → Run ledger). It
+`metric`, and a run gains only when `<passed>` rose (`skills/autopilot/references/ledger.md`). It
 trusts only a run with exactly one such annotation, so one that setup code forged beside the real
 one leaves the metric `null`. The run's conclusion must also agree, `success` for passed == total
 and `failure` otherwise, so a forged notice on a run where `run.sh` never printed its own (setup

@@ -4,7 +4,7 @@
 # Usage:
 #   octo-ledger-state.sh --repo OWNER/NAME --runs N [--issue LEDGER] [--metric P/T|none] [--resume]
 #
-# Applies the rules in skills/autopilot/SKILL.md → Run ledger and convergence. An entry is a
+# Applies the rules in skills/autopilot/references/ledger.md (the run ledger). An entry is a
 # ledger comment by an OWNER, MEMBER, or COLLABORATOR whose body holds exactly one ```json block
 # parsing to an object with all nine keys and a known kind. A numeric metric is an object with
 # whole numbers 0 <= passed <= total, total >= 1; it is all-pass when passed == total. Each entry
@@ -18,11 +18,17 @@
 # decision is `observe` when converged and `build` otherwise; `all-pass` reports whether every
 # eval passes, which the skill checks first (Run ledger → All evals pass).
 #
-# Prints five lines:
+# `planning-failed` reads the newest valid `run` or `reset` entry (observe entries plan nothing,
+# so they are passed over): when it is a `run` entry whose optional `planning_failed` key is an
+# object with a 40-digit `tip` and a string `reason`, that run's next-milestone planning failed
+# at that tip. octo-milestone-gate.sh's --failed-tip takes the tip. With --resume it is none.
+#
+# Prints six lines:
 #   entries: <k> (since the last reset | since the last all-pass entry | since --resume | all)
 #   skipped: none | <count> (<authorAssociation>), …   (entry-shaped comments by other authors)
 #   streak: <entries without a gain, newest first>/<N>
 #   all-pass: yes | no
+#   planning-failed: none | <tip> <reason, at most 80 characters on one line>
 #   decision: observe | build
 # Read-only: one `gh issue view`.
 #
@@ -58,7 +64,7 @@ if [ "$METRIC" != none ]; then
 fi
 
 if [ -z "$ISSUE" ]; then
-  printf 'entries: 0 (no ledger yet)\nskipped: none\nstreak: 0/%s\nall-pass: %s\ndecision: build\n' \
+  printf 'entries: 0 (no ledger yet)\nskipped: none\nstreak: 0/%s\nall-pass: %s\nplanning-failed: none\ndecision: build\n' \
     "$RUNS" "$all_pass"
   exit 0
 fi
@@ -98,10 +104,18 @@ def gains($prev): if .kind == "observe" then false
    else "since the last all-pass entry" end) as $why
 | [range(0; $stop) as $i | $v[$i] | gains($v[$i + 1])] as $g
 | ([range(0; $g | length) | select($g[.])] | .[0] // ($g | length)) as $streak
+| ([$v[] | select(.kind != "observe")] | .[0]) as $last
+| (if $last.kind == "run" then $last.planning_failed else null end) as $pf
+| (if RESUME then "none"
+   elif ($pf | type) == "object" and (($pf.tip | type) == "string")
+        and ($pf.tip | test("^[0-9a-f]{40}$")) and (($pf.reason | type) == "string") then
+     "\($pf.tip) \($pf.reason | gsub("[[:cntrl:]]"; " ") | .[0:80])"
+   else "none" end) as $failed
 | "entries: \($stop) (\($why))",
   "skipped: \(if $skipped == "" then "none" else $skipped end)",
   "streak: \($streak)/RUNS",
   "all-pass: ALLPASS",
+  "planning-failed: \($failed)",
   "decision: \(if $streak >= RUNS then "observe" else "build" end)"'
 filter="${filter//RESUME/$RESUME}"
 filter="${filter//ALLPASS/$all_pass}"
