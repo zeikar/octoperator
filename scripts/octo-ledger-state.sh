@@ -4,7 +4,7 @@
 # Usage:
 #   octo-ledger-state.sh --repo OWNER/NAME --runs N [--issue LEDGER] [--metric P/T|none] [--resume]
 #
-# Applies the rules in skills/autopilot/SKILL.md → Run ledger and convergence. An entry is a
+# Applies the rules in skills/autopilot/references/ledger.md (the run ledger). An entry is a
 # ledger comment by an OWNER, MEMBER, or COLLABORATOR whose body holds exactly one ```json block
 # parsing to an object with all nine keys and a known kind. A numeric metric is an object with
 # whole numbers 0 <= passed <= total, total >= 1; it is all-pass when passed == total. Each entry

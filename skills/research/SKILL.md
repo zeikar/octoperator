@@ -88,14 +88,15 @@ Build an evidence base before proposing — read, do not write:
     The ledger is the open issue labeled `octoperator-ledger`; each autopilot run appends one entry
     to it. Format, validity rules, and the read command (the newest 20 entry-shaped comments from
     allowed authors) are in the Run ledger section of
-    `${CLAUDE_PLUGIN_ROOT}/skills/autopilot/SKILL.md`; find the issue with:
+    `${CLAUDE_PLUGIN_ROOT}/skills/autopilot/SKILL.md` and its
+    `${CLAUDE_PLUGIN_ROOT}/skills/autopilot/references/ledger.md`; find the issue with:
     ```bash
     gh issue list --repo "$REPO" --label octoperator-ledger --state open --json number,url
     ```
     A valid entry counts only when `held` is above 0 (its summary line names the held issues and
     reasons) or it is part of a no-gain streak: one of `convergence_runs` (the setting in
     `.claude/octoperator.local.md`, default `3`) consecutive entries, none of which gains, by the
-    gain rule and walk in that Run ledger section (a merge, or with an evals metric, more evals
+    gain rule and walk in that `ledger.md` (a merge, or with an evals metric, more evals
     passing; counted since the last `reset` or all-pass entry).
     Cite the PR or the entry's comment URL. Both are narrow evidence. A held PR is in-flight work,
     so it supports a root-cause or tooling proposal (why such PRs get held) — never a re-proposal of
