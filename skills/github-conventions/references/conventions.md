@@ -83,17 +83,20 @@ anywhere else, or when that annotation can't be read or disagrees, it is `null`.
 mode — `research` proposes, nothing is built — until a human runs `autopilot --resume`. An entry
 gains when P rose since the previous entry, if both have a metric, and otherwise when it merged
 something; an `observe` entry never gains. The count restarts at a `reset` entry or an entry where
-every eval passed. When every eval passes (P == T), autopilot prints the progress line
-`autopilot: all evals pass → planning next milestone` and observes while a next-milestone PR (an
-open `milestone-*` branch from this repo) waits to merge. Otherwise, until next-milestone planning
-(#93) replaces this step, it goes on by the ledger's own build/observe decision. Only comments from an `OWNER`, `MEMBER`, or `COLLABORATOR`
+every eval passed. When every eval passes (P == T), autopilot asks `scripts/octo-milestone-gate.sh`
+whether to plan the next milestone: it observes while a next-milestone PR (an open `milestone-*`
+branch from this repo) waits to merge, or while the metric's run judged an older commit than the
+default branch's tip; otherwise it plans the next milestone with `genesis --next`
+(`skills/genesis/references/next.md`) and ends `autopilot: all evals pass → planning next
+milestone`. A P == T run never ends a schedule. Only comments from an `OWNER`, `MEMBER`, or `COLLABORATOR`
 count as entries, so autopilot must run under a `gh` login with one of those roles — a local run under your own login
 has it, while a bot account without one (e.g. `github-actions[bot]`) gets its entries skipped, and
 autopilot never converges.
 `research` may cite an entry as `failure-log` evidence, but only for a proposal about the held
 issues it names or about why runs stopped gaining. The ledger is not work, so it carries no type or
 priority label. Keep it open; the entry format is defined in
-`skills/autopilot/SKILL.md` → Run ledger and convergence.
+`skills/autopilot/SKILL.md` → Run ledger and convergence, and its rules in
+`skills/autopilot/references/ledger.md`.
 
 ## Branch naming
 
@@ -106,11 +109,17 @@ branch.
   `7-fix-flaky-upload-test`.
 - The pattern is configurable via `branch_pattern` in settings using the tokens `{number}` and
   `{slug}` (default `{number}-{slug}`).
+- **Next-milestone branches** are the one exception: `genesis --next` plans a milestone, not an
+  issue, on `milestone-<n>-<slug>` (`<n>` the milestone's number, the slug from its title by the
+  rules above), whatever `branch_pattern` says. Autopilot and genesis find an open next-milestone
+  PR by that `milestone-` prefix, so never name another branch with it.
 
 ## Pull request linking
 
 - The PR body MUST contain `Closes #<issue>` (or `Fixes #<issue>`) referencing the primary issue, so
-  merging the PR auto-closes the issue and keeps issue↔PR traceability.
+  merging the PR auto-closes the issue and keeps issue↔PR traceability. A next-milestone PR is the
+  exception: it closes no issue (its branch is the link), so its body writes no closing keyword
+  next to any `#<number>`; `auto --pr <pr#>` ships it.
 - PR title mirrors the issue title (optionally prefixed with the type, e.g. `feat:`/`fix:`).
 - Open PRs as **draft** when the branch has no commits beyond the base, otherwise ready-for-review.
 - Add the PR to the project board and set status to `In Review`.
@@ -193,6 +202,7 @@ its board item to the mapped `done` status afterward with
 | PR → review            | review posted to the PR on GitHub           |
 | issue/PR → board       | project item with mirrored Status field     |
 | autopilot run → ledger | one entry comment on the `octoperator-ledger` issue |
+| all evals pass → next milestone | `genesis --next`'s PR on `milestone-<n>-<slug>`, citing its sources |
 
 When any link cannot be established automatically, state which link is missing so the user can repair
 it — never leave a silently broken chain.
