@@ -57,7 +57,7 @@ convergence_runs: 3
 # directory). A pattern also covers everything under a directory it matches.
 # `?`, `[...]`, `{...}`, `!`, and a backslash are unsupported; a pattern using
 # them holds every PR. `scripts/octo-approval-match.sh` applies these rules.
-# Default: empty (no gate).
+# Default: empty (no gate). Genesis writes `.github/workflows/` and `.claude/`.
 approval_paths:
   - ".github/workflows/"
   - "/infra/"
@@ -67,6 +67,13 @@ approval_paths:
 # Notes
 Free-form project notes for humans; Octoperator ignores this section.
 ```
+
+`.claude/` is worth listing in any repo that commits Claude Code settings there, Octoperator's
+own included (its `.claude/settings.json` registers the plugin marketplace): those settings
+decide what an unattended run may do, such as whether `genesis --next` may use the web under
+autopilot (`scripts/octo-web-allowed.sh`), so a PR that changes them should wait for a human.
+This file itself is git-ignored, so no PR changes it. VISION.md's Immutable constraints need no
+pattern: `auto` checks that section on every PR (`conventions.md` → Approval gates).
 
 ## Reading settings
 

@@ -24,8 +24,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-web-allowed.sh" <root>
 ```
 
 It reads the repo's `.claude/settings.json` and `.claude/settings.local.json`, and
-`~/.claude/settings.json`; a missing file allows nothing. It prints `web: allowed` only when, for
-each of WebSearch and WebFetch, both of these hold:
+`~/.claude/settings.json`; a missing file allows nothing. Genesis's `approval_paths` lists
+`.claude/`, so no PR that `auto` merges unattended can add an allow entry there. It prints
+`web: allowed` only when, for each of WebSearch and WebFetch, both of these hold:
 - a bare entry for it (`"WebSearch"`, `"WebFetch"`) is in a `permissions.allow`;
 - no `deny` or `ask` entry in any of those files names it, bare or scoped (such as
   `WebFetch(domain:x)`), since either one wins over an allow.

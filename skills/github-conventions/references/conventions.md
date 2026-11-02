@@ -48,7 +48,8 @@ a `needs-approval` proposal).
 
 ### Approval gates
 
-Independent gates keep deploy, spend, and delete changes, and weakened evals, in front of a human:
+Independent gates keep deploy, spend, and delete changes, weakened evals, and changes to the
+constitution's Immutable constraints in front of a human:
 - **Issue gate (`autopilot`).** Discovery skips every `needs-approval` issue without `approved` and
   reports it as `gated: needs-approval`. It relies on the label, so an issue nobody labeled is not
   caught.
@@ -58,11 +59,22 @@ Independent gates keep deploy, spend, and delete changes, and weakened evals, in
   hand. This is the backstop for sensitive files, whatever the issue's labels. In a repo genesis
   created, its `.github/workflows/` entry covers the evals guard and `evals-model.yml`, so a
   `schedule:` trigger (unattended model spend), a higher call cap, or a longer timeout there needs
-  a human to merge. It holds only the merge: a workflow pushed on a branch runs, with the repo's
-  secrets, before any PR exists. Keep a secret such as the model key in a GitHub Environment
+  a human to merge; its `.claude/` entry covers the committed Claude Code settings, which decide
+  whether `genesis --next` may use the web under autopilot. It holds only the merge: a workflow
+  pushed on a branch runs, with the repo's secrets, before any PR exists. Keep a secret such as the model key in a GitHub Environment
   restricted to the default branch, named by the job that uses it (`environment:`), and use a
   repo secret only where environments aren't available (a private repo on GitHub Free);
   `skills/genesis/references/evals.md` → Model-judged evals has the steps.
+- **Vision check (`auto`).** For every PR, in any repo with a root `VISION.md`, `auto` merges
+  only when `scripts/octo-vision-guard.sh` finds the reviewed commit leaves its
+  `## Immutable constraints` section as it was at the merge base: not changed or removed, the
+  file not deleted, made a symlink, or given another mode, and no second level-1 or level-2
+  heading named Immutable constraints (an ATX heading after a tab or indented up to 3 spaces, or
+  a setext one) that the exact `## ` match would miss. Otherwise it holds with `VISION.md
+  immutable constraints changed: a human merges this`. That holds Octoperator's own PRs too:
+  its `VISION.md` says only a human edits that section. The rest of the file stays open, so a
+  milestone can add its Roadmap item. The check can't judge meaning: other text that argues
+  against a constraint passes it, and only review catches that.
 - **Evals guard (`auto`).** Where the base branch has `.github/workflows/evals-guard.yml` (a repo
   genesis created), `auto` merges only when `scripts/octo-evals-guard.sh` finds both guard checks
   passed on the reviewed commit (against the base branch's tip, when the PR changes `evals/` or
@@ -192,9 +204,10 @@ re-review loop; leftover minors never block), that review covered the current he
 with `--match-head-commit`), and the PR is `OPEN`, not draft, with `mergeStateStatus` **`CLEAN`**
 (GitHub's "ready to merge" — no conflicts, all required checks green, not blocked by protection,
 not behind). Any other state (`DIRTY` / `BLOCKED` / `BEHIND` / `UNSTABLE` / `UNKNOWN`) → do not
-merge; report the reason. A PR that touches an `approval_paths` pattern is never merged by `auto`
-either (Approval gates above). Never force-merge. The PR's `Closes #N` auto-closes the issue; move
-its board item to the mapped `done` status afterward with
+merge; report the reason. A PR that touches an `approval_paths` pattern, or changes `VISION.md`'s
+Immutable constraints, is never merged by `auto` either (Approval gates above). Never
+force-merge. The PR's `Closes #N` auto-closes the issue; move its board item to the mapped `done`
+status afterward with
 `octo-project-status.sh ... --status "<statuses.done>"`.
 
 ## Traceability matrix

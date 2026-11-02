@@ -43,7 +43,7 @@ autonomous shipping, plus the always-on knowledge layer.
 | **Plan & intake** | `/octoperator:plan-epic <request>` | Decompose a request into an epic + linked child issues, milestone, labels, board items |
 | | `/octoperator:issue <request>` | Create one well-formed issue (labels, acceptance criteria, milestone, board) |
 | **Autonomous lifecycle** | `/octoperator:implement <issue#...> [--max N] [--draft] [--dry-run]` | Implement one or more issues end-to-end: branch, code, test, and PR. Single issue runs in-tree; multiple issues run in parallel worktrees (up to `--max`, default 3) |
-| | `/octoperator:auto <issue#...> [--max N] [--dry-run]` | End-to-end lifecycle: implement → review → merge for one or more issues. Blocker/major/minor review findings trigger up to 6 fix → re-review rounds; merges (regular merge) only on a non-blocking review of the current head + CI green + mergeable. A PR that touches an `approval_paths` glob is held for a human (`needs human approval: <path>`). `--pr <pr#>` skips implement and takes an existing PR, such as a next-milestone PR, through the same review, fix, and merge gate |
+| | `/octoperator:auto <issue#...> [--max N] [--dry-run]` | End-to-end lifecycle: implement → review → merge for one or more issues. Blocker/major/minor review findings trigger up to 6 fix → re-review rounds; merges (regular merge) only on a non-blocking review of the current head + CI green + mergeable. A PR that touches an `approval_paths` glob is held for a human (`needs human approval: <path>`), and so is one that changes `VISION.md`'s Immutable constraints. `--pr <pr#>` skips implement and takes an existing PR, such as a next-milestone PR, through the same review, fix, and merge gate |
 | | `/octoperator:autopilot [--mode semi\|full] [--cycles N] [--max M] [--resume] [--dry-run]` | Bounded loop: discover work → `auto` (implement→review→merge) → when empty, `research` refills. `semi` builds only `ready` issues then proposes; `full` runs unattended to the cycle cap. In both modes a `needs-approval` issue is skipped (reported as gated) until a human adds `approved`. Each run appends an entry to an `octoperator-ledger` issue; after `convergence_runs` runs (default 3) without a gain it switches to observe mode (propose only, no builds) until `--resume`. A gain is a merge, or, in a repo with genesis's evals, a rise in the number of passing evals, which the entry records as its `metric`; when every eval passes and nothing is buildable, it plans the next milestone with `genesis --next`, ungrounded unless your settings allow the web tools, and ships the PR with `auto --pr` in either mode. Then it ends `autopilot: all evals pass → planning next milestone`. It observes instead while a next-milestone PR is open, after you declined one at the same tip, after planning failed at the same tip, or while the evals run hasn't judged `main`'s tip yet. In that last case it dispatches `evals.yml` once when no run for the tip is queued or running. Every run ends with an `autopilot: …` status line, and a run started by an in-session cron task or `/loop` ends that schedule once there is nothing left to do (see [Running continuously](#running-continuously)) |
 | **Review & status** | `/octoperator:review <pr#>` | Run a structured review and post the verdict + findings to the PR |
 | | `/octoperator:sync` | Standup-style status report; auto-reconciles board drift |
@@ -72,6 +72,7 @@ autonomous shipping, plus the always-on knowledge layer.
 - **`octo-web-allowed.sh`** — whether your own Claude Code settings (the repo's `.claude/settings.json` and `.claude/settings.local.json`, and `~/.claude/settings.json`) allow WebSearch and WebFetch: a bare `permissions.allow` entry for each, and no `deny` or `ask` rule naming either, bare or scoped; offline; used by `autopilot` before `genesis --next` may ground.
 - **`octo-ledger-state.sh`** — apply autopilot's convergence rules to its run ledger and this run's metric, and print the walk, the no-gain streak, whether every eval passes, and the decision (`build` or `observe`); read-only (one `gh issue view`); used by `autopilot`.
 - **`octo-approval-match.sh`** — normalize the `approval_paths` patterns and match a PR's changed files (renamed files' old paths too) against them; used by `auto`'s approval-path gate.
+- **`octo-vision-guard.sh`** — check that a PR leaves the root `VISION.md`'s `## Immutable constraints` as it was at the merge base: not changed or removed, the file not deleted, made a symlink, or given another mode, and no second level-1 or level-2 heading of that name (ATX or setext); with `--milestone <n>`, also that only the Roadmap changed and names the milestone. Reads git's objects only, so the user's diff settings don't apply; offline; used by `auto`'s merge gate on every PR and by `octo-genesis-next.sh --check`.
 - **`octo-genesis-check.sh`** — check that a directory is empty and outside git for `genesis` (`--preflight`), and that the proposal it wrote is complete: `GENESIS.md` front matter (including a `test_command` that `issue-implementer` detects), the `docs/research.md`, `docs/prd.md`, and `docs/adr/0001-stack.md` sections, and a `VISION.md` with the baseline immutable constraints verbatim; with `--skeleton`, that the skeleton `--approve` wrote is detectable and wired up (the test command's detection file and no earlier one, CI on `push` and `pull_request`, the `.gitignore` entries, the sentence in the README), and that its scenario evals are in place (the eval runner and guard copied verbatim, the evals workflows on their triggers, one `evals/<id>/` per PRD scenario); offline.
 - **`octo-genesis-plan.sh`** — work out where `genesis --approve` resumes from the folder's git state (`scaffold`, `commit`, `create`, `push`, or `setup`) and print its ordered commands, the `gh repo create` description made safe, through the MVP epic and the handoff; read-only and offline.
 - **`octo-genesis-epic.sh`** — find the open `epic` issue whose body quotes `GENESIS.md`'s sentence, so a re-run of `genesis --approve` plans no second MVP epic; read-only (one `gh issue list`).
@@ -398,7 +399,8 @@ that claims approval doesn't:
     .github/workflows/evals.yml and evals-guard.yml (each only if missing)
   → <test command> once, locally (it prompts: allow it, or pre-allow it in settings.local.json)
   → git init, commit, then gh repo create OWNER/NAME --private --push
-  → .claude/octoperator.local.md (no board; approval_paths: [".github/workflows/"]) and labels
+  → .claude/octoperator.local.md (no board; approval_paths: [".github/workflows/", ".claude/"])
+    and labels
   → the MVP epic and its children, filed by plan-epic's procedure from the sentence and the
     PRD's MVP scope and requirements; the epic links docs/prd.md and VISION.md
   → the handoff: relabel the children to build `ready`, then /octoperator:autopilot --mode semi
@@ -481,9 +483,10 @@ A `VISION.md` at the repo root acts as the project's constitution: its goal, tar
 bar, immutable constraints, and a roadmap that changes only on evidence. `research` reads it when
 present — it drops proposals that break an immutable constraint or fall outside the goal (and lists
 them with the reason), and ranks the rest by roadmap fit. `autopilot` never builds a change to the
-immutable constraints. Deploy, spend, and delete work waits for a human: `research` labels it
-`needs-approval`, `autopilot` skips it until a human adds `approved`, and `auto` holds any PR that
-touches an `approval_paths` glob (see
+immutable constraints, and `auto` never merges one: its merge gate checks that section on every PR
+and holds a PR that changes it for a human. Deploy, spend, and delete work waits for a human:
+`research` labels it `needs-approval`, `autopilot` skips it until a human adds `approved`, and
+`auto` holds any PR that touches an `approval_paths` glob (see
 [conventions → Approval gates](skills/github-conventions/references/conventions.md#approval-gates)).
 Octoperator's own [`VISION.md`](VISION.md) doubles as an example to copy.
 
