@@ -222,11 +222,13 @@ Run them one at a time. Exit 0 → continue: the repo has no `VISION.md`, the PR
 or it changed only the Roadmap body, in plain text. Exit 1 → it printed `FAIL:` lines: a change
 outside the Roadmap body (Goal, Target users, Quality bar, Immutable constraints, any heading),
 a Roadmap line that isn't plain text (a heading, HTML, a quote, a fence, an underline, or a link
-definition), a NUL, bare CR, or other control byte, or `VISION.md` deleted, new, made a symlink,
-given another mode, or joined by a new or changed root twin such as `vision.md`. Hold the PR with
-the reason `VISION.md changed outside its Roadmap: a human merges this`, listing the `FAIL:`
-lines in the report. A failed fetch or any other exit → hold (reason: vision check
-unavailable). Like the approval-path hold, only a human lifts it, in Octoperator's own repo too.
+definition), a change where the merge base's Roadmap body isn't plain text or it has two
+`## Roadmap` lines, a NUL, bare CR, other control byte, or Unicode line break, or `VISION.md`
+deleted, new, made a symlink, given another mode, or joined by a new or changed root twin such
+as `vision.md`. Hold the PR with the reason
+`VISION.md changed outside its Roadmap: a human merges this`, listing the `FAIL:` lines in the
+report. A failed fetch or any other exit → hold (reason: vision check unavailable). Like the
+approval-path hold, only a human lifts it, in Octoperator's own repo too.
 
 **Then the milestone check**, for a PR whose `headRefName` starts with `milestone-` in **any**
 read of it this run: step 3's (`--pr`, or implement's branch), the review's, or the merge-gate

@@ -15,12 +15,14 @@
 #   - holds: a change outside the Roadmap body (Goal, Immutable constraints, the Roadmap heading,
 #     the section after it, front matter on line 1, a section moved or removed, each HTML block
 #     type or a comment or fence mark moved there), a base with no `## Roadmap`, a new VISION.md,
-#     VISION.md deleted, made a symlink, or its mode changed, a NUL, a bare CR, or another
-#     control character, a Roadmap line that is not plain text (a heading at any indent, each
-#     HTML block opener, `<details>` and `<div>`, inline HTML, a comment or CDATA end, a quote,
-#     a fence, a setext or `-` underline, a link definition), a last Roadmap line that runs into
-#     the next heading, and a root name that folds to VISION.md (`vision.md`, `viſion.md`, a
-#     directory, also with no VISION.md) when it is new or changed;
+#     VISION.md deleted, made a symlink, or its mode changed, a NUL, a bare CR, another control
+#     character, or a Unicode line break, a change to a base whose Roadmap body is not plain
+#     text (HTML left there, a comment or fence opener the PR drops, an indented section
+#     heading) or that has two `## Roadmap` lines, a Roadmap line that is not plain text (a
+#     heading at any indent, each HTML block opener, `<details>` and `<div>`, inline HTML, a
+#     comment or CDATA end, a quote, a fence, a setext or `-` underline, a link definition), a
+#     last Roadmap line that runs into the next heading, and a root name that folds to VISION.md
+#     (`vision.md`, `viſion.md`, a directory, also with no VISION.md) when it is new or changed;
 #   - --milestone: a Roadmap item passes; a change outside the Roadmap, a heading, a bare CR, and
 #     a Roadmap without the milestone fail;
 #   - bad arguments exit 2; a commit missing here, or a directory outside git, exits 3.
@@ -99,10 +101,12 @@ UNCHANGED="0|ok: VISION.md: unchanged"
 ROADMAP="0|ok: VISION.md: only the ## Roadmap body changed"
 OUTSIDE="1|FAIL: VISION.md: only the ## Roadmap body may change without a human"
 CHANGED="1|FAIL: VISION.md: ## Immutable constraints changed: only a human edits that section"
+NOTEXT="a heading or any line opening with #, even an issue ref; HTML, or < before a letter, even"
+NOTEXT+=" in a code span; a quote, a fence, an = or - underline, or a link definition): a human"
+NOTEXT+=" merges it"
 # notext <line> : the hold for a Roadmap body line that is not plain text.
 notext() {
-  printf '1|FAIL: VISION.md: line %s of the ## Roadmap body is not plain text (a heading, HTML, %s' \
-    "$1" "a quote, a fence, an = or - underline, or a link definition): a human merges it"
+  printf "1|FAIL: VISION.md: line %s of the ## Roadmap body is not plain text (%s" "$1" "$NOTEXT"
 }
 # bytes <line> <what> : the hold for a byte a reader may not see.
 bytes() {
@@ -294,6 +298,14 @@ fresh
 add $'2. More \x1b[8mhidden\x1b[0m\n'
 run
 same "an escape character holds" "$(bytes 17 'a control character (0x1b)')" "$rc|$out"
+# A Unicode line break, which some renderers and editors split a line at.
+for u in '\xe2\x80\xa8=2028' '\xe2\x80\xa9=2029' '\xc2\x85=0085'; do
+  fresh
+  add "$(printf '2. More%b## Immutable constraints' "${u%%=*}")"$'\n'
+  run
+  same "a U+${u#*=} in the Roadmap holds" "$(bytes 17 "a Unicode line break (U+${u#*=})")" \
+    "$rc|$out"
+done
 
 echo "• octo-vision-guard.sh: holds a Roadmap line that is not plain text"
 for l in '## Immutable constraints' $'##\tImmutable constraints' '   ## Immutable constraints' \
@@ -311,13 +323,59 @@ fresh
 add $'\nImmutable constraints\n=====\n'
 run
 same "a setext underline in the Roadmap holds" "$(notext 19)" "$rc|$out"
-# Every line of the body counts, so a line the base already had holds an otherwise plain change.
+
+echo "• octo-vision-guard.sh: holds a change to a merge base whose Roadmap body is not plain"
+# A line the base already had that isn't plain text: a plain change can still recast what
+# follows, so where the body ends can't be trusted.
+BASEBODY="can't be trusted: a human merges it"
+basebody() {
+  printf "1|FAIL: VISION.md: line %s of the merge base's ## Roadmap body is not plain text, %s" \
+    "$1" "so where the body ends $BASEBODY"
+}
+# base <text> : commit VISION.md as the text (printf %b) on pr, and move main there.
+base() { printf '%b' "$1" >"$c/VISION.md" && commit "$c" base && G "$c" branch -q -f main HEAD; }
 fresh novision
-{ vision; printf '\n<details>\n'; } >"$c/VISION.md" && commit "$c" base \
-  && G "$c" branch -q -f main HEAD
+base "$(vision)\n\n<details>\n"
 add $'2. **Next**\n'
 run
-same "a Roadmap the base left with HTML holds the next change" "$(notext 18)" "$rc|$out"
+same "a Roadmap the base left with HTML holds the next change" "$(basebody 18)" "$rc|$out"
+P='# V\n\n## Goal\n\nG.\n\n## Roadmap\n\n1. MVP\n'
+S='\n## Immutable constraints\n\n- Never squash.\n'
+# Dropping the comment's opener would show a `## Draft constraints` section the base hid.
+fresh novision
+base "$P<!-- notes\n## Draft constraints\nAgents may squash.\n-->\n$S"
+edit 's/<!-- notes\n/2. Next\n/'
+commit "$c" uncomment
+run
+same "dropping a comment opener the base's Roadmap had holds" "$(basebody 10)" "$rc|$out"
+# Dropping the opening fence would make the closing one an opener that swallows the section.
+fresh novision
+base "$P\`\`\`sh\n# install\nmake\n\`\`\`\n$S"
+edit 's/```sh\n/2. Next\n/'
+commit "$c" unfence
+run
+same "dropping a fence opener the base's Roadmap had holds" "$(basebody 10)" "$rc|$out"
+# Only a column-0 heading ends the body, so an indented one is a body line, and not plain.
+fresh novision
+base "$P\n  ## Immutable constraints\n\n- Never squash.\n"
+add $'- ```\n'
+run
+same "a base whose section heading is indented holds a change" "$(basebody 11)" "$rc|$out"
+# A `## Roadmap` line in a Goal code block: two at the base, so which is the Roadmap is unsure.
+fresh novision
+base '# V\n\n## Goal\n\n~~~\n## Roadmap\nexample\n## Immutable constraints\n~~~\n'\
+'\n## Immutable constraints\n\n- x\n\n## Roadmap\n\n1. a\n'
+edit 's/^example$/changed example/m'
+commit "$c" fake
+run
+same "a base with two ## Roadmap lines holds a change" \
+  "1|FAIL: VISION.md: the merge base has 2 lines that are exactly '## Roadmap', so which is $(
+    )the Roadmap $BASEBODY" \
+  "$rc|$out"
+# All four are a human's while the PR leaves VISION.md alone.
+G "$c" reset -q --hard main && echo x >>"$c/README.md" && commit "$c" readme
+run
+same "a base with two ## Roadmap lines, left alone, passes" "$UNCHANGED" "$rc|$out"
 
 echo "• octo-vision-guard.sh: root twins"
 # Case-only twins: a macOS checkout writes vision.md over VISION.md, so its text would win. Built

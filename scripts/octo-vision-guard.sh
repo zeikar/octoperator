@@ -21,21 +21,28 @@
 #   - no VISION.md on either side: ok; one left as it was: ok;
 #   - VISION.md deleted, new, --head's not a regular file (a symlink, a submodule, a directory),
 #     or its mode changed: FAIL;
-#   - --head's file holds a NUL, a CR not followed by LF, or another C0 control character but a
-#     tab: FAIL. Tools and renderers split such a file differently, so a reader may not see
-#     what the guard checked;
+#   - --head's file holds a NUL, a CR not followed by LF, another C0 control character but a
+#     tab, or a Unicode line break (U+2028, U+2029, U+0085): FAIL. Tools and renderers split
+#     such a file differently, so a reader may not see what the guard checked;
 #   - the Roadmap body is everything after the merge base's line that is exactly `## Roadmap`
-#     (a trailing CR aside) up to its next level-1 or level-2 heading line (up to 3 spaces, `#`
-#     or `##`, then a blank or the line's end), or to the end. --head must keep the merge base's
+#     (a trailing CR aside) up to its next level-1 or level-2 heading line (at column 0, `#` or
+#     `##`, then a blank or the line's end), or to the end. --head must keep the merge base's
 #     bytes before that body (its Roadmap line included) and from that heading on: otherwise
 #     FAIL, and with no `## Roadmap` line at the merge base any change does. So Goal, Target
 #     users, Quality bar, and Immutable constraints change only through a human merge;
+#   - where that body ends is only as sure as the merge base's body is plain, so a change to
+#     VISION.md also FAILs when the merge base has more than one `## Roadmap` line, or a line of
+#     its Roadmap body that isn't plain text by the rule below (an indented heading-like line
+#     among them: the body runs on past it);
 #   - each line of --head's Roadmap body, changed or not, must be plain text: FAIL for a line
 #     that, after any blanks, opens with `<`, `#`, `>`, ``` or ~~~, or is only a run of `=` or
 #     of `-`, or that holds `<!--`, `-->`, `?>`, `]]>`, `<` before a letter, `/`, `!`, or `?`
-#     (raw HTML), or `]:` (a link definition). Those open or close what can hide, recast, or
-#     re-link the sections around it. List items, indented continuation lines, code spans, and
-#     `[text](url)` links pass.
+#     (raw HTML), or `]:` (a link definition). The rule reads text, not Markdown, so a line
+#     opening with `#` fails even as an issue ref (`#74 …`), and `<` before a letter fails even
+#     in a code span (`Result<T>`). Those marks open or close what can hide or recast the sections
+#     around them, so the body may hold none. List items, indented continuation lines, code
+#     spans, and `[text](url)` links pass. The guard renders nothing: it shuts out the constructs
+#     it knows of, which is not proof that every renderer shows the same sections.
 # With --milestone N (genesis --next's check, octo-genesis-next.sh --check), also: the Roadmap
 # body names `Milestone N`.
 #
@@ -130,6 +137,9 @@ bad="$(perl -0777 -ne 'my $what;
     elsif (/\r(?!\n)/) { $what = "a CR not followed by LF" }
     elsif (/([\x01-\x08\x0b\x0c\x0e-\x1f])/) {
       $what = sprintf "a control character (0x%02x)", ord $1 }
+    elsif (/(\xe2\x80[\xa8\xa9]|\xc2\x85)/) {
+      $what = sprintf "a Unicode line break (U+%04X)", { "\xe2\x80\xa8" => 0x2028,
+        "\xe2\x80\xa9" => 0x2029, "\xc2\x85" => 0x85 }->{$1} }
     else { exit 0 }
     printf "line %d holds %s", 1 + (substr($_, 0, $-[0]) =~ tr/\n//), $what' "$tmp/head")" || exit 3
 [ -z "$bad" ] || { fail "$bad: a reader may not see the text checked here, so a human merges it"
@@ -143,7 +153,7 @@ bad="$(perl -0777 -ne 'my $what;
 split="$(perl -e 'use strict; my $d = shift;
     sub slurp { local $/; open my $f, "<:raw", $_[0] or die "$_[0]: $!"; my $s = <$f>; $s // "" }
     sub put { open my $f, ">:raw", "$d/$_[0]" or die "$d/$_[0]: $!"; print $f $_[1]; close $f }
-    my $heading = qr/^ {0,3}##?(?:[ \t]|\r?\n|\r?\z)/m;
+    my $heading = qr/^##?(?:[ \t]|\r?\n|\r?\z)/m;
     my ($bs, $h) = (slurp("$d/base"), slurp("$d/head"));
     for (["base", $bs], ["head", $h]) {
       my ($side, $s) = @$_; my $sec = "";
@@ -157,6 +167,8 @@ split="$(perl -e 'use strict; my $d = shift;
     my $pre = substr $bs, 0, pos $bs; my $rest = substr $bs, pos $bs;
     my $suf = $rest =~ $heading ? substr($rest, $-[0]) : "";
     put("base.pre", $pre); put("base.suf", $suf);
+    put("base.mid", substr $rest, 0, length($rest) - length $suf);
+    put("base.line", 1 + ($pre =~ tr/\n//));
     if (length $h < length($pre) + length $suf) { print "outside"; exit 0 }
     put("head.pre", substr $h, 0, length $pre);
     put("head.suf", length $suf ? substr($h, -length $suf) : "");
@@ -179,19 +191,36 @@ case "$split" in
         || split=outside ;;
   *) echo "could not split VISION.md" >&2; exit 3 ;;
 esac
+
+# plain <first line's number> <file> : the number of the file's first line that isn't plain text
+# (the header lists what isn't), or nothing.
+plain() {
+  perl -ne 'BEGIN { $n = shift; $n-- }
+    $n++; chomp; s/\r\z//;
+    next unless /^[ \t]*(?:<|#|>|```|~~~)/ || /^[ \t]*(?:=+|-+)[ \t]*$/
+      || /<!--|-->|\?>|\]\]>|<[A-Za-z\/!?]|\]:/;
+    print "$n"; exit 0' "$1" "$2"
+}
+# Where the merge base's Roadmap body ends is only as sure as that body is plain: a comment or
+# fence the base opened there, or a heading-like line, lets a plain edit recast what follows.
+if [ "$be" != "$he" ]; then
+  roadmaps="$(perl -0777 -ne 'print scalar(() = /^## Roadmap(?:\r?\n|\z)/mg)' "$tmp/base")" \
+    || exit 3
+  [ "$roadmaps" -le 1 ] || { fail "the merge base has $roadmaps lines that are exactly" \
+    "'## Roadmap', so which is the Roadmap can't be trusted: a human merges it"; exit 1; }
+  notext="$(plain "$(<"$tmp/base.line")" "$tmp/base.mid")" || exit 3
+  [ -z "$notext" ] || { fail "line $notext of the merge base's ## Roadmap body is not plain" \
+    "text, so where the body ends can't be trusted: a human merges it"; exit 1; }
+fi
 if [ "$split" = outside ]; then
   if cmp -s "$tmp/imm.base" "$tmp/imm.head"; then fail "$OUTSIDE"
   else fail "## Immutable constraints changed: only a human edits that section"; fi
   exit 1
 fi
 
-# Each body line must be plain text (the header lists what isn't). Prints the first that isn't.
-notext="$(perl -ne 'BEGIN { open my $f, "<", shift or die; $n = <$f>; $n-- }
-    $n++; chomp; s/\r\z//;
-    next unless /^[ \t]*(?:<|#|>|```|~~~)/ || /^[ \t]*(?:=+|-+)[ \t]*$/
-      || /<!--|-->|\?>|\]\]>|<[A-Za-z\/!?]|\]:/;
-    print "$n"; exit 0' "$tmp/head.line" "$tmp/head.mid")" || exit 3
-[ -z "$notext" ] || fail "line $notext of the ## Roadmap body is not plain text (a heading, HTML," \
+notext="$(plain "$(<"$tmp/head.line")" "$tmp/head.mid")" || exit 3
+[ -z "$notext" ] || fail "line $notext of the ## Roadmap body is not plain text (a heading or" \
+  "any line opening with #, even an issue ref; HTML, or < before a letter, even in a code span;" \
   "a quote, a fence, an = or - underline, or a link definition): a human merges it"
 if [ -n "$MILESTONE" ]; then
   grep -Eq "Milestone $MILESTONE([^0-9]|$)" "$tmp/head.mid" \

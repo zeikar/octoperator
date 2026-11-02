@@ -73,15 +73,18 @@ constitution outside its Roadmap in front of a human:
   all, only in its Roadmap body and only in plain text. The whole constitution outside the
   Roadmap body (Goal, Target users, Quality bar, Immutable constraints, every heading) must keep
   the merge base's bytes; each Roadmap body line must not open with `<`, `#`, `>`, or a fence,
-  be only `=` or `-` marks, or hold HTML or a link definition; the file may hold no NUL, bare
-  CR, or other control byte; and it must not be deleted, new, made a symlink, given another
-  mode, or joined by a new or changed root name that differs only in case (`vision.md`, which a
-  macOS checkout writes over it). The guard parses no Markdown: anything that isn't plainly text
-  waits for a human, so no construct can hide, recast, or re-link a section. Otherwise it holds
-  with `VISION.md changed outside its Roadmap: a human merges this`. That holds Octoperator's
-  own PRs too. A milestone's Roadmap item still merges unattended. The check can't judge
-  meaning: Roadmap text that argues against a constraint passes it, and only review catches
-  that.
+  be only `=` or `-` marks, or hold HTML or a link definition; the body ends only at a column-0
+  `#` or `##` heading, and the merge base must have one `## Roadmap` line and a body that passes
+  the same rule, so where the body ends can be trusted; the file may hold no NUL, bare CR, other
+  control byte, or Unicode line break; and it must not be deleted, new, made a symlink, given
+  another mode, or joined by a new or changed root name that differs only in case (`vision.md`,
+  which a macOS checkout writes over it). The guard parses no Markdown: anything that isn't
+  plainly text waits for a human, which shuts out the constructs known to hide, recast, or
+  re-link a section, though it renders nothing and so can't prove every renderer agrees.
+  Otherwise it holds with `VISION.md changed outside its Roadmap: a human merges this`. That
+  holds Octoperator's own PRs too. A milestone's Roadmap item still merges unattended. The
+  check can't judge meaning: Roadmap text that argues against a constraint passes it, and only
+  review catches that.
 - **Evals guard (`auto`).** Where the base branch has `.github/workflows/evals-guard.yml` (a repo
   genesis created), `auto` merges only when `scripts/octo-evals-guard.sh` finds both guard checks
   passed on the reviewed commit (against the base branch's tip, when the PR changes `evals/` or

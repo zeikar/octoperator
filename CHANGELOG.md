@@ -287,14 +287,16 @@ All notable changes to Octoperator are documented in this file. The format is ba
   New offline helper `scripts/octo-vision-guard.sh` compares the root `VISION.md` at the merge
   base with the reviewed commit, from git's objects, so no checkout is needed and the user's diff
   settings don't apply. It parses no Markdown; it allows instead of blocking. Everything before
-  the Roadmap body (its `## Roadmap` line included) and from the next level-1 or level-2 heading
-  on must keep the merge base's bytes, so Goal, Target users, Quality bar, and Immutable
+  the Roadmap body (its `## Roadmap` line included) and from the next column-0 `#` or `##`
+  heading on must keep the merge base's bytes, so Goal, Target users, Quality bar, and Immutable
   constraints change only through a human merge. Each Roadmap body line must not open with `<`,
   `#`, `>`, or a fence, be only `=` or `-` marks, or hold HTML (`<!--`, `-->`, `?>`, `]]>`, a
-  tag) or a link definition. The file may hold no NUL, bare CR, or other control byte, and must
-  not be deleted, new, made a symlink, given another mode, or joined by a new or changed root
-  name such as `vision.md`, which would replace it on a case-insensitive checkout. A repo with no
-  `VISION.md`, one the PR leaves alone, and a plain Roadmap item pass. The hold reason is
+  tag) or a link definition, and the merge base must have one `## Roadmap` line and a body that
+  passes the same rule, so where the body ends can be trusted. The file may hold no NUL, bare
+  CR, other control byte, or Unicode line break, and must not be deleted, new, made a symlink,
+  given another mode, or joined by a new or changed root name such as `vision.md`, which would
+  replace it on a case-insensitive checkout. A repo with no `VISION.md`, one the PR leaves
+  alone, and a plain Roadmap item pass. The hold reason is
   `VISION.md changed outside its Roadmap: a human merges this`. It applies to Octoperator's own
   repo too. `octo-genesis-next.sh --check` now runs its VISION.md rules through the same helper
   (`--milestone <n>`, which also needs a Roadmap item for the milestone). Genesis's

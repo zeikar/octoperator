@@ -345,7 +345,9 @@ check
 fails "a Roadmap without the milestone fails" "VISION.md: ## Roadmap needs an item for Milestone 2"
 # Inside ## Roadmap, so only the plain-text rule sees them: a heading, HTML, a quote, a fence, or
 # an underline can recast what is around it, at any indent.
-NOTEXT="a heading, HTML, a quote, a fence, an = or - underline, or a link definition): a human merges it"
+NOTEXT="a heading or any line opening with #, even an issue ref; HTML, or < before a letter, even"
+NOTEXT+=" in a code span; a quote, a fence, an = or - underline, or a link definition): a human"
+NOTEXT+=" merges it"
 for h in $'##\tImmutable constraints' ' ## Immutable constraints' '   # Vision' '##' \
     '### Sub-item' '##not a heading' '    ## indented' '<details>' '> quoted' '```'; do
   case_repo

@@ -197,8 +197,11 @@ in literally. Stop at the first failure with the reason given; nothing is create
      another Roadmap item cites evidence too, as the section's first line asks. Keep every
      Roadmap line plain text: list items, indented continuation lines, code spans, and
      `[text](url)` links or bare URLs, never HTML, a `<url>` autolink, a heading, a quote, a
-     fence, an `=` or `-` underline, or a `[label]: url` definition. The vision check holds any
-     other line, and any change to VISION.md outside the Roadmap body.
+     fence, an `=` or `-` underline, or a `[label]: url` definition. The check reads text, not
+     Markdown: a line opening with `#` is held even as an issue ref (write `see #74`, not a line
+     that starts `#74`), and `<` before a letter is held even inside a code span (`Result<T>`).
+     The vision check holds any other line, and any change to VISION.md outside the Roadmap
+     body.
    - **`docs/research.md`**, grounded runs only, in `references/proposal.md`'s format: add or
      revise Prior art rows, Build and Skip items, and each page read in Sources, accessed today.
      If the file was ungrounded, remove its `ungrounded: no web access` line: it is grounded now,
