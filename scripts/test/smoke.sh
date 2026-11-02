@@ -680,6 +680,12 @@ genesis_check "$g/roadcode"
 expect 0 "VISION.md Roadmap with \`Result<T>\` in a code span: exits 1, names the line" \
   test "$gc_rc" -eq 1 -a "${gc_out#"$notplain"}" != "$gc_out" \
   -a "$(printf '%s\n' "$gc_out" | grep -c '')" -eq 1
+genesis_fixture "$g/roadcr"
+perl -pe 's/^(A companion)/$1\r/' "$g/valid/VISION.md" \
+  >"$g/roadcr/VISION.md"
+genesis_check "$g/roadcr"
+expect 0 "VISION.md with a bare CR outside the Roadmap: exits 1, names the byte" \
+  test "$gc_rc" -eq 1 -a -n "$(printf '%s\n' "$gc_out" | grep -F 'a CR not followed by LF')"
 genesis_fixture "$g/notest"
 grep -v '^test_command:' "$g/valid/GENESIS.md" >"$g/notest/GENESIS.md"
 genesis_check "$g/notest"

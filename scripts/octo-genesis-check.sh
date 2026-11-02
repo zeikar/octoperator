@@ -37,7 +37,8 @@
 #     ## Roadmap. Immutable constraints holds the four baseline constraints as `- ` lines, each
 #     exact up to its end or a space after it, and Roadmap item `1.` is the MVP. Its Roadmap
 #     body passes the vision guard's plain-text rule (octo-vision-guard.sh --plain-roadmap), so
-#     no `<placeholder>` is left, no line opens with `#`, and no `<` comes before a letter, even
+#     the file holds no NUL, bare CR, or other byte the guard refuses, no `<placeholder>` is
+#     left, no line opens with `#`, and no `<` comes before a letter, even
 #     in a code span: the guard holds every later change to a VISION.md whose merge base fails it.
 #   - When docs/research.md is ungrounded, the PRD, the ADR, and VISION.md cite no http(s) URL.
 #

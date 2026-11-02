@@ -507,6 +507,13 @@ for l in '2. <the next milestone>' '2. errors as `Result<T>`' '#74 next' '  ## L
   same "a Roadmap line '$l' fails" "1|FAIL: VISION.md: line 17 of the ## Roadmap body is not plain \
 text (${NOTEXT%%): a human merges it}; a template <placeholder> too), $LATER" "$rc|$out"
 done
+# Outside the Roadmap too: genesis writes the whole file, and every later --next is held on it.
+for b in 'a NUL byte|\000' 'a CR not followed by LF|\r' 'a Unicode line break (U+2028)|\342\200\250'; do
+  { printf '# Vision\n\nGoal x'; printf "${b#*|}"; printf ' y\n\n'; vision | sed 1d; } >"$P"
+  plain_run
+  same "${b%%|*} outside the Roadmap fails" "1|FAIL: VISION.md: line 3 holds ${b%%|*}, $LATER" \
+    "$rc|$out"
+done
 { vision; printf '\n## Roadmap\n\n1. again\n'; } >"$P"; plain_run
 same "two '## Roadmap' lines fail" "1|FAIL: VISION.md: it has 2 lines that are exactly \
 '## Roadmap'; keep one, or auto's vision check holds every later change to it" "$rc|$out"

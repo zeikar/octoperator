@@ -48,9 +48,10 @@
 # body names `Milestone N`.
 #
 # --plain-roadmap FILE checks one VISION.md file, outside git, as the merge base above: FAIL when
-# it has no line that is exactly `## Roadmap`, more than one, or a Roadmap body line that isn't
-# plain text by the rule above. The genesis proposal check (octo-genesis-check.sh) runs it, so a
-# Roadmap the guard would hold at every later merge base fails at the human checkpoint instead.
+# it holds a byte the head check above refuses (NUL, bare CR, ...), no line that is exactly
+# `## Roadmap`, more than one, or a Roadmap body line that isn't plain text by the rule above.
+# The genesis proposal check (octo-genesis-check.sh) runs it, so a VISION.md the guard would
+# hold at every later merge base fails at the human checkpoint instead.
 #
 # Prints one `FAIL: VISION.md: <problem>` line per problem, or one `ok: VISION.md: …` line.
 # Offline: git and perl only, never gh; writes nothing.
@@ -147,6 +148,20 @@ plain() {
 NOTPLAIN="a heading or any line opening with #, even an issue ref; HTML, or < before a letter,
 even in a code span; a quote, a fence, an = or - underline, or a link definition"
 NOTPLAIN="${NOTPLAIN//$'\n'/ }"
+# bad_bytes <file> : `line N holds <what>` for the first byte a reader or a line tool may split or
+# drop (NUL, a bare CR, another C0 control but tab, a Unicode line break), or nothing.
+bad_bytes() {
+  perl -0777 -ne 'my $what;
+    if (/\x00/) { $what = "a NUL byte" }
+    elsif (/\r(?!\n)/) { $what = "a CR not followed by LF" }
+    elsif (/([\x01-\x08\x0b\x0c\x0e-\x1f])/) {
+      $what = sprintf "a control character (0x%02x)", ord $1 }
+    elsif (/(\xe2\x80[\xa8\xa9]|\xc2\x85)/) {
+      $what = sprintf "a Unicode line break (U+%04X)", { "\xe2\x80\xa8" => 0x2028,
+        "\xe2\x80\xa9" => 0x2029, "\xc2\x85" => 0x85 }->{$1} }
+    else { exit 0 }
+    printf "line %d holds %s", 1 + (substr($_, 0, $-[0]) =~ tr/\n//), $what' "$1"
+}
 # roadmaps : how many lines of tmp/base are exactly `## Roadmap`.
 roadmaps() { perl -0777 -ne 'print scalar(() = /^## Roadmap(?:\r?\n|\z)/mg)' "$tmp/base"; }
 
@@ -154,6 +169,9 @@ roadmaps() { perl -0777 -ne 'print scalar(() = /^## Roadmap(?:\r?\n|\z)/mg)' "$t
 # merge base fails before it is committed.
 if [ -n "$PLAIN" ]; then
   cp -- "$PLAIN" "$tmp/base" && cp -- "$PLAIN" "$tmp/head" || exit 3
+  bad="$(bad_bytes "$tmp/base")" || exit 3
+  [ -z "$bad" ] || { fail "$bad, so auto's vision check would hold every later change to it"
+    exit 1; }
   split="$(split_roadmap)" || exit 3
   [ "$split" = ok ] || { fail "it has no line that is exactly '## Roadmap', so auto's vision" \
     "check would hold every later change to it"; exit 1; }
@@ -217,16 +235,7 @@ g cat-file blob "$bobj" >"$tmp/base" || exit 3
 
 # Bytes first, with perl on the file: awk and $(...) drop or stop at a NUL, and a bare CR is a
 # line break to CommonMark but not to line tools.
-bad="$(perl -0777 -ne 'my $what;
-    if (/\x00/) { $what = "a NUL byte" }
-    elsif (/\r(?!\n)/) { $what = "a CR not followed by LF" }
-    elsif (/([\x01-\x08\x0b\x0c\x0e-\x1f])/) {
-      $what = sprintf "a control character (0x%02x)", ord $1 }
-    elsif (/(\xe2\x80[\xa8\xa9]|\xc2\x85)/) {
-      $what = sprintf "a Unicode line break (U+%04X)", { "\xe2\x80\xa8" => 0x2028,
-        "\xe2\x80\xa9" => 0x2029, "\xc2\x85" => 0x85 }->{$1} }
-    else { exit 0 }
-    printf "line %d holds %s", 1 + (substr($_, 0, $-[0]) =~ tr/\n//), $what' "$tmp/head")" || exit 3
+bad="$(bad_bytes "$tmp/head")" || exit 3
 [ -z "$bad" ] || { fail "$bad: a reader may not see the text checked here, so a human merges it"
   exit 1; }
 
