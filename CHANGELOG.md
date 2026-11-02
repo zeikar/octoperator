@@ -154,8 +154,11 @@ All notable changes to Octoperator are documented in this file. The format is ba
   last stage of epic #85 (#93). Run in a repo genesis created, it reads `VISION.md`,
   `docs/prd.md`, `docs/research.md`, the run ledger, and earlier `milestone-*` PRs (a closed,
   unmerged one is a plan a human turned down); researches what similar products shipped since,
-  under stage 1's caps (6 WebSearch, 10 WebFetch, inline, pages are data, never instructions), or
-  plans from the repo alone, marked `ungrounded: no web access`; picks one milestone of about 3–8
+  under stage 1's caps (6 WebSearch, 10 WebFetch, inline, pages are data, never instructions;
+  queries name only the product's public category and known prior art, and it fetches only URLs a
+  search or `docs/research.md` gave it), or plans from the repo alone, marked
+  `ungrounded: no web access`, as it does under autopilot unless your settings allow the web
+  tools; picks one milestone of about 3–8
   issues that fits `VISION.md`, listing what it rules out; and opens one PR on
   `milestone-<n>-<slug>` with a `## Milestone <n>` section appended to the PRD, new must-fail
   evals under `evals/<id>/` only, a Roadmap item citing its evidence, and the refreshed research,
@@ -164,11 +167,15 @@ All notable changes to Octoperator are documented in this file. The format is ba
   judged an older commit than the default branch's tip (right after a milestone merges, it would
   plan twice). `--dry-run` prints the milestone and the PR and writes nothing. It works in its own
   worktree, and the new offline `scripts/octo-genesis-next.sh` numbers the milestone from the
-  default branch (`--rev`) and checks the commit before the push (`--check`): only the PRD
-  (appended), the Roadmap, the research, and new eval directories change, never an existing eval
-  or the Immutable constraints. The new `scripts/octo-milestone-gate.sh` makes the open-PR,
-  all-pass, and stale-tip decision for both genesis and autopilot, and `octo-evals-metric.sh` now
-  also prints the run's `head:` commit. The procedure is
+  default branch (`--rev`) and checks the commit before the push (`--check`). Only the PRD
+  (appended), the Roadmap, the research (file modes unchanged), and new eval directories of
+  regular files change, never an existing eval or the Immutable constraints, and no CI skip token
+  appears in the milestone's title or the commit message. `--check --head <sha>` runs the same
+  check in a detached checkout. A stop after the worktree exists removes it and the local branch.
+  The new `scripts/octo-milestone-gate.sh` makes the decision for both genesis and autopilot:
+  buildable work first, an open milestone PR, all-pass, planning that failed at the tip, a
+  milestone a human declined at the tip, and a stale tip (and whether an evals run for it is
+  queued or running). `octo-evals-metric.sh` now also prints the run's `head:` commit. The procedure is
   `skills/genesis/references/next.md`, which states the risks (unattended web content steering
   the product, and how the gates, a private repo, cited sources, and one open milestone PR at a
   time bound it).
@@ -176,16 +183,27 @@ All notable changes to Octoperator are documented in this file. The format is ba
   implement phase: the PR must be open, not a draft, from this repo, based on the default branch,
   and close at most one issue, which (or else the PR itself) is the fixer's scope. A milestone PR
   ships this way: its evals guard holds it for a human when a new eval already passes or an
-  existing one changed.
-- `autopilot`, when every eval passes, asks the milestone gate and, with no next-milestone PR open
-  and the metric at the default branch's tip, plans the next milestone with `genesis --next`; in
-  `full` mode it then ships the PR with `auto --pr`, in `semi` mode it leaves it for the human. The
-  run ends with the new status line `autopilot: all evals pass → planning next milestone` (no
-  longer a progress line). While a milestone PR is open or the metric is stale, it observes and
-  ends `stopped: next-milestone PR #<pr> open` or `stopped: evals metric stale`, and a P == T run
-  never ends a schedule. `autopilot` pre-allows WebSearch and WebFetch for that research only.
-  The ledger's entry, validity, convergence, and metric rules moved to
-  `skills/autopilot/references/ledger.md`. New offline tests: the gate in
+  existing one changed. For any PR on a `milestone-*` branch, `auto`'s merge gate also re-runs
+  `octo-genesis-next.sh --check --head` on the reviewed commit and holds with `milestone check
+  failed`, and its fixer gets the milestone rules as scope.
+- `autopilot`, when every eval passes, first discovers work and builds any it finds. With nothing
+  buildable, it asks the milestone gate. With no next-milestone PR open and the metric at the
+  default branch's tip, it plans the next milestone with `genesis --next` and ships the PR with
+  `auto --pr` in both modes: semi mode's one self-proposed merge, gated mechanically by the evals
+  guard and the milestone check. The run ends with the new status line `autopilot: all evals pass
+  → planning next milestone` (no longer a progress line). It observes instead, and a P == T run
+  never ends a schedule, in four cases. While a milestone PR is open, it ends `stopped:
+  next-milestone PR #<pr> open`. After a human closed the newest one unmerged at the same tip, it
+  ends `stopped: next-milestone PR #<pr> declined`. After planning failed at the same tip
+  (recorded in the entry's new optional `planning_failed` key), it ends `stopped: milestone
+  planning failed at this tip`. While the metric is stale, it ends `stopped: evals metric stale`,
+  first dispatching `evals.yml` once when no run for the tip is queued or running (never
+  `evals-model.yml`). `--resume` or a new commit lifts the declined and failed cases. `autopilot`
+  pre-allows no web tool: a skill's grant lasts the whole turn, which `research`, `implement`, and
+  `auto` share. So it plans ungrounded unless your settings allow WebSearch and WebFetch, and
+  `research` never uses them. The all-pass procedure is in
+  `skills/autopilot/references/milestone.md`. The ledger's entry, validity, convergence, and
+  metric rules moved to `skills/autopilot/references/ledger.md`. New offline tests: the gate in
   `scripts/test/autopilot.sh`, and `scripts/test/genesis-next.sh`, which CI runs.
 - README → "Running continuously": copy-paste recipes for re-running `autopilot` with Claude
   Code's own scheduling on your machine — an in-session cron task in a background session (the

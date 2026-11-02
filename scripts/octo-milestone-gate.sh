@@ -2,44 +2,63 @@
 # octo-milestone-gate.sh — decide whether to plan the next milestone (`genesis --next`) now.
 #
 # Usage:
-#   octo-milestone-gate.sh --repo OWNER/NAME --rate P/T|none --head SHA|none
+#   octo-milestone-gate.sh --repo OWNER/NAME --rate P/T|none --head SHA|none [--buildable N]
+#                          [--failed-tip SHA|none] [--resume]
 #
-# --rate and --head are octo-evals-metric.sh's `rate:` and `head:` values, verbatim. Planning
-# needs all three of these, checked in this order:
-#   1. No next-milestone PR is open: an open PR from this repo (not a fork) whose head branch
+# --rate and --head are octo-evals-metric.sh's `rate:` and `head:` values, verbatim. --buildable
+# is how many issues autopilot's discovery found it could build (default 0); --failed-tip is
+# octo-ledger-state.sh's `planning-failed:` tip (default none); --resume is autopilot's flag.
+# Planning needs all of these, checked in this order:
+#   1. Nothing is buildable: ready work comes before a new milestone (no gh call).
+#   2. No next-milestone PR is open: an open PR from this repo (not a fork) whose head branch
 #      starts with `milestone-`, the branch genesis --next opens. At most one is open at a time.
-#   2. Every eval passes: the rate is P/T with P == T.
-#   3. The metric is fresh: the evals run it came from judged the default branch's current tip
-#      (--head equals the tip). Right after a milestone PR merges, the latest completed run still
-#      says P == T for the commit before it, and planning then would file the milestone twice.
+#   3. Every eval passes: the rate is P/T with P == T.
+#   4. The last run's planning did not fail at the default branch's current tip (--failed-tip):
+#      a failure that would repeat waits for a new commit or --resume.
+#   5. A human did not decline the last milestone at this tip: the newest closed or merged
+#      next-milestone PR from this repo was closed unmerged, and the tip is still the merge base
+#      of its head and the tip (nothing landed since it was planned). A new commit, or --resume,
+#      lifts it. (--resume does not lift step 4: octo-ledger-state.sh prints no failed tip then.)
+#   6. The metric is fresh: the evals run it came from judged the tip (--head equals it). Right
+#      after a milestone PR merges, the latest completed run still says P == T for the commit
+#      before it, and planning then would file the milestone twice. When stale, it asks whether
+#      a push or dispatch run of evals.yml for the tip is queued or in progress: `wait` if one is,
+#      else `dispatch` (a `[skip ci]` push started none, so dispatching evals.yml is safe).
 #
 # Prints three lines:
 #   milestone-pr: none | <number> <url>       (the lowest-numbered open next-milestone PR)
 #   tip: <the default branch's tip commit> | unchecked
-#   decision: open <number> | not all-pass | stale | plan
-# The tip is read only when steps 1 and 2 passed. Read-only: `gh pr list`, `gh repo view`, and
-# one `gh api` GET.
+#   decision: build | open <number> | not all-pass | failed | declined <number> |
+#             stale dispatch | stale wait <run id> | plan
+# The tip is read only when steps 1 to 3 passed. Read-only: `gh pr list`, `gh repo view`, and
+# `gh api` GETs.
 #
 # Exit codes: 0 decided, 2 bad arguments, 3 a gh error (gh's output on stderr; nothing decided).
 set -uo pipefail
 
-REPO="" RATE="" HEAD=""
+REPO="" RATE="" HEAD="" BUILDABLE=0 FAILED_TIP=none RESUME=false
 need_value() { [ $# -ge 2 ] || { echo "Missing value for $1" >&2; exit 2; }; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo) need_value "$@"; REPO="$2"; shift 2 ;;
     --rate) need_value "$@"; RATE="$2"; shift 2 ;;
     --head) need_value "$@"; HEAD="$2"; shift 2 ;;
+    --buildable) need_value "$@"; BUILDABLE="$2"; shift 2 ;;
+    --failed-tip) need_value "$@"; FAILED_TIP="$2"; shift 2 ;;
+    --resume) RESUME=true; shift ;;
     -h|--help) sed -n '2,/^[^#]/s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 [ -n "$REPO" ] && [ -n "$RATE" ] && [ -n "$HEAD" ] || {
-  echo "Usage: octo-milestone-gate.sh --repo OWNER/NAME --rate P/T|none --head SHA|none" >&2
+  echo "Usage: octo-milestone-gate.sh --repo OWNER/NAME --rate P/T|none --head SHA|none" \
+    "[--buildable N] [--failed-tip SHA|none] [--resume]" >&2
   exit 2; }
+# REPO goes into a jq filter as a string literal (gh's --jq has no --arg), so no quotes in it.
 [[ "$REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] \
   || { echo "--repo must be OWNER/NAME" >&2; exit 2; }
 int='(0|[1-9][0-9]{0,8})'
+[[ "$BUILDABLE" =~ ^$int$ ]] || { echo "--buildable must be a whole number" >&2; exit 2; }
 all_pass=no
 if [ "$RATE" != none ]; then
   [[ "$RATE" =~ ^$int/$int$ ]] && [ "${BASH_REMATCH[1]}" -le "${BASH_REMATCH[2]}" ] \
@@ -47,19 +66,23 @@ if [ "$RATE" != none ]; then
     || { echo "--rate must be P/T (whole numbers, P <= T, T >= 1) or none" >&2; exit 2; }
   [ "${BASH_REMATCH[1]}" -eq "${BASH_REMATCH[2]}" ] && all_pass=yes
 fi
-[ "$HEAD" = none ] || [[ "$HEAD" =~ ^[0-9a-f]{40}$ ]] \
-  || { echo "--head must be a 40-digit commit or none" >&2; exit 2; }
+for v in "$HEAD" "$FAILED_TIP"; do
+  [ "$v" = none ] || [[ "$v" =~ ^[0-9a-f]{40}$ ]] \
+    || { echo "--head and --failed-tip must be a 40-digit commit or none" >&2; exit 2; }
+done
+
+decide() { printf 'milestone-pr: %s\ntip: %s\ndecision: %s\n' "$1" "$2" "$3"; exit 0; }
+[ "$BUILDABLE" -eq 0 ] || decide none unchecked build
 
 err="$(mktemp)" && [ -n "$err" ] || { echo "mktemp failed" >&2; exit 3; }
 trap 'rm -f "$err"' EXIT
 # gh_failed <what> : gh's own error on stderr, exit 3.
 gh_failed() { echo "$1 failed: $(grep -m 1 . "$err" || echo "exit status")" >&2; exit 3; }
-decide() { printf 'milestone-pr: %s\ntip: %s\ndecision: %s\n' "$1" "$2" "$3"; exit 0; }
+mine='select((.isCrossRepository | not) and (.headRefName | startswith("milestone-")))'
 
 prs="$(gh pr list --repo "$REPO" --state open --limit 200 \
   --json number,url,headRefName,isCrossRepository \
-  --jq '.[] | select((.isCrossRepository | not) and (.headRefName | startswith("milestone-")))
-        | "\(.number) \(.url)"' 2>"$err")" || gh_failed "gh pr list"
+  --jq ".[] | $mine | \"\(.number) \(.url)\"" 2>"$err")" || gh_failed "gh pr list"
 pr="$(printf '%s\n' "$prs" | grep . | sort -n | head -n 1)"
 if [ -n "$pr" ]; then
   case "${pr%% *}" in '' | *[!0-9]*) echo "unexpected gh output: $pr" >&2; exit 3 ;; esac
@@ -73,5 +96,35 @@ branch="$(gh repo view "$REPO" --json defaultBranchRef --jq .defaultBranchRef.na
 tip="$(gh api "repos/$REPO/git/ref/heads/$branch" --jq .object.sha 2>"$err")" \
   || gh_failed "reading the tip of $branch"
 [[ "$tip" =~ ^[0-9a-f]{40}$ ]] || { echo "unexpected tip from gh: $tip" >&2; exit 3; }
-[ "$HEAD" = "$tip" ] || decide none "$tip" stale
-decide none "$tip" plan
+[ "$FAILED_TIP" != "$tip" ] || decide none "$tip" failed
+
+if [ "$RESUME" = false ]; then
+  # The newest closed or merged next-milestone PR (gh's closed state holds both).
+  last="$(gh pr list --repo "$REPO" --state closed --limit 100 \
+    --json number,state,headRefName,headRefOid,isCrossRepository \
+    --jq ".[] | $mine | \"\(.number) \(.state) \(.headRefOid)\"" 2>"$err")" \
+    || gh_failed "gh pr list"
+  last="$(printf '%s\n' "$last" | grep . | sort -n | tail -n 1)"
+  read -r num state sha <<EOF
+$last
+EOF
+  if [ "${state:-}" = CLOSED ]; then
+    case "$num" in '' | *[!0-9]*) echo "unexpected gh output: $last" >&2; exit 3 ;; esac
+    [[ "${sha:-}" =~ ^[0-9a-f]{40}$ ]] || { echo "unexpected head from gh: $last" >&2; exit 3; }
+    base="$(gh api "repos/$REPO/compare/$tip...$sha" --jq .merge_base_commit.sha 2>"$err")" \
+      || gh_failed "comparing PR #$num with $branch"
+    [ "$base" != "$tip" ] || decide none "$tip" "declined $num"
+  fi
+fi
+
+[ "$HEAD" != "$tip" ] || decide none "$tip" plan
+run="$(gh api -X GET "repos/$REPO/actions/workflows/evals.yml/runs" -f branch="$branch" \
+  -f head_sha="$tip" -f per_page=20 \
+  --jq '[.workflow_runs[] | select(.status != "completed")
+          | select(.event == "push" or .event == "workflow_dispatch")
+          | select((.head_repository.full_name // "" | ascii_downcase)
+                   == ("'"$REPO"'" | ascii_downcase))]
+        | .[0] // empty | .id' 2>"$err")" || gh_failed "listing evals.yml runs for the tip"
+[ -n "$run" ] || decide none "$tip" "stale dispatch"
+case "$run" in *[!0-9]*) echo "unexpected run id from gh: $run" >&2; exit 3 ;; esac
+decide none "$tip" "stale wait $run"

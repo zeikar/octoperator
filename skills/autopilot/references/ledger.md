@@ -18,12 +18,21 @@ entry's shape, the commands, and what happens when every eval passes).
   run reports it as `total_cost_usd`, where a wrapper could pick it up.
 - `kind` — `run` (a normal run, or one that planned the next milestone), `observe` (a converged
   run, or an all-pass run that waits, SKILL.md step 3), or `reset` (`--resume`).
+- `planning_failed` — optional, and only on a `run` entry whose next-milestone planning stopped
+  before opening a PR: `{"tip": "<the 40-digit commit it planned at>", "reason": "<genesis's
+  stopped: reason>"}` ([milestone.md → Planning](milestone.md#planning)). The newest valid `run`
+  or `reset` entry decides; `observe` entries are passed over, since they plan nothing. When it is
+  a `run` entry with this key, `octo-ledger-state.sh` prints its tip and reason as
+  `planning-failed:`, and the milestone gate observes while the default branch's tip is still that
+  commit. A `reset` entry, or a newer `run` entry without the key, clears it. A malformed value
+  counts as absent.
 
 ## Valid entries
 
 People comment on the ledger too, and on a public repo anyone can. Count a comment as an entry
 only if its `authorAssociation` is `OWNER`, `MEMBER`, or `COLLABORATOR` and its body holds one
-fenced `json` block that parses to an object with all nine keys above and a `kind` from the list.
+fenced `json` block that parses to an object with the nine required keys above (all but
+`planning_failed`) and a `kind` from the list. Extra keys don't matter.
 Skip every other comment. Entries post under the `gh` login that runs autopilot, so that login
 needs one of those roles. A local run under your own login has it; a bot account without one (e.g.
 `github-actions[bot]`) does not, and autopilot then skips its own entries and never converges.

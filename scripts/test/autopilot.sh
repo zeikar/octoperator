@@ -27,13 +27,21 @@
 #                            --resume), --resume, no
 #                            ledger yet, the validity rules (author association, a malformed or
 #                            incomplete entry, an unknown kind, two blocks, a non-numeric metric),
+#                            the planning-failed line (the newest run entry's planning_failed,
+#                            past observe entries; none after a reset, a newer run, with
+#                            --resume, or when malformed; its reason on one line, cut at 80),
 #                            a gh error, and bad arguments
-#   - octo-milestone-gate.sh : autopilot's P == T decision (and genesis --next's guards): an
+#   - octo-milestone-gate.sh : autopilot's P == T decision (and genesis --next's guards):
+#                            buildable work wins over everything without a gh call, then an
 #                            open next-milestone PR (the lowest of two; a fork's milestone-*
-#                            branch and other branches don't count) wins over everything, then
-#                            P < T or no metric, then a metric run on an older commit than the
-#                            default branch's tip (stale), else plan; gh errors exit 3, bad
-#                            arguments 2
+#                            branch and other branches don't count), then P < T or no metric,
+#                            then planning that failed at the tip, then the newest closed
+#                            milestone PR declined at the tip (not once the tip moved, a newer
+#                            one merged, a fork's or another branch's PR, or with --resume), then
+#                            a metric run on an older commit than the tip: `stale wait` while a
+#                            push or dispatch run of evals.yml for the tip is queued or running,
+#                            else `stale dispatch` (completed, pull_request, and fork runs don't
+#                            count), else plan; gh errors exit 3, bad arguments 2
 #
 # Nothing here calls the real gh or the network. Exits 0 when every check passes, 1 when any fails.
 set -uo pipefail
@@ -67,17 +75,20 @@ trap 'rm -rf "$tmp"' EXIT
 # filter (jq -r): `repo view` → repo.json, contents → a file or, with $ST_NOWF, gh's 404, a
 # workflow's runs → runs.json (or a 404 with $ST_NORUNS; it checks the branch and status
 # parameters), a run's jobs → jobs-<run>.json, annotations → ann-<id>.json (or none), and
-# `issue view` → ledger.json, `pr list` → prs.json, and a branch's ref → ref.json (it checks the
-# branch). $ST_FAIL=<endpoint word> makes that call fail with a 500.
+# `issue view` → ledger.json, `pr list` → prs.json (--state open) or prs-closed.json (--state
+# closed, `[]` when missing), a branch's ref → ref.json (it checks the branch), a compare →
+# compare.json, and the runs for one head commit → runs-tip.json (it checks the parameters).
+# $ST_FAIL=<endpoint word> makes that call fail with a 500 (pr-open and pr-closed for the lists).
 stub="$tmp/bin"
 ST_DIR="$tmp/st"
 mkdir -p "$stub" "$ST_DIR"
 cat >"$stub/gh" <<'STUB'
 #!/usr/bin/env bash
-cmd="$1"; shift; ep="" jq="" params=""
+cmd="$1"; shift; ep="" jq="" params="" state=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --paginate) shift ;; --jq) jq="$2"; shift 2 ;; --repo | --json | -X) shift 2 ;;
+    --paginate) shift ;; --jq) jq="$2"; shift 2 ;; --repo | --json | -X | --limit) shift 2 ;;
+    --state) state="$2"; shift 2 ;;
     -f) params="$params $2"; shift 2 ;;
     *) ep="${ep:-$1}"; shift ;;
   esac
@@ -86,7 +97,12 @@ fail() { echo "gh: Server Error (HTTP 500)" >&2; exit 1; }
 case "$cmd" in
   repo) [ "${ST_FAIL:-}" != repo ] || fail; f="$ST_DIR/repo.json" ;;
   issue) [ "${ST_FAIL:-}" != issue ] || fail; f="$ST_DIR/ledger.json" ;;
-  pr) [ "${ST_FAIL:-}" != pr ] || fail; f="$ST_DIR/prs.json" ;;
+  pr) [ "${ST_FAIL:-}" != "pr-$state" ] || fail
+    case "$state" in
+      open) f="$ST_DIR/prs.json" ;;
+      closed) f="$ST_DIR/prs-closed.json"; [ -f "$f" ] || { echo '[]' | jq -r "$jq"; exit; } ;;
+      *) echo "stub: bad state $state" >&2; exit 9 ;;
+    esac ;;
   api)
     case "$ep" in
       */contents/.github/workflows/evals.yml)
@@ -95,6 +111,12 @@ case "$cmd" in
         case "$params" in *" ref=$ST_BRANCH"*) ;; *) echo "stub: bad ref:$params" >&2; exit 9 ;; esac
         echo file; exit 0 ;;
       */actions/workflows/evals.yml/runs)
+        case "$params" in *" head_sha="*)
+          [ "${ST_FAIL:-}" != tipruns ] || fail
+          case "$params" in *" branch=$ST_BRANCH head_sha=$ST_TIP per_page=20") ;;
+            *) echo "stub: bad params:$params" >&2; exit 9 ;; esac
+          jq -r "$jq" "$ST_DIR/runs-tip.json"; exit ;;
+        esac
         [ "${ST_FAIL:-}" != runs ] || fail
         [ -z "${ST_NORUNS:-}" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
         case "$params" in *" branch=$ST_BRANCH "*"status=completed per_page=20"*) ;;
@@ -105,6 +127,9 @@ case "$cmd" in
       */git/ref/heads/*) [ "${ST_FAIL:-}" != ref ] || fail
         [ "$ep" = "repos/o/n/git/ref/heads/$ST_BRANCH" ] || { echo "stub: bad ref $ep" >&2; exit 9; }
         f="$ST_DIR/ref.json" ;;
+      */compare/*) [ "${ST_FAIL:-}" != compare ] || fail
+        [ "$ep" = "repos/o/n/compare/$ST_TIP...$ST_CMP_HEAD" ] || { echo "stub: bad compare $ep" >&2; exit 9; }
+        f="$ST_DIR/compare.json" ;;
       */check-runs/*/annotations*) [ "${ST_FAIL:-}" != annotations ] || fail
         f="${ep%/annotations*}"; f="$ST_DIR/ann-${f##*/}.json"
         [ -f "$f" ] || { echo '[]' | jq -r "$jq"; exit; } ;;
@@ -296,10 +321,12 @@ state() {
   rc=$?
   out="$(printf '%s' "$out" | paste -sd '|' -)"
 }
-# [AP=yes] decides <label> <entries> <skipped> <streak> <decision> : the helper exited 0 with
-# these lines, and `all-pass: no` (or $AP).
+# [AP=yes] [PF=<tip reason>] decides <label> <entries> <skipped> <streak> <decision> : the
+# helper exited 0 with these lines, `all-pass: no` (or $AP), and `planning-failed: none` (or $PF).
 decides() {
-  same "$1" "0|entries: $2|skipped: $3|streak: $4|all-pass: ${AP:-no}|decision: $5" "$rc|$out"
+  same "$1" \
+    "0|entries: $2|skipped: $3|streak: $4|all-pass: ${AP:-no}|planning-failed: ${PF:-none}|decision: $5" \
+    "$rc|$out"
 }
 O=OWNER
 m() { printf '{"passed": %s, "total": %s}' "$1" "$2"; }
@@ -418,6 +445,49 @@ ledger "$O|$(e run 0 "$(m 5 5)")" "$O|$(e run 0 '{"passed": 3, "total": 3, "x": 
 state
 decides "an all-pass entry with extra metric keys still ends the walk" \
   "0 (since the last all-pass entry)" none 0/3 build
+
+# planning-failed: the newest run entry's planning_failed.
+T7="$(printf '%040d' 7)"
+# pf <tip> <reason> : a P == T run entry whose next-milestone planning failed.
+pf() { e run 0 "$(m 5 5)" | jq -c --arg t "$1" --arg r "$2" '. + {planning_failed: {tip: $t, reason: $r}}'; }
+ledger "$O|$(e run 0 "$(m 4 6)")" "$O|$(pf "$T7" "milestone invalid")"
+state --metric 5/5
+AP=yes PF="$T7 milestone invalid" decides "a run whose planning failed: its tip and reason" \
+  "0 (since the last all-pass entry)" none 0/3 build
+ledger "$O|$(pf "$T7" "milestone invalid")" "$O|$(e observe 0 "$(m 5 5)")" \
+  "$O|$(e observe 0 "$(m 5 5)")"
+state --metric 5/5
+AP=yes PF="$T7 milestone invalid" decides "observe entries after it are passed over" \
+  "0 (since the last all-pass entry)" none 0/3 build
+state --metric 5/5 --resume
+AP=yes decides "--resume: none" "0 (since --resume)" none 0/3 build
+ledger "$O|$(pf "$T7" "milestone invalid")" "$O|$(e reset 0 "$(m 5 5)")"
+state --metric 5/5
+AP=yes decides "a reset after it: none" "0 (since the last reset)" none 0/3 build
+ledger "$O|$(pf "$T7" "milestone invalid")" "$O|$(e run 1 "$(m 5 5)")"
+state --metric 5/5
+AP=yes decides "a newer run entry without it: none" "0 (since the last all-pass entry)" none 0/3 \
+  build
+ledger "$O|$(e reset 0 "$(m 5 5)" | jq -c --arg t "$T7" '. + {planning_failed: {tip: $t, reason: "x"}}')"
+state --metric 5/5
+AP=yes decides "on a reset entry it is not read" "0 (since the last reset)" none 0/3 build
+for bad in '"milestone invalid"' '{"tip": "abc", "reason": "x"}' "{\"tip\": \"$T7\", \"reason\": 3}" \
+    "{\"tip\": \"$T7\"}"; do
+  ledger "$O|$(e run 0 "$(m 5 5)" | jq -c --argjson p "$bad" '. + {planning_failed: $p}')"
+  state --metric 5/5
+  AP=yes decides "a malformed planning_failed ($bad): none" "0 (since the last all-pass entry)" \
+    none 0/3 build
+done
+long="$(printf 'x%.0s' $(seq 1 90))"
+ledger "$O|$(pf "$T7" $'gh pr create\nfailed')"
+state --metric 5/5
+AP=yes PF="$T7 gh pr create failed" decides "a reason with a newline prints on one line" \
+  "0 (since the last all-pass entry)" none 0/3 build
+ledger "$O|$(pf "$T7" "$long")"
+state --metric 5/5
+AP=yes PF="$T7 ${long:0:80}" decides "a long reason is cut at 80 characters" \
+  "0 (since the last all-pass entry)" none 0/3 build
+
 ST_FAIL=issue state
 same "a gh error reading the ledger exits 3" "3|" "$rc|$out"
 for bad in "--runs 0" "--runs x" "--metric 7/6" "--metric 0/0" "--metric 04/6" "--metric 4" \
@@ -439,24 +509,74 @@ prs() {
   done
   printf '[%s]\n' "$body" >"$ST_DIR/prs.json"
 }
+# closed [<number>:<head branch>:<CLOSED|MERGED>[:fork]]... : the closed and merged PRs, newest
+# first, as gh lists them; PR <number>'s head commit is $(sha <number>).
+closed() {
+  local sep="" body="" p num br st fk
+  for p in "$@"; do
+    IFS=: read -r num br st fk <<<"$p"
+    body="$body$sep$(printf '{"number":%s,"state":"%s","headRefName":"%s","headRefOid":"%s","isCrossRepository":%s}' \
+      "$num" "$st" "$br" "$(sha "$num")" "$([ -n "$fk" ] && echo true || echo false)")"
+    sep=","
+  done
+  printf '[%s]\n' "$body" >"$ST_DIR/prs-closed.json"
+}
 # tip <n> : the default branch's tip is $(sha <n>).
-tip() { printf '{"object":{"sha":"%s"}}\n' "$(sha "$1")" >"$ST_DIR/ref.json"; }
-# gate <rate> <head> : run the helper; sets out (lines joined by |) and rc.
+tip() { ST_TIP="$(sha "$1")"; printf '{"object":{"sha":"%s"}}\n' "$ST_TIP" >"$ST_DIR/ref.json"; }
+# compared <pr> <n> : comparing the tip with PR <pr>'s head gives the merge base $(sha <n>).
+compared() {
+  ST_CMP_HEAD="$(sha "$1")"
+  printf '{"merge_base_commit":{"sha":"%s"}}\n' "$(sha "$2")" >"$ST_DIR/compare.json"
+}
+# tipruns [<id>:<status>[:<event>[:<head repo>]]]... : evals.yml's runs for the tip, newest first.
+tipruns() {
+  local sep="" body="" r id st ev hr
+  for r in "$@"; do
+    IFS=: read -r id st ev hr <<<"$r"
+    body="$body$sep$(printf '{"id":%s,"status":"%s","event":"%s","head_repository":{"full_name":"%s"}}' \
+      "$id" "$st" "${ev:-push}" "${hr:-o/n}")"
+    sep=","
+  done
+  printf '{"total_count":%s,"workflow_runs":[%s]}\n' "$#" "$body" >"$ST_DIR/runs-tip.json"
+}
+export ST_TIP ST_CMP_HEAD
+# gate <rate> <head> [args...] : run the helper; sets out (lines joined by |) and rc.
 gate() {
-  out="$(PATH="$stub:$PATH" bounded 10 bash "$GATE" --repo o/n --rate "$1" --head "$2" 2>/dev/null)"
+  out="$(PATH="$stub:$PATH" bounded 10 bash "$GATE" --repo o/n --rate "$1" --head "$2" "${@:3}" \
+    2>/dev/null)"
   rc=$?
   out="$(printf '%s' "$out" | paste -sd '|' -)"
 }
 H78="$(sha 78)"
 prs 12:42-fix-login 13:milestone-2-x:fork
 tip 78
+tipruns
 gate 5/5 "$H78"
 same "P == T, at the tip, no next-milestone PR: plan" \
   "0|milestone-pr: none|tip: $H78|decision: plan" "$rc|$out"
+ST_FAIL=pr-open gate 5/5 "$H78" --buildable 2
+same "buildable work comes first, with no gh call" \
+  "0|milestone-pr: none|tip: unchecked|decision: build" "$rc|$out"
+gate 5/5 "$H78" --buildable 0
+same "--buildable 0: plan" "0|milestone-pr: none|tip: $H78|decision: plan" "$rc|$out"
 tip 79
 gate 5/5 "$H78"
-same "P == T on an older commit than the tip (a merge's run still going): stale" \
-  "0|milestone-pr: none|tip: $(sha 79)|decision: stale" "$rc|$out"
+same "P == T on an older commit than the tip, no run for the tip: stale dispatch" \
+  "0|milestone-pr: none|tip: $(sha 79)|decision: stale dispatch" "$rc|$out"
+tipruns 90:completed 91:in_progress:pull_request 92:queued:push:fork/n
+gate 5/5 "$H78"
+same "completed, pull_request, and another repo's runs don't count: stale dispatch" \
+  "0|milestone-pr: none|tip: $(sha 79)|decision: stale dispatch" "$rc|$out"
+tipruns 93:queued 94:in_progress:workflow_dispatch
+gate 5/5 "$H78"
+same "a push run for the tip queued: stale wait, the newest" \
+  "0|milestone-pr: none|tip: $(sha 79)|decision: stale wait 93" "$rc|$out"
+tipruns 94:in_progress:workflow_dispatch:O/N
+gate 5/5 "$H78"
+same "a dispatch run in progress (the repo compares case-insensitively): stale wait" \
+  "0|milestone-pr: none|tip: $(sha 79)|decision: stale wait 94" "$rc|$out"
+tipruns
+tip 78
 prs 31:milestone-3-sync 12:42-fix-login 30:milestone-2-export
 gate 5/5 "$H78"
 same "a next-milestone PR open: open, the lowest of two, nothing else read" \
@@ -472,18 +592,67 @@ ST_FAIL=ref gate none none
 same "no metric: not all-pass" "0|milestone-pr: none|tip: unchecked|decision: not all-pass" \
   "$rc|$out"
 prs
-tip 78
 gate 5/5 "$H78"
 same "no open PR at all: plan" "0|milestone-pr: none|tip: $H78|decision: plan" "$rc|$out"
-for step in pr repo ref; do
+
+# The last run's planning failed at the tip.
+ST_FAIL=pr-closed gate 5/5 "$H78" --failed-tip "$H78"
+same "planning failed at this tip: failed, before the closed PRs are read" \
+  "0|milestone-pr: none|tip: $H78|decision: failed" "$rc|$out"
+gate 5/5 "$H78" --failed-tip "$(sha 77)"
+same "planning failed at an older tip: plan" "0|milestone-pr: none|tip: $H78|decision: plan" \
+  "$rc|$out"
+
+# A milestone PR a human closed unmerged.
+closed 40:milestone-2-export:CLOSED 39:41-fix:MERGED 35:milestone-1-x:MERGED
+compared 40 78
+gate 5/5 "$H78"
+same "the newest milestone PR closed unmerged, the tip unchanged: declined" \
+  "0|milestone-pr: none|tip: $H78|decision: declined 40" "$rc|$out"
+ST_FAIL=compare gate 5/5 "$H78" --resume
+same "--resume lifts declined, comparing nothing" "0|milestone-pr: none|tip: $H78|decision: plan" \
+  "$rc|$out"
+tip 80
+compared 40 78
+gate 5/5 "$(sha 80)"
+same "the tip moved since it was planned: plan" \
+  "0|milestone-pr: none|tip: $(sha 80)|decision: plan" "$rc|$out"
+tip 79
+compared 40 79
+gate 5/5 "$H78"
+same "declined wins over a stale metric" "0|milestone-pr: none|tip: $(sha 79)|decision: declined 40" \
+  "$rc|$out"
+tip 78
+closed 41:milestone-2-sync:MERGED 40:milestone-2-export:CLOSED
+ST_FAIL=compare gate 5/5 "$H78"
+same "a newer milestone PR merged: plan, comparing nothing" \
+  "0|milestone-pr: none|tip: $H78|decision: plan" "$rc|$out"
+closed 43:milestone-2-x:CLOSED:fork 42:44-fix:CLOSED 41:milestone-2-sync:MERGED
+ST_FAIL=compare gate 5/5 "$H78"
+same "a fork's milestone-* PR and another branch's PR don't count" \
+  "0|milestone-pr: none|tip: $H78|decision: plan" "$rc|$out"
+closed
+
+for step in pr-open repo ref; do
   ST_FAIL=$step gate 5/5 "$H78"
   same "a gh error reading $step exits 3, deciding nothing" "3|" "$rc|$out"
 done
+closed 40:milestone-2-export:CLOSED
+compared 40 78
+for step in pr-closed compare; do
+  ST_FAIL=$step gate 5/5 "$H78"
+  same "a gh error reading $step exits 3, deciding nothing" "3|" "$rc|$out"
+done
+closed
+tip 79
+ST_FAIL=tipruns gate 5/5 "$H78"
+same "a gh error listing the tip's runs exits 3" "3|" "$rc|$out"
 printf '{"object":{"sha":"abc"}}\n' >"$ST_DIR/ref.json"
 gate 5/5 "$H78"
 same "a tip that is not a commit exits 3" "3|" "$rc|$out"
 for bad in "--rate 5/5" "--rate 7/6 --head none" "--rate 5/5 --head abc" "--rate x --head none" \
-    "--rate 0/0 --head none"; do
+    "--rate 0/0 --head none" "--rate 5/5 --head none --buildable x" \
+    "--rate 5/5 --head none --buildable -1" "--rate 5/5 --head none --failed-tip abc"; do
   # shellcheck disable=SC2086 # each case is several words on purpose
   out="$(bash "$GATE" --repo o/n $bad 2>/dev/null)"; rc=$?
   same "bad argument $bad exits 2" "2|" "$rc|$out"

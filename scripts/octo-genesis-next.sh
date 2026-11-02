@@ -4,7 +4,7 @@
 #
 # Usage:
 #   octo-genesis-next.sh --rev REV [--tip SHA] DIR
-#   octo-genesis-next.sh --check --base REV --branch NAME DIR
+#   octo-genesis-next.sh --check --base REV --branch NAME [--head SHA] DIR
 #
 # DIR is a git work tree of a repo genesis created.
 #
@@ -16,13 +16,19 @@
 #                            least 2: the MVP is milestone 1 (VISION.md's Roadmap item 1)
 #   next_requirement: R<k>   1 + the highest `### R<k>:` requirement id in docs/prd.md
 #
-# --check checks what the current branch committed since its merge base with --base:
-#   - the work tree is clean, and the branch is NAME, `milestone-<n>-<slug>`: <n> as --rev numbers
-#     it at the merge base, <slug> lowercase kebab-case of at most 50 characters;
+# --check checks what HEAD committed since its merge base with --base:
+#   - the work tree is clean, and the current branch is NAME; with --head (a detached checkout,
+#     such as auto's at the reviewed commit), HEAD is SHA instead. NAME is
+#     `milestone-<n>-<slug>`: <n> as --rev numbers it at the merge base, <slug> lowercase
+#     kebab-case of at most 50 characters;
 #   - each change is docs/prd.md or VISION.md modified (both required), docs/research.md
-#     modified, or a file added under evals/<id>/ for a lowercase kebab-case <id> that has no
-#     evals/<id>/ at the merge base; at least one such new eval, each with scenario.md and
-#     check.sh. Nothing else: no other file, deletion, or rename, and no existing eval;
+#     modified, each keeping its file mode, or a file added under evals/<id>/ for a lowercase
+#     kebab-case <id> that has no evals/<id>/ at the merge base; at least one such new eval, each
+#     with scenario.md and check.sh. Nothing else: no other file, deletion, or rename, no
+#     existing eval, no symlink or submodule, and no .gitattributes in a new eval;
+#   - no CI skip token (`[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`, `[actions skip]`,
+#     or `skip-checks:`, in any case) in the ## Milestone title, which the PR title and so the
+#     merge commit carry, or in HEAD's commit message: the default branch's evals run must start;
 #   - docs/prd.md only grows: the merge base's file is a prefix of HEAD's, and the appended text
 #     is one `## Milestone <n>: <title>` section, with no other `## ` heading, holding
 #     `### R<k>: <title>` requirements (ids new to the PRD, each with `- ` acceptance criteria),
@@ -46,7 +52,7 @@ set -uo pipefail
 export LC_ALL=C
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-MODE=rev DIR="" REV="" TIP="" BASE="" BRANCH=""
+MODE=rev DIR="" REV="" TIP="" BASE="" BRANCH="" HEADSHA=""
 need_value() { [ $# -ge 2 ] || { echo "Missing value for $1" >&2; exit 2; }; }
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -55,6 +61,7 @@ while [ $# -gt 0 ]; do
     --check) MODE=check; shift ;;
     --base) need_value "$@"; BASE="$2"; shift 2 ;;
     --branch) need_value "$@"; BRANCH="$2"; shift 2 ;;
+    --head) need_value "$@"; HEADSHA="$2"; shift 2 ;;
     -h|--help) sed -n '2,/^[^#]/s/^# \{0,1\}//p' "$0"; exit 0 ;;
     -*) echo "Unknown argument: $1" >&2; exit 2 ;;
     *) [ -z "$DIR" ] || { echo "Only one DIR may be given" >&2; exit 2; }
@@ -63,16 +70,18 @@ while [ $# -gt 0 ]; do
 done
 usage() {
   echo "Usage: octo-genesis-next.sh --rev REV [--tip SHA] DIR" >&2
-  echo "       octo-genesis-next.sh --check --base REV --branch NAME DIR" >&2
+  echo "       octo-genesis-next.sh --check --base REV --branch NAME [--head SHA] DIR" >&2
   exit 2
 }
 [ -n "$DIR" ] || usage
 if [ "$MODE" = rev ]; then
-  [ -n "$REV" ] && [ -z "$BASE$BRANCH" ] || usage
+  [ -n "$REV" ] && [ -z "$BASE$BRANCH$HEADSHA" ] || usage
   [ -z "$TIP" ] || [[ "$TIP" =~ ^[0-9a-f]{40}$ ]] \
     || { echo "--tip must be a 40-digit commit" >&2; exit 2; }
 else
   [ -n "$BASE" ] && [ -n "$BRANCH" ] && [ -z "$REV$TIP" ] || usage
+  [ -z "$HEADSHA" ] || [[ "$HEADSHA" =~ ^[0-9a-f]{40}$ ]] \
+    || { echo "--head must be a 40-digit commit" >&2; exit 2; }
 fi
 [ -d "$DIR" ] || { echo "Not a directory: $DIR" >&2; exit 2; }
 
@@ -110,10 +119,17 @@ if [ "$MODE" = rev ]; then
 fi
 
 # --check
+# GitHub's skip tokens: a push whose head commit message holds one starts no workflow.
+SKIP_RE='\[(skip ci|ci skip|no ci|skip actions|actions skip)\]|skip-checks:'
 mb="$(g merge-base "$BASE" HEAD)" || { echo "git merge-base $BASE HEAD failed" >&2; exit 3; }
 [ -z "$(g status --porcelain)" ] || fail "the work tree has uncommitted changes: commit them first"
-cur="$(g symbolic-ref --short -q HEAD || true)"
-[ "$cur" = "$BRANCH" ] || fail "the current branch is ${cur:-detached}, not $BRANCH"
+if [ -n "$HEADSHA" ]; then
+  cur="$(g rev-parse -q --verify HEAD)"
+  [ "$cur" = "$HEADSHA" ] || { fail "HEAD is ${cur:-unborn}, not $HEADSHA"; exit 1; }
+else
+  cur="$(g symbolic-ref --short -q HEAD || true)"
+  [ "$cur" = "$BRANCH" ] || fail "the current branch is ${cur:-detached}, not $BRANCH"
+fi
 for f in docs/prd.md VISION.md; do
   g cat-file -e "$mb:$f" 2>/dev/null || { fail "$f is missing at the merge base"; exit 1; }
 done
@@ -125,14 +141,22 @@ else
   fail "branch $BRANCH is not milestone-$N-<slug> (lowercase kebab-case)"
 fi
 
-# The changed paths, NUL-separated as `<status>\0<path>\0`.
-g diff --no-renames --name-status -z "$mb" HEAD >"$tmp/diff" || exit 3
+# The changed paths, as evals/guard.sh reads them: `:<old mode> <new mode> <old sha> <new sha>
+# <status>` NUL `<path>` NUL. --name-status would hide the modes.
+g diff --no-color --no-renames --no-ext-diff --no-textconv --raw -z "$mb" HEAD >"$tmp/diff" \
+  || exit 3
 prd=0 vision=0 research=0 new_ids=""
-while IFS= read -r -d '' st && IFS= read -r -d '' path; do
+while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
+  st="${meta##* }" smode="${meta#:}" smode="${smode%% *}" dmode="${meta#* }" dmode="${dmode%% *}"
+  case "$dmode" in
+    120000) fail "$path: a symlink: a milestone adds and changes regular files only"; continue ;;
+    160000) fail "$path: a submodule: a milestone adds and changes regular files only"; continue ;;
+  esac
   case "$path" in
     docs/prd.md | VISION.md | docs/research.md)
       [ "$st" = M ] || { fail "$path: may only be modified (status $st)"; continue; }
-      case "$path" in docs/prd.md) prd=1 ;; VISION.md) vision=1 ;; *) research=1 ;; esac ;;
+      case "$path" in docs/prd.md) prd=1 ;; VISION.md) vision=1 ;; *) research=1 ;; esac
+      [ "$smode" = "$dmode" ] || fail "$path: its mode changed ($smode to $dmode)" ;;
     evals/*/*)
       id="${path#evals/}" id="${id%%/*}"
       if ! [[ "$id" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
@@ -141,6 +165,8 @@ while IFS= read -r -d '' st && IFS= read -r -d '' path; do
         fail "$path: evals/$id/ already exists: a milestone never changes an existing eval"
       elif [ "$st" != A ]; then
         fail "$path: a new eval's files are only added (status $st)"
+      elif [ "${path##*/}" = .gitattributes ]; then
+        fail "$path: a .gitattributes changes how git checks out the evals"
       else
         case " $new_ids " in *" $id "*) ;; *) new_ids="${new_ids:+$new_ids }$id" ;; esac
       fi ;;
@@ -156,6 +182,10 @@ for id in $new_ids; do
     g cat-file -e "HEAD:evals/$id/$f" 2>/dev/null || fail "evals/$id/$f is missing"
   done
 done
+
+g log -1 --format=%B HEAD >"$tmp/message" || exit 3
+grep -Eiq "$SKIP_RE" "$tmp/message" \
+  && fail "the HEAD commit message holds a CI skip token: its workflows would not start"
 
 ungrounded=0
 if [ "$prd" -eq 1 ]; then
@@ -223,6 +253,9 @@ if [ "$prd" -eq 1 ]; then
         for (id in want) if (!(id in seen)) bad("evals/" id "/ has no #### " id " scenario") }
       ' "$tmp/added")"
     printf '%s\n' "$out" | grep '^FAIL: ' && FAILS=$((FAILS + $(printf '%s\n' "$out" | grep -c '^FAIL: ')))
+    grep -m 1 '^## ' "$tmp/added" | grep -Eiq "$SKIP_RE" \
+      && fail "docs/prd.md: the ## Milestone $N title holds a CI skip token: the PR title carries" \
+           "it into the merge commit, so the evals run on the default branch would not start"
     printf '%s\n' "$out" | grep -qx UNGROUNDED && ungrounded=1
     urls="$(printf '%s\n' "$out" | grep -cx URL)"
     # Each new eval's scenario.md front matter agrees with its scenario.

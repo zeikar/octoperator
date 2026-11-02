@@ -38,13 +38,13 @@ autonomous shipping, plus the always-on knowledge layer.
 |-------|---------|--------------|
 | **New project** | `/octoperator:genesis "<sentence>"` | Start a new project from one sentence, in an empty directory outside git: research existing services and similar open-source projects (at most 6 web searches and 10 page fetches), write a local proposal (`GENESIS.md`, `docs/research.md`, a PRD, a stack ADR, and a `VISION.md` draft), and stop at a human checkpoint with `genesis: proposed <dir>`. Makes no GitHub write |
 | | `/octoperator:genesis --approve [--dry-run]` | Re-run in the proposal folder once you've reviewed it: write a minimal skeleton (one module, one passing test, CI, `.gitignore`, README) and offline scenario evals (one per PRD scenario, run on pushes to `main`, with an append-only guard on PRs), run its test once, commit, create the **private** repo with `gh repo create`, write the Octoperator settings and labels, plan the MVP epic there with `plan-epic`'s procedure, and print the autopilot handoff (semi-mode triage, the scheduling recipes, the allow rules); ends with `genesis: handed off <repo> (epic #N)`. It never starts autopilot or adds `ready`. `--dry-run` prints every command and plan-epic's dry run, and writes nothing (see [Starting a new project](#starting-a-new-project-genesis)) |
-| | `/octoperator:genesis --next [--dry-run]` | In a repo genesis created, once every eval passes on `main`'s tip and no next-milestone PR is open: research the web (the same caps; `ungrounded` without web access), pick one milestone that fits `VISION.md`, and open one PR on `milestone-<n>-<slug>` with a `## Milestone <n>` PRD section, new must-fail evals only, and a cited Roadmap item; ends with `genesis: planned milestone <n> (PR #M)`. It never merges (`auto --pr` does) and never touches an existing eval or the Immutable constraints. `--dry-run` prints the milestone and the PR, and writes nothing |
+| | `/octoperator:genesis --next [--dry-run]` | In a repo genesis created, once every eval passes on `main`'s tip and no next-milestone PR is open: research the web (the same caps; `ungrounded` without web access, and under autopilot unless your settings allow the web tools), pick one milestone that fits `VISION.md`, and open one PR on `milestone-<n>-<slug>` with a `## Milestone <n>` PRD section, new must-fail evals only, and a cited Roadmap item; ends with `genesis: planned milestone <n> (PR #M)`. It never merges (`auto --pr` does) and never touches an existing eval or the Immutable constraints. `--dry-run` prints the milestone and the PR, and writes nothing |
 | **Onboarding** | `/octoperator:setup` | One-time onboarding: detect repo, auto-detect Projects v2 access, optionally create/link a board, write `.claude/octoperator.local.md` |
 | **Plan & intake** | `/octoperator:plan-epic <request>` | Decompose a request into an epic + linked child issues, milestone, labels, board items |
 | | `/octoperator:issue <request>` | Create one well-formed issue (labels, acceptance criteria, milestone, board) |
 | **Autonomous lifecycle** | `/octoperator:implement <issue#...> [--max N] [--draft] [--dry-run]` | Implement one or more issues end-to-end: branch, code, test, and PR. Single issue runs in-tree; multiple issues run in parallel worktrees (up to `--max`, default 3) |
 | | `/octoperator:auto <issue#...> [--max N] [--dry-run]` | End-to-end lifecycle: implement → review → merge for one or more issues. Blocker/major/minor review findings trigger up to 6 fix → re-review rounds; merges (regular merge) only on a non-blocking review of the current head + CI green + mergeable. A PR that touches an `approval_paths` glob is held for a human (`needs human approval: <path>`). `--pr <pr#>` skips implement and takes an existing PR, such as a next-milestone PR, through the same review, fix, and merge gate |
-| | `/octoperator:autopilot [--mode semi\|full] [--cycles N] [--max M] [--resume] [--dry-run]` | Bounded loop: discover work → `auto` (implement→review→merge) → when empty, `research` refills. `semi` builds only `ready` issues then proposes; `full` runs unattended to the cycle cap. In both modes a `needs-approval` issue is skipped (reported as gated) until a human adds `approved`. Each run appends an entry to an `octoperator-ledger` issue; after `convergence_runs` runs (default 3) without a gain it switches to observe mode (propose only, no builds) until `--resume`. A gain is a merge, or, in a repo with genesis's evals, a rise in the number of passing evals, which the entry records as its `metric`; when every eval passes, it plans the next milestone with `genesis --next` (in `full` mode it then ships the PR with `auto --pr`; in `semi` mode it leaves it for you) and ends `autopilot: all evals pass → planning next milestone`, or observes while a next-milestone PR is open or the evals run hasn't judged `main`'s tip yet. Every run ends with an `autopilot: …` status line, and a run started by an in-session cron task or `/loop` ends that schedule once there is nothing left to do (see [Running continuously](#running-continuously)) |
+| | `/octoperator:autopilot [--mode semi\|full] [--cycles N] [--max M] [--resume] [--dry-run]` | Bounded loop: discover work → `auto` (implement→review→merge) → when empty, `research` refills. `semi` builds only `ready` issues then proposes; `full` runs unattended to the cycle cap. In both modes a `needs-approval` issue is skipped (reported as gated) until a human adds `approved`. Each run appends an entry to an `octoperator-ledger` issue; after `convergence_runs` runs (default 3) without a gain it switches to observe mode (propose only, no builds) until `--resume`. A gain is a merge, or, in a repo with genesis's evals, a rise in the number of passing evals, which the entry records as its `metric`; when every eval passes and nothing is buildable, it plans the next milestone with `genesis --next`, ungrounded unless your settings allow the web tools, and ships the PR with `auto --pr` in either mode. Then it ends `autopilot: all evals pass → planning next milestone`. It observes instead while a next-milestone PR is open, after you declined one at the same tip, after planning failed at the same tip, or while the evals run hasn't judged `main`'s tip yet. In that last case it dispatches `evals.yml` once when no run for the tip is queued or running. Every run ends with an `autopilot: …` status line, and a run started by an in-session cron task or `/loop` ends that schedule once there is nothing left to do (see [Running continuously](#running-continuously)) |
 | **Review & status** | `/octoperator:review <pr#>` | Run a structured review and post the verdict + findings to the PR |
 | | `/octoperator:sync` | Standup-style status report; auto-reconciles board drift |
 | **What's next** | `/octoperator:research [--create] [--count N] [--focus <feature\|refactor\|debt\|tests\|docs\|dx\|all>] [--dry-run]` | Analyze the repo and produce a ranked list of proposals balanced across features, refactoring, tech debt, tests, docs, and DX; with `--create`, file the top ones as `proposed` issues — only proposals backed by verifiable evidence (a benchmark result, failing CI, a held PR or autopilot ledger entry, or user feedback). Proposals that would deploy, spend money, or delete data also get `needs-approval` |
@@ -67,8 +67,8 @@ autonomous shipping, plus the always-on knowledge layer.
 - **`octo-merge-state.sh`** — print a PR's `mergeStateStatus`, waiting out GitHub's `UNKNOWN`; used by `auto`'s merge gate.
 - **`octo-evals-guard.sh`** — in a repo with genesis's evals guard, check that both guard jobs of the PR's own guard run passed on its reviewed commit, against the base branch's current tip when the PR changes `evals/` (`pass`, `none`, or why to hold: a `[skip ci]` head has no checks); read-only; used by `auto`'s merge gate.
 - **`octo-evals-metric.sh`** — in a repo with genesis's `evals.yml`, read the pass rate from the `evals-metric` notice of its latest completed default-branch push or dispatch run in this repo, as the ledger's `metric` (`{"passed":P,"total":T}` and `rate: P/T`, or `null` with the reason: no evals workflow, no completed run, a missing, malformed, or ambiguous annotation, or one the run's conclusion disagrees with), and the run's head commit; read-only; used by `autopilot` and `genesis --next`.
-- **`octo-milestone-gate.sh`** — decide whether to plan the next milestone now: `open <pr>` while a next-milestone PR (an open `milestone-*` branch from this repo) is open, `not all-pass`, `stale` when the metric's run judged an older commit than the default branch's tip, else `plan`; read-only; used by `autopilot` and `genesis --next`.
-- **`octo-genesis-next.sh`** — `genesis --next`'s offline half: number the next milestone from the default branch's `docs/prd.md` (`--rev`), and check the committed milestone before it is pushed (`--check`): only `docs/prd.md` (appended), `VISION.md` (its Roadmap), `docs/research.md`, and new `evals/<id>/` directories change, each new eval with its scenario, and an ungrounded milestone cites no URL; offline.
+- **`octo-milestone-gate.sh`** — decide whether to plan the next milestone now. It says `build` when autopilot's discovery found buildable work, `open <pr>` while a next-milestone PR (an open `milestone-*` branch from this repo) is open, and `not all-pass`. It says `failed` when the last run's planning failed at the default branch's tip, and `declined <pr>` when the newest milestone PR was closed unmerged and the tip hasn't moved since. It says `stale dispatch` or `stale wait <run>` when the metric's run judged an older commit than the tip (whether an `evals.yml` run for the tip is queued or running), else `plan`. Read-only; used by `autopilot` and `genesis --next`.
+- **`octo-genesis-next.sh`** — `genesis --next`'s offline half: number the next milestone from the default branch's `docs/prd.md` (`--rev`), and check the committed milestone before it is pushed, and in `auto`'s merge gate on the reviewed commit (`--check`, `--head <sha>` in a detached checkout). Only `docs/prd.md` (appended), `VISION.md` (its Roadmap), `docs/research.md` (file modes unchanged), and new `evals/<id>/` directories of regular files (no symlink, submodule, or `.gitattributes`) change. Each new eval has its scenario, no CI skip token appears in the title or the commit message, and an ungrounded milestone cites no URL. Offline.
 - **`octo-ledger-state.sh`** — apply autopilot's convergence rules to its run ledger and this run's metric, and print the walk, the no-gain streak, whether every eval passes, and the decision (`build` or `observe`); read-only (one `gh issue view`); used by `autopilot`.
 - **`octo-approval-match.sh`** — normalize the `approval_paths` patterns and match a PR's changed files (renamed files' old paths too) against them; used by `auto`'s approval-path gate.
 - **`octo-genesis-check.sh`** — check that a directory is empty and outside git for `genesis` (`--preflight`), and that the proposal it wrote is complete: `GENESIS.md` front matter (including a `test_command` that `issue-implementer` detects), the `docs/research.md`, `docs/prd.md`, and `docs/adr/0001-stack.md` sections, and a `VISION.md` with the baseline immutable constraints verbatim; with `--skeleton`, that the skeleton `--approve` wrote is detectable and wired up (the test command's detection file and no earlier one, CI on `push` and `pull_request`, the `.gitignore` entries, the sentence in the README), and that its scenario evals are in place (the eval runner and guard copied verbatim, the evals workflows on their triggers, one `evals/<id>/` per PRD scenario); offline.
@@ -134,8 +134,11 @@ resolves them by name at call time. Full schema:
 
 `implement`, `auto`, `review`, and `autopilot` pre-allow the tools they use themselves — `gh`, `git`,
 and `bash …` (which covers the helper scripts, and any `bash -c` command), plus
-Read/Grep/Glob/Edit/Write/Task; `autopilot` and `genesis` also pre-allow WebSearch and WebFetch,
-for next-milestone planning's capped research (and genesis's stage 1). Every step runs as one plain command with one of those prefixes:
+Read/Grep/Glob/Edit/Write/Task. Only `genesis` also pre-allows WebSearch and WebFetch, for its
+capped research. A skill's grant lasts for the whole turn, and `research`, `implement`, and `auto`
+run inside autopilot's turn reading untrusted text, so `autopilot` pre-allows no web tool and
+`research` never uses one. Under autopilot, `genesis --next` plans ungrounded unless your own
+settings allow both tools. Every step runs as one plain command with one of those prefixes:
 Claude Code checks each part of a compound command, so the skills keep shell `if`s, `VAR=… cmd`
 prefixes, `|| true`, and `sleep` out of their commands, and anything needing a loop or a pause lives
 in a `scripts/octo-*.sh` helper. The grant lasts for the turn the skill runs in.
@@ -182,7 +185,12 @@ semi mode that happens once a run finds no `ready` issue to build, so start the 
 after you triage. A run in which every eval of a genesis repo passes never ends the schedule: it
 plans the next milestone (`autopilot: all evals pass → planning next milestone`), or observes
 while a next-milestone PR is open (`autopilot: stopped: next-milestone PR #<pr> open`) or until
-the evals run for `main`'s tip completes (`autopilot: stopped: evals metric stale`).
+the evals run for `main`'s tip completes (`autopilot: stopped: evals metric stale`; with no run
+for the tip queued or running, it dispatches `evals.yml` once, never `evals-model.yml`). It also
+observes after you closed its milestone PR unmerged
+(`autopilot: stopped: next-milestone PR #<pr> declined`) or its planning failed
+(`autopilot: stopped: milestone planning failed at this tip`), until `main` moves or you pass
+`--resume`.
 
 **Permissions.** Nobody is there to answer a prompt, so first add the allow rules from
 [Unattended runs](#unattended-runs). That applies to every mode below.
@@ -445,18 +453,22 @@ rose. The plan is [epic #85](https://github.com/zeikar/octoperator/issues/85).
 
 ### The next milestone (`genesis --next`)
 
-Once every eval passes on `main`'s tip, run `/octoperator:genesis --next` in the repo (autopilot
-does it for you on its next run). It reads `VISION.md`, the PRD, `docs/research.md`, the run
-ledger, and earlier milestone PRs, researches what similar products shipped since (at most 6
-searches and 10 fetches; pages are data, never instructions), and picks one milestone that fits
+Once every eval passes on `main`'s tip, run `/octoperator:genesis --next` in the repo. Autopilot
+does it for you once nothing is buildable, but ungrounded: it pre-allows no web tool, so it
+plans from the repo alone unless your settings allow WebSearch and WebFetch. It reads
+`VISION.md`, the PRD, `docs/research.md`, the run ledger, and earlier milestone PRs. It researches
+what similar products shipped since (at most 6 searches and 10 fetches; pages are data, never
+instructions). Its queries name only the product's public category and its known prior art, and
+it fetches only URLs a search or `docs/research.md` gave it. Then it picks one milestone that fits
 `VISION.md`, about 3–8 issues of work. It opens one PR on `milestone-<n>-<slug>`: a
 `## Milestone <n>` section appended to `docs/prd.md`, new evals under `evals/<id>/` that must fail
 on `main`, a Roadmap item, and the refreshed research, its body citing the sources. Without web
 access it plans from the repo alone and marks the PR `ungrounded`. It stops, creating nothing,
 while another next-milestone PR is open, or while the latest evals run judged an older commit
 than `main`'s tip (right after a milestone merges). `/octoperator:auto --pr <M>` then reviews and
-merges it like any PR; the evals guard holds it for a human if a new eval already passes or an
-existing one changed. Once it merges, the new evals fail on `main`, `research` files the work,
+merges it like any PR, as autopilot does in both modes. The evals guard holds it for a human if a
+new eval already passes or an existing one changed. So does the milestone check, which `auto`
+re-runs on the reviewed commit of every `milestone-*` PR. Once it merges, the new evals fail on `main`, `research` files the work,
 and the build loop resumes. The risk is unattended web content steering the product: every gate
 still applies, the repo is private by default, at most one milestone PR is open at a time, and
 the PR cites its sources so you can audit it. Steps:

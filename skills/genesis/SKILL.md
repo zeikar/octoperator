@@ -53,18 +53,19 @@ deletes nothing, and the access date is the session's current date.
 | Tool | Why |
 |---|---|
 | `Bash(gh:*)` | `gh api user` (the repo owner, first run); under `--approve`, the preflight, the name check, `gh repo create`, `gh label create`, and plan-epic's `gh issue create` and `gh issue edit`; under `--next`, `gh repo view`, the ledger and milestone reads, and `gh pr create` |
-| `Bash(git:*)` | `--approve`: `git init`, `git add`, `git commit`, and `git push` when a push must be retried; `--next`: `git fetch`, `git show`, `git ls-remote`, `git add`, `git commit`, `git push`, and `git branch -d` |
+| `Bash(git:*)` | `--approve`: `git init`, `git add`, `git commit`, and `git push` when a push must be retried; `--next`: `git fetch`, `git show`, `git ls-remote`, `git add`, `git commit`, `git push`, and `git branch -d` (`-D` when a stop cleans up) |
 | `Bash(bash:*)` | `octo-genesis-check.sh` (the preflight, the proposal check, the skeleton check), `octo-genesis-plan.sh` (the `--approve` stage and steps, and its re-check after the commit), setup's `octo-setup.sh` probe, `octo-genesis-epic.sh` (the MVP epic lookup), and plan-epic's `octo-subissue.sh`; `--next`: `octo-evals-metric.sh`, `octo-milestone-gate.sh`, `octo-genesis-next.sh`, and `octo-worktree.sh` |
 | `Read` | the formats in `references/proposal.md`, `references/skeleton.md`, and `references/evals.md`, `docs/research.md` for stage 2, the ADR for the skeleton, `docs/prd.md` and the eval templates in `templates/` for the evals, `docs/prd.md` and plan-epic's procedure for stage 4, and the files to summarize |
 | `Write` | the five proposal files; under `--approve`, the skeleton files, the evals, and `.claude/octoperator.local.md`, each only when missing; under `--next`, the new evals, in its worktree |
 | `Edit` | `--approve`: fix a skeleton file this run wrote when the skeleton check fails, and add `.github/workflows/` to an existing settings file's `approval_paths`; `--next`: its PRD section, Roadmap item, and research refresh, and fixes after its check |
 | `Glob` | list what the run wrote, for the checkpoint's file list, and which skeleton files exist |
 | `Task` | plan-epic's `issue-planner` dispatch in stage 4, and in its `--dry-run`; the planner only reads |
-| `WebSearch` | find existing services and similar open-source projects (stage 1), and what they shipped since (`--next`) |
+| `WebSearch` | find existing services and similar open-source projects (stage 1), and what they shipped since (`--next`; under autopilot, only when your own settings allow it) |
 | `WebFetch` | read the pages found, to fill the prior-art table and cite claims (stage 1 and `--next`) |
 
 Browse inline, never in a `Task` subagent: a skill's pre-allowed tools are not documented to reach
-subagents. `research` keeps its repo-only tools; only genesis browses.
+subagents. `research` never browses; only genesis does. Autopilot follows `--next` by reference
+without genesis's grant, so there it plans ungrounded unless your settings allow both tools.
 
 **Not pre-allowed:** the stack's test command, `npm test`, `make test`, `pytest`, or
 `go test ./...`, whichever `GENESIS.md` names; with `make test`, whatever its `test` target runs
@@ -439,10 +440,12 @@ plan-epic's procedure reads them as written and files everything in `<repo>`.
 Runs only on `--next`, in a clone of a repo genesis created: read
 `${CLAUDE_PLUGIN_ROOT}/skills/genesis/references/next.md` and follow its steps. Once every eval
 passes on the default branch's tip, and no next-milestone PR is open, it researches under stage
-1's caps (or plans ungrounded from the repo's state), picks one milestone, and opens one PR on
+1's caps (or plans ungrounded from the repo's state, as it does under autopilot unless your
+settings allow the web tools), picks one milestone, and opens one PR on
 `milestone-<n>-<slug>`: a `## Milestone <n>` PRD section, new must-fail evals only, and a Roadmap
 item, citing its sources. It never merges: `auto --pr` takes the PR through the review and merge
-gate. That reference states the risks of planning from unattended web content, and their bounds.
+gate, which re-checks the milestone rules on the reviewed commit. That reference states the risks
+of planning from unattended web content, and their bounds.
 
 ## Status line
 
