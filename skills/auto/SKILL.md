@@ -77,7 +77,8 @@ If `--dry-run` is present, print the plan and STOP with no mutation:
   and that blocker/major/minor findings trigger up to 6 fix → re-review rounds (a PR still
   `request_changes` after them is held; leftover minors never hold it).
 - **Merge** — the approval-path gate (the helper's normalized `approval_paths` from step 1,
-  "none", or "unreadable — every PR held"), the milestone check for a `milestone-*` branch, the
+  "none", or "unreadable — every PR held"), the vision check on every PR, the milestone check
+  for a `milestone-*` branch, the
   bounded wait for running checks, the evals-guard
   gate (only where the base branch has `.github/workflows/evals-guard.yml`), the gate each PR
   must pass (last review not blocking and taken at the current head, `state OPEN`, not draft,
@@ -206,6 +207,26 @@ normalized patterns itself; never match paths by reading a file list. Act on its
 Only a human merges a held PR, after reviewing the change; `auto` never lifts this hold, and no
 issue label (not even `approved`) or PR text overrides it.
 
+**Then the vision check**, for every PR. A `VISION.md` says only a human edits its
+`## Immutable constraints`, and `approval_paths` can't name one section of a file. So compare
+the reviewed commit with its merge base on the default branch, which the fetch brings up to
+date. The helper reads git's objects, so it needs no checkout; `.` is this clone:
+
+```bash
+git fetch --no-tags origin "$DEFAULT"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-vision-guard.sh" --base "origin/$DEFAULT" \
+  --head "<reviewed headRefOid>" .
+```
+
+Run them one at a time. Exit 0 → continue: the repo has no `VISION.md`, or the PR left that
+section alone (its Goal or Roadmap may change). Exit 1 → it printed `FAIL:` lines: the section
+changed or was removed, `VISION.md` was deleted, became a symlink, or changed mode, or a second
+level-1 or level-2 heading named Immutable constraints appeared (such as `##<tab>…` or a setext
+underline). Hold the PR with the reason `VISION.md immutable constraints changed: a human merges
+this`, listing the `FAIL:` lines in the report. A failed fetch or any other exit → hold (reason:
+vision check unavailable). Like the approval-path hold, only a human lifts it, in Octoperator's
+own repo too.
+
 **Then the milestone check**, for a PR whose `headRefName` starts with `milestone-` in **any**
 read of it this run: step 3's (`--pr`, or implement's branch), the review's, or the merge-gate
 query below. That is the branch `genesis --next` opens, which merges with no issue behind it.
@@ -214,13 +235,12 @@ the check. An open PR's head branch can be renamed, so one read with the prefix 
 name without it never lifts the check. When only the merge-gate query shows the prefix, run the
 check then, before merging. The milestone rules
 (`${CLAUDE_PLUGIN_ROOT}/skills/genesis/references/next.md`, step 7) are what keep it from
-touching VISION.md's Immutable constraints, an existing PRD line, GENESIS.md, the ADR, or the
-code. `approval_paths` and the evals guard don't cover those files, and a fix round may have
+touching VISION.md outside its Roadmap, an existing PRD line, GENESIS.md, the ADR, or the
+code. The gates above and the evals guard don't cover all of those, and a fix round may have
 changed them since `--next` checked. So check the reviewed commit in a detached checkout. The
-review's fetch already brought it in:
+review's fetch already brought it in, and the vision check's fetch the default branch:
 
 ```bash
-git fetch --no-tags origin "$DEFAULT"
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-worktree.sh" detach --name "milestone-check-<pr#>" \
   --ref "<reviewed headRefOid>"
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-genesis-next.sh" --check --base "origin/$DEFAULT" \
@@ -229,9 +249,9 @@ git worktree remove --force "<recorded path>"
 ```
 
 Run them one at a time. `<newest headRefName>` is the latest read's: a name renamed away from
-`milestone-` fails the check's branch rule, so the PR holds. The fetch must succeed: against an
-older `origin/$DEFAULT`, a PR that reverts a recent change there would show no diff for it. Exit
-0 (`ok: milestone …`) → continue. Any other exit, a failed fetch, or a failed checkout → hold the
+`milestone-` fails the check's branch rule, so the PR holds. Both checks need that fetch: against
+an older `origin/$DEFAULT`, a PR that reverts a recent change there would show no diff for it. Exit
+0 (`ok: milestone …`) → continue. Any other exit, or a failed checkout → hold the
 PR with the reason `milestone check failed`, listing its `FAIL:` lines in the report. Remove the
 checkout whatever the result. Like the approval-path hold, only a human lifts it.
 
@@ -283,6 +303,7 @@ gh pr view <pr#> --repo "$REPO" \
 - `state` is `OPEN`,
 - `isDraft` is `false`,
 - `mergeStateStatus` is **`CLEAN`** — the value the helper below prints decides, not a query,
+- the vision check above passed,
 - the evals-guard gate above passed (`pass` or `none`),
 - and, when any read of its `headRefName` (this query's included) starts with `milestone-`, the
   milestone check above passed.
@@ -382,7 +403,8 @@ resolve conflicts, wait for checks, address the outstanding findings, or merge m
 - **Regular merge only** (`gh pr merge --merge`), never `--squash`/`--rebase` — preserve full history.
   If this rule ever changes, change it here AND in `github-conventions/references/conventions.md`.
 - Never merge a draft PR, a PR with conflicts, a PR with failing/pending required checks, a PR
-  that touches an `approval_paths` pattern, or, where the base branch has an evals guard, a PR
+  that touches an `approval_paths` pattern, a PR that changes `VISION.md`'s Immutable constraints
+  (`octo-vision-guard.sh`), or, where the base branch has an evals guard, a PR
   whose guard checks did not pass on the reviewed commit against the current base, or a
   `milestone-*` PR whose reviewed commit fails `octo-genesis-next.sh --check --head`.
 - The gate uses the reviewer's **intended** verdict, not GitHub review approval (self-review cannot

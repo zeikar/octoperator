@@ -21,8 +21,8 @@
 #               scenario without an eval or an eval without a scenario, a scenario.md that
 #               disagrees, no script-judged scenario, a changed Immutable constraints section
 #               or other non-Roadmap section of VISION.md, a level-1 or level-2 heading added
-#               inside the Roadmap (after a tab or up to 3 spaces; an indented code line, a ###,
-#               and `##x` pass), a Roadmap without the milestone, a
+#               inside the Roadmap (after a tab or up to 3 spaces, or setext; an indented code
+#               line, a ###, and `##x` pass), a Roadmap without the milestone, a
 #               grounded milestone that leaves docs/research.md as it is, an ungrounded one that
 #               changes it or cites a URL, and a research file the proposal check rejects
 #   - bad arguments
@@ -343,11 +343,12 @@ sed -i.bak 's/^2\. \*\*Milestone 2: /2. **Next: /' "$c/VISION.md" && rm "$c/VISI
 check
 fails "a Roadmap without the milestone fails" "VISION.md: ## Roadmap needs an item for Milestone 2"
 # Inside ## Roadmap, so the section checks pass them; CommonMark still reads each as a heading.
-for h in $'##\tImmutable constraints' ' ## Immutable constraints' '   # Vision' '##'; do
+for h in $'##\tImmutable constraints' ' ## Immutable constraints' '   # Vision' '##' \
+    $'Immutable constraints\n---'; do
   case_repo
   printf '\n%s\n\n- New constraint\n' "$h" >>"$c/VISION.md" && commit "$c" heading
   check
-  fails "a Roadmap line that is a heading ('${h//$'\t'/<tab>}') fails" \
+  fails "a Roadmap line that is a heading ('$(printf '%s' "${h//$'\t'/<tab>}" | paste -sd '/' -)') fails" \
     "VISION.md: a milestone adds no level-1 or level-2 heading, only Roadmap items"
 done
 # The check runs in auto's merge gate under the user's git config, so forced diff color or an

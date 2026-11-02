@@ -37,8 +37,9 @@
 #     `- judge: model`, and text, at least one judged by script; each new eval's scenario.md
 #     front matter has the same `id:`, `judge:`, and `requirement:` lines;
 #   - VISION.md changes only inside ## Roadmap, so ## Immutable constraints never changes, it
-#     gains no level-1 or level-2 heading line (CommonMark's: up to 3 spaces, then `#` or `##`,
-#     then a space, a tab, or the line's end), and its Roadmap names `Milestone <n>`;
+#     gains no level-1 or level-2 heading (CommonMark's ATX or setext form), and its Roadmap
+#     names `Milestone <n>`: octo-vision-guard.sh --milestone <n>, the guard auto runs on every
+#     PR, checks these;
 #   - grounding: when the new section holds the line `ungrounded: no web access` before its
 #     first `### ` heading, docs/research.md is unchanged, and neither the section nor the lines
 #     VISION.md gained cite an http(s) URL; otherwise docs/research.md changed (refreshed);
@@ -157,7 +158,9 @@ while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
     docs/prd.md | VISION.md | docs/research.md)
       [ "$st" = M ] || { fail "$path: may only be modified (status $st)"; continue; }
       case "$path" in docs/prd.md) prd=1 ;; VISION.md) vision=1 ;; *) research=1 ;; esac
-      [ "$smode" = "$dmode" ] || fail "$path: its mode changed ($smode to $dmode)" ;;
+      # The vision guard below reports VISION.md's own mode change.
+      [ "$smode" = "$dmode" ] || [ "$path" = VISION.md ] \
+        || fail "$path: its mode changed ($smode to $dmode)" ;;
     evals/*/*)
       id="${path#evals/}" id="${id%%/*}"
       if ! [[ "$id" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
@@ -278,31 +281,16 @@ EOF
 fi
 
 if [ "$vision" -eq 1 ]; then
-  # without <section> <file> : the file with that section's body left out.
-  without() {
-    awk -v s="## $1" '{ line = $0; sub(/[ \t\r]+$/, "", line) }
-      line ~ /^## / { skip = (line == s); print; next } !skip' "$2"
-  }
-  section_of() {
-    awk -v s="## $1" '{ line = $0; sub(/[ \t\r]+$/, "", line) }
-      line ~ /^## / { on = (line == s); next } on' "$2"
-  }
-  g show "$mb:VISION.md" >"$tmp/vision.base" || exit 3
-  g show "HEAD:VISION.md" >"$tmp/vision.head" || exit 3
-  if [ "$(section_of 'Immutable constraints' "$tmp/vision.base")" \
-      != "$(section_of 'Immutable constraints' "$tmp/vision.head")" ]; then
-    fail "VISION.md: ## Immutable constraints changed: only a human edits that section"
-  elif [ "$(without Roadmap "$tmp/vision.base")" != "$(without Roadmap "$tmp/vision.head")" ]; then
-    fail "VISION.md: only ## Roadmap may change"
-  fi
-  # The section checks above key on a literal `## `, but CommonMark also reads `##<tab>x` or
-  # ` ## x` as a heading: a Roadmap line like that would render as a new Immutable constraints.
-  g diff --no-color --no-ext-diff --no-textconv --text -U0 "$mb" HEAD -- VISION.md >"$tmp/vision.diff" || exit 3
-  awk '/^@@/ { h = 1; next } h && /^\+/ { l = substr($0, 2); sub(/\r$/, "", l); print l }' \
-    "$tmp/vision.diff" | grep -Eq '^ {0,3}#{1,2}([[:blank:]]|$)' \
-    && fail "VISION.md: a milestone adds no level-1 or level-2 heading, only Roadmap items"
-  section_of Roadmap "$tmp/vision.head" | grep -Eq "Milestone $N([^0-9]|$)" \
-    || fail "VISION.md: ## Roadmap needs an item for Milestone $N"
+  # The VISION.md rules live in the guard auto runs on every PR; --milestone adds the Roadmap ones.
+  vrc=0
+  vout="$(bash "$HERE/octo-vision-guard.sh" --base "$mb" --head HEAD --milestone "$N" "$DIR")" \
+    || vrc=$?
+  case "$vrc" in
+    0) ;;
+    1) printf '%s\n' "$vout" | grep '^FAIL: ' || true
+       FAILS=$((FAILS + $(printf '%s\n' "$vout" | grep -c '^FAIL: '))) ;;
+    *) echo "octo-vision-guard.sh exited $vrc" >&2; exit 3 ;;
+  esac
   [ "$ungrounded" -eq 0 ] \
     || { g diff --no-color --no-ext-diff --no-textconv --text "$mb" HEAD -- VISION.md | grep -E '^\+[^+]' | grep -Eq 'https?://' \
          && fail "VISION.md: an ungrounded milestone read no source, so it cites no URL"; }
