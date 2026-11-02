@@ -21,9 +21,14 @@
 #                            (`head:` is the run's head commit, or `none` with no metric)
 #   - octo-ledger-state.sh : the convergence decision against a stub ledger: the merge rule
 #                            without a metric, the P-gain rule (an idle merge is no gain, P rising
-#                            is one without a merge, P falling or T rising is not, a metric on
-#                            one side only falls back to merges, observe entries never gain), the
-#                            walk stopping at a reset or an all-pass entry, the all-pass line
+#                            is one without a merge, P falling or T rising is not, no numeric
+#                            entry before it falls back to merges, observe entries never gain),
+#                            the high-water mark and its line (P oscillating converges, strictly
+#                            rising never does, a recovery to the old high is no gain, observe
+#                            entries' P counts, the mark restarts at a reset or all-pass entry
+#                            from its P, a null reset leaves the first numeric entry to merges,
+#                            null entries don't hide it, other authors' entries don't raise it),
+#                            the walk stopping at a reset or an all-pass entry, the all-pass line
 #                            beside the ledger's own decision (over a converged ledger, and with
 #                            --resume), --resume, no
 #                            ledger yet, the validity rules (author association, a malformed or
@@ -337,11 +342,12 @@ state() {
   rc=$?
   out="$(printf '%s' "$out" | paste -sd '|' -)"
 }
-# [AP=yes] [PF=<tip reason>] decides <label> <entries> <skipped> <streak> <decision> : the
-# helper exited 0 with these lines, `all-pass: no` (or $AP), and `planning-failed: none` (or $PF).
+# [HW=<P>] [AP=yes] [PF=<tip reason>] decides <label> <entries> <skipped> <streak> <decision> :
+# the helper exited 0 with these lines, `high-water: none` (or $HW), `all-pass: no` (or $AP), and
+# `planning-failed: none` (or $PF).
 decides() {
   same "$1" \
-    "0|entries: $2|skipped: $3|streak: $4|all-pass: ${AP:-no}|planning-failed: ${PF:-none}|decision: $5" \
+    "0|entries: $2|skipped: $3|streak: $4|high-water: ${HW:-none}|all-pass: ${AP:-no}|planning-failed: ${PF:-none}|decision: $5" \
     "$rc|$out"
 }
 O=OWNER
@@ -364,28 +370,82 @@ decides "fewer than N entries: not converged" "2 (all)" none 1/3 build
 ledger "$O|$(e run 0 "$(m 2 6)")" "$O|$(e run 1 "$(m 2 6)")" "$O|$(e run 1 "$(m 2 6)")" \
   "$O|$(e run 1 "$(m 2 6)")"
 state --metric 2/6
-decides "P-gain: merges that move no eval are no gain, and converge" "4 (all)" none 4/3 observe
+HW=2 decides "P-gain: merges that move no eval are no gain, and converge" "4 (all)" none 4/3 observe
 ledger "$O|$(e run 0 "$(m 2 6)")" "$O|$(e run 0 "$(m 3 6)")" "$O|$(e run 0 "$(m 3 6)")" \
   "$O|$(e run 0 "$(m 3 6)")"
 state --metric 3/6
-decides "P-gain: P rising is a gain without a merge" "4 (all)" none 2/3 build
+HW=3 decides "P-gain: P rising is a gain without a merge" "4 (all)" none 2/3 build
 ledger "$O|$(e run 0 "$(m 4 6)")" "$O|$(e run 1 "$(m 3 6)")" "$O|$(e run 1 "$(m 3 6)")" \
   "$O|$(e run 1 "$(m 3 6)")"
 state --metric 3/6
-decides "P-gain: P falling (a regression) is no gain" "4 (all)" none 4/3 observe
+HW=4 decides "P-gain: P falling (a regression) is no gain" "4 (all)" none 4/3 observe
 ledger "$O|$(e run 0 "$(m 4 6)")" "$O|$(e run 1 "$(m 4 8)")" "$O|$(e run 1 "$(m 4 8)")" \
   "$O|$(e run 1 "$(m 4 8)")"
 state --metric 4/8
-decides "P-gain: T rising (new must-fail evals) with P unchanged is no gain" "4 (all)" none 4/3 \
-  observe
+HW=4 decides "P-gain: T rising (new must-fail evals) with P unchanged is no gain" "4 (all)" none \
+  4/3 observe
 ledger "$O|$(e run 0 null)" "$O|$(e run 1 "$(m 4 6)")" "$O|$(e run 0 "$(m 4 6)")" \
   "$O|$(e run 0 "$(m 4 6)")"
 state
-decides "a metric on one side only: the merge rule decides that entry" "4 (all)" none 2/3 build
+HW=4 decides "no numeric entry before it: the merge rule decides that entry" "4 (all)" none 2/3 \
+  build
 ledger "$O|$(e run 0 "$(m 2 6)")" "$O|$(e observe 0 "$(m 3 6)")" "$O|$(e observe 0 "$(m 4 6)")" \
   "$O|$(e observe 0 "$(m 5 6)")"
 state --metric 5/6
-decides "observe entries never gain, even when P rose" "4 (all)" none 4/3 observe
+HW=5 decides "observe entries never gain, even when P rose" "4 (all)" none 4/3 observe
+
+# The high-water mark: the highest P among the walk's older entries and the entry that ends it.
+ledger "$O|$(e run 1 "$(m 4 6)")" "$O|$(e run 1 "$(m 3 6)")" "$O|$(e run 1 "$(m 4 6)")" \
+  "$O|$(e run 1 "$(m 3 6)")" "$O|$(e run 1 "$(m 4 6)")"
+state --metric 4/6
+HW=4 decides "high-water: P oscillating 4→3→4→3→4, merging every run, converges" "5 (all)" none \
+  4/3 observe
+ledger "$O|$(e run 0 "$(m 1 6)")" "$O|$(e run 0 "$(m 2 6)")" "$O|$(e run 0 "$(m 3 6)")" \
+  "$O|$(e run 0 "$(m 4 6)")" "$O|$(e run 0 "$(m 5 6)")"
+state --metric 5/6 --runs 1
+HW=5 decides "high-water: P strictly rising never converges, even with N = 1" "5 (all)" none 0/1 \
+  build
+ledger "$O|$(e run 0 "$(m 3 6)")" "$O|$(e run 0 "$(m 5 6)")" "$O|$(e run 1 "$(m 4 6)")" \
+  "$O|$(e run 1 "$(m 5 6)")"
+state --metric 5/6
+HW=5 decides "high-water: recovering to the previous high is no gain" "4 (all)" none 2/3 build
+ledger "$O|$(e run 0 "$(m 3 6)")" "$O|$(e run 0 "$(m 5 6)")" "$O|$(e run 1 "$(m 4 6)")" \
+  "$O|$(e run 0 "$(m 6 7)")"
+state --metric 6/7
+HW=6 decides "high-water: passing the previous high is a gain" "4 (all)" none 0/3 build
+ledger "$O|$(e run 0 "$(m 3 6)")" "$O|$(e observe 0 "$(m 5 6)")" "$O|$(e run 1 "$(m 5 6)")"
+state --metric 5/6
+HW=5 decides "high-water: an observe entry's P counts toward the mark" "3 (all)" none 3/3 observe
+ledger "$O|$(e run 0 "$(m 6 8)")" "$O|$(e reset 0 "$(m 4 8)")" "$O|$(e run 0 "$(m 5 8)")"
+state --metric 5/8
+HW=5 decides "high-water: the mark restarts at a reset, from its P" "1 (since the last reset)" \
+  none 0/3 build
+ledger "$O|$(e run 0 "$(m 8 10)")" "$O|$(e observe 0 "$(m 6 6)")" "$O|$(e run 0 "$(m 7 9)")"
+state --metric 7/9
+HW=7 decides "high-water: the mark restarts at an all-pass entry, from its P" \
+  "1 (since the last all-pass entry)" none 0/3 build
+ledger "$O|$(e run 0 "$(m 6 8)")" "$O|$(e reset 0 null)" "$O|$(e run 0 "$(m 4 6)")"
+state --metric 4/6
+HW=4 decides "high-water: the first numeric entry after a null reset falls back to merges" \
+  "1 (since the last reset)" none 1/3 build
+ledger "$O|$(e reset 0 null)" "$O|$(e run 1 "$(m 4 6)")" "$O|$(e run 1 "$(m 4 6)")"
+state --metric 4/6
+HW=4 decides "high-water: ... its merge is a gain, and the next entry meets its mark" \
+  "2 (since the last reset)" none 1/3 build
+ledger "$O|$(e run 0 "$(m 4 6)")" "$O|$(e run 1 null)" "$O|$(e run 1 "$(m 4 6)")" \
+  "$O|$(e run 0 null)" "$O|$(e run 0 null)"
+state
+HW=4 decides "high-water: null entries use merges, and don't hide the mark from later ones" \
+  "5 (all)" none 3/3 observe
+ledger "$O|$(e run 0 "$(m 4 6)")" "$O|$(e run 1 null)" "$O|$(e run 0 null)" \
+  "$O|$(e run 0 "$(m 5 6)")"
+state --metric 5/6
+HW=5 decides "high-water: past null entries, P above the mark is a gain" "4 (all)" none 0/3 build
+ledger "$O|$(e run 0 "$(m 3 6)")" "NONE|$(e run 0 "$(m 6 6)")" \
+  "CONTRIBUTOR|$(e run 0 "$(m 5 6)")" "$O|$(e run 0 "$(m 4 6)")"
+state --metric 4/6
+HW=4 decides "high-water: other authors' entries neither end the walk nor raise the mark" \
+  "2 (all)" "1 (CONTRIBUTOR), 1 (NONE)" 0/3 build
 
 # Where the walk stops.
 ledger "$O|$(e run 0 null)" "$O|$(e run 0 null)" "$O|$(e run 0 null)" "$O|$(e reset 0 null)" \
@@ -394,31 +454,33 @@ state
 decides "the walk stops at the last reset" "2 (since the last reset)" none 2/3 build
 ledger "$O|$(e reset 0 "$(m 4 6)")" "$O|$(e run 0 "$(m 5 6)")"
 state --metric 5/6
-decides "a reset entry's metric is the baseline for the entry after it" \
+HW=5 decides "a reset entry's metric is the baseline for the entry after it" \
   "1 (since the last reset)" none 0/3 build
 ledger "$O|$(e run 0 "$(m 2 6)")" "$O|$(e run 0 "$(m 2 6)")" "$O|$(e observe 0 "$(m 5 5)")" \
   "$O|$(e observe 0 "$(m 5 5)")" "$O|$(e run 1 "$(m 5 8)")" "$O|$(e run 0 "$(m 5 8)")"
 state --metric 5/8
-decides "the walk stops at an all-pass entry: a new milestone starts the count again" \
+HW=5 decides "the walk stops at an all-pass entry: a new milestone starts the count again" \
   "2 (since the last all-pass entry)" none 2/3 build
 
 # The decision.
 ledger "$O|$(e observe 0 "$(m 4 6)")" "$O|$(e observe 0 "$(m 4 6)")" \
   "$O|$(e observe 0 "$(m 4 6)")"
 state --metric 6/6
-AP=yes decides "P == T over a converged ledger: all-pass, beside the ledger's observe" "3 (all)" \
-  none 3/3 observe
+HW=4 AP=yes decides "P == T over a converged ledger: all-pass, beside the ledger's observe" \
+  "3 (all)" none 3/3 observe
 state --metric 4/6
-decides "the same ledger, P < T: observe" "3 (all)" none 3/3 observe
+HW=4 decides "the same ledger, P < T: observe" "3 (all)" none 3/3 observe
 state --metric 4/6 --resume
-decides "--resume: the walk is empty, so build" "0 (since --resume)" none 0/3 build
+HW=4 decides "--resume: the walk is empty, so build" "0 (since --resume)" none 0/3 build
 state --metric 6/6 --resume
-AP=yes decides "--resume with P == T: all-pass, beside build" "0 (since --resume)" none 0/3 build
+HW=6 AP=yes decides "--resume with P == T: all-pass, beside build" "0 (since --resume)" none 0/3 build
+state --metric none --resume
+decides "--resume with no metric: no high-water mark" "0 (since --resume)" none 0/3 build
 state --metric none --runs 2
-decides "--runs sets N" "3 (all)" none 3/2 observe
+HW=4 decides "--runs sets N" "3 (all)" none 3/2 observe
 ledger "$O|$(e run 0 "$(m 4 6)")" "$O|$(e run 0 "$(m 4 6)")" "$O|$(e run 0 "$(m 6 6)")"
 state --metric 6/6
-AP=yes decides "P == T again after an all-pass entry: the walk is empty, so build" \
+HW=6 AP=yes decides "P == T again after an all-pass entry: the walk is empty, so build" \
   "0 (since the last all-pass entry)" none 0/3 build
 # nolog <args...> : run the helper with no --issue; sets out / rc.
 nolog() {
@@ -430,6 +492,8 @@ nolog
 decides "no ledger yet: build" "0 (no ledger yet)" none 0/3 build
 nolog --metric 2/2
 AP=yes decides "no ledger yet, P == T: all-pass, beside build" "0 (no ledger yet)" none 0/3 build
+nolog --metric 3/6 --resume
+HW=3 decides "no ledger yet, --resume: the mark is this run's P" "0 (no ledger yet)" none 0/3 build
 
 # Validity: only an allowed author's well-formed entry counts.
 ledger "$O|$(e run 0 null)" "MEMBER|$(e run 0 null)" "COLLABORATOR|$(e run 0 null)" \
@@ -455,11 +519,12 @@ decides "a missing key, an unknown kind, bad JSON, and two blocks are not entrie
 for bad in "$(m 3 2)" "$(m 3.5 6)" '"3/6"' '{"passed": "3", "total": "6"}' "$(m 3 0)"; do
   ledger "$O|$(e run 0 "$(m 4 6)")" "$O|$(e run 1 "$bad")"
   state
-  decides "a metric that is not valid ($bad) falls back to the merge rule" "2 (all)" none 0/3 build
+  HW=4 decides "a metric that is not valid ($bad) falls back to the merge rule" "2 (all)" none \
+    0/3 build
 done
 ledger "$O|$(e run 0 "$(m 5 5)")" "$O|$(e run 0 '{"passed": 3, "total": 3, "x": 1}')"
 state
-decides "an all-pass entry with extra metric keys still ends the walk" \
+HW=3 decides "an all-pass entry with extra metric keys still ends the walk" \
   "0 (since the last all-pass entry)" none 0/3 build
 
 # planning-failed: the newest run entry's planning_failed.
@@ -468,40 +533,40 @@ T7="$(printf '%040d' 7)"
 pf() { e run 0 "$(m 5 5)" | jq -c --arg t "$1" --arg r "$2" '. + {planning_failed: {tip: $t, reason: $r}}'; }
 ledger "$O|$(e run 0 "$(m 4 6)")" "$O|$(pf "$T7" "milestone invalid")"
 state --metric 5/5
-AP=yes PF="$T7 milestone invalid" decides "a run whose planning failed: its tip and reason" \
+HW=5 AP=yes PF="$T7 milestone invalid" decides "a run whose planning failed: its tip and reason" \
   "0 (since the last all-pass entry)" none 0/3 build
 ledger "$O|$(pf "$T7" "milestone invalid")" "$O|$(e observe 0 "$(m 5 5)")" \
   "$O|$(e observe 0 "$(m 5 5)")"
 state --metric 5/5
-AP=yes PF="$T7 milestone invalid" decides "observe entries after it are passed over" \
+HW=5 AP=yes PF="$T7 milestone invalid" decides "observe entries after it are passed over" \
   "0 (since the last all-pass entry)" none 0/3 build
 state --metric 5/5 --resume
-AP=yes decides "--resume: none" "0 (since --resume)" none 0/3 build
+HW=5 AP=yes decides "--resume: none" "0 (since --resume)" none 0/3 build
 ledger "$O|$(pf "$T7" "milestone invalid")" "$O|$(e reset 0 "$(m 5 5)")"
 state --metric 5/5
-AP=yes decides "a reset after it: none" "0 (since the last reset)" none 0/3 build
+HW=5 AP=yes decides "a reset after it: none" "0 (since the last reset)" none 0/3 build
 ledger "$O|$(pf "$T7" "milestone invalid")" "$O|$(e run 1 "$(m 5 5)")"
 state --metric 5/5
-AP=yes decides "a newer run entry without it: none" "0 (since the last all-pass entry)" none 0/3 \
-  build
+HW=5 AP=yes decides "a newer run entry without it: none" "0 (since the last all-pass entry)" \
+  none 0/3 build
 ledger "$O|$(e reset 0 "$(m 5 5)" | jq -c --arg t "$T7" '. + {planning_failed: {tip: $t, reason: "x"}}')"
 state --metric 5/5
-AP=yes decides "on a reset entry it is not read" "0 (since the last reset)" none 0/3 build
+HW=5 AP=yes decides "on a reset entry it is not read" "0 (since the last reset)" none 0/3 build
 for bad in '"milestone invalid"' '{"tip": "abc", "reason": "x"}' "{\"tip\": \"$T7\", \"reason\": 3}" \
     "{\"tip\": \"$T7\"}"; do
   ledger "$O|$(e run 0 "$(m 5 5)" | jq -c --argjson p "$bad" '. + {planning_failed: $p}')"
   state --metric 5/5
-  AP=yes decides "a malformed planning_failed ($bad): none" "0 (since the last all-pass entry)" \
-    none 0/3 build
+  HW=5 AP=yes decides "a malformed planning_failed ($bad): none" \
+    "0 (since the last all-pass entry)" none 0/3 build
 done
 long="$(printf 'x%.0s' $(seq 1 90))"
 ledger "$O|$(pf "$T7" $'git commit\nfailed')"
 state --metric 5/5
-AP=yes PF="$T7 git commit failed" decides "a reason with a newline prints on one line" \
+HW=5 AP=yes PF="$T7 git commit failed" decides "a reason with a newline prints on one line" \
   "0 (since the last all-pass entry)" none 0/3 build
 ledger "$O|$(pf "$T7" "$long")"
 state --metric 5/5
-AP=yes PF="$T7 ${long:0:80}" decides "a long reason is cut at 80 characters" \
+HW=5 AP=yes PF="$T7 ${long:0:80}" decides "a long reason is cut at 80 characters" \
   "0 (since the last all-pass entry)" none 0/3 build
 
 ST_FAIL=issue state

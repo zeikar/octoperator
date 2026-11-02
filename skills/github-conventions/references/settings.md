@@ -43,8 +43,9 @@ statuses:
   done: Done
 
 # Autopilot convergence: after this many ledger entries in a row without a
-# gain (a merge, or, with genesis's evals, more evals passing), autopilot
-# switches to observe mode (propose only) until `--resume`. Positive integer.
+# gain (with genesis's evals, more evals passing than the high-water mark;
+# otherwise a merge), autopilot switches to observe mode (propose only) until
+# `--resume`. Positive integer.
 # Default: 3.
 convergence_runs: 3
 

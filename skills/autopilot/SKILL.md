@@ -136,7 +136,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-ledger-state.sh" --repo "$REPO" --issue
 ```
 
 It prints `entries: <k> (<where the walk stopped>)`, `skipped: <none | counts by author
-association>`, `streak: <s>/<N>` (the newest entries without a gain), `all-pass: yes|no`,
+association>`, `streak: <s>/<N>` (the newest entries without a gain), `high-water: none | <P>`
+(the P this run's entry must exceed to gain, ledger.md → Convergence; with `--resume`, this run's
+P, which the reset entry carries), `all-pass: yes|no`,
 `planning-failed: none | <tip> <reason>` (the last run's next-milestone planning failed at that
 tip), and `decision: observe` (converged) or `build`. Exit 3 means the ledger couldn't be read. With no
 ledger yet, leave out `--issue`. When `skipped` isn't `none`, report it — "N entry-shaped comments
@@ -155,7 +157,8 @@ Parse and validate flags:
   value above `10` is passed, clamp to `10` and say so; reject a non-positive value.
 - `--max M` — parallelism cap passed through to `auto` per cycle (default `3`).
 - `--resume` — end observe mode: append a `reset` entry to the ledger, then run normally (step 3).
-  Harmless when not converged — it only restarts the no-gain count.
+  Harmless when not converged — it restarts the no-gain count and the high-water mark, at this
+  run's P.
 - `--dry-run` — plan only, no mutation.
 
 ### 2. Dry-run gate (BEFORE any mutation)
@@ -169,12 +172,12 @@ refilling the backlog per the mode. Defer the merge-gate specifics to `auto`.
 Also print the **convergence state**, using only the read commands in Run ledger: the evals
 metric's `metric:` and `source:` lines (the source run's id, URL, and P/T, or `no evals
 workflow`, or why it is unreadable), the ledger issue (or "none yet — the first real run creates
-it"), then `octo-ledger-state.sh`'s entries, skipped comments, and no-gain streak against
-`convergence_runs`, and what this run would do: build normally or `converged → observe mode`
-(research propose-only, then stop). For `all-pass: yes`, also print the milestone gate's three
-lines (with `--buildable` set to the actionable count above) and what follows, by
-[milestone.md](references/milestone.md#the-gates-decisions): build, or plan the next milestone with
-`genesis --next` and then `auto --pr` on its PR (`/octoperator:genesis --next --dry-run` shows the
+it"), then `octo-ledger-state.sh`'s entries, skipped comments, no-gain streak against
+`convergence_runs`, and high-water mark, and what this run would do: build normally or
+`converged → observe mode` (research propose-only, then stop). For `all-pass: yes`, also print
+the milestone gate's three lines (with `--buildable` set to the actionable count above) and what
+follows, by [milestone.md](references/milestone.md#the-gates-decisions): build, or plan the next
+milestone with `genesis --next` and then `auto --pr` on its PR (`/octoperator:genesis --next --dry-run` shows the
 milestone), or observe, saying whether it would dispatch `evals.yml`. With `--resume`, say a
 `reset` entry would be appended first.
 Mutate nothing: no label, ledger issue, or entry, and never end a schedule. End with the status

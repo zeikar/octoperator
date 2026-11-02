@@ -8,11 +8,13 @@
 # ledger comment by an OWNER, MEMBER, or COLLABORATOR whose body holds exactly one ```json block
 # parsing to an object with all nine keys and a known kind. A numeric metric is an object with
 # whole numbers 0 <= passed <= total, total >= 1; it is all-pass when passed == total. Each entry
-# is compared with the next older valid entry: an `observe` entry never gains; when both have a
-# numeric metric, an entry gains only if passed rose; otherwise it gains when merged >= 1. The
-# walk runs newest first and stops at the first `reset` or all-pass entry (--resume: it is
-# empty, as the reset entry about to be appended ends it). Converged: the newest N entries of
-# the walk exist and none gains. With no --issue (no ledger yet) the walk is empty.
+# is compared with the high-water mark: the highest numeric passed among the older entries of
+# the walk and the entry that ends it. An `observe` entry never gains; an entry with a numeric
+# metric, when there is a mark, gains only if passed exceeds it; otherwise it gains when
+# merged >= 1. The walk runs newest first and stops at the first `reset` or all-pass entry
+# (--resume: it is empty, as the reset entry about to be appended ends it). Converged: the
+# newest N entries of the walk exist and none gains. With no --issue (no ledger yet) the walk is
+# empty.
 #
 # --metric is this run's pass rate (default none), octo-evals-metric.sh's `rate:` value. The
 # decision is `observe` when converged and `build` otherwise; `all-pass` reports whether every
@@ -23,10 +25,12 @@
 # object with a 40-digit `tip` and a string `reason`, that run's next-milestone planning failed
 # at that tip. octo-milestone-gate.sh's --failed-tip takes the tip. With --resume it is none.
 #
-# Prints six lines:
+# Prints seven lines:
 #   entries: <k> (since the last reset | since the last all-pass entry | since --resume | all)
 #   skipped: none | <count> (<authorAssociation>), …   (entry-shaped comments by other authors)
 #   streak: <entries without a gain, newest first>/<N>
+#   high-water: none | <P>   (the mark this run's entry must exceed; with --resume, --metric's P,
+#                            which the reset entry about to be appended carries)
 #   all-pass: yes | no
 #   planning-failed: none | <tip> <reason, at most 80 characters on one line>
 #   decision: observe | build
@@ -55,21 +59,23 @@ done
 int='(0|[1-9][0-9]{0,8})'
 [[ "$RUNS" =~ ^$int$ ]] && [ "$RUNS" -ge 1 ] || { echo "--runs must be a positive integer" >&2; exit 2; }
 [ -z "$ISSUE" ] || [[ "$ISSUE" =~ ^$int$ ]] || { echo "--issue must be a number" >&2; exit 2; }
-all_pass=no
+all_pass=no resume_mark=none
 if [ "$METRIC" != none ]; then
   [[ "$METRIC" =~ ^$int/$int$ ]] && [ "${BASH_REMATCH[1]}" -le "${BASH_REMATCH[2]}" ] \
     && [ "${BASH_REMATCH[2]}" -ge 1 ] \
     || { echo "--metric must be P/T (whole numbers, P <= T, T >= 1) or none" >&2; exit 2; }
   [ "${BASH_REMATCH[1]}" -eq "${BASH_REMATCH[2]}" ] && all_pass=yes
+  # --resume appends a reset entry carrying this metric, so its P is the mark the run must beat.
+  [ "$RESUME" = false ] || resume_mark="${BASH_REMATCH[1]}"
 fi
 
 if [ -z "$ISSUE" ]; then
-  printf 'entries: 0 (no ledger yet)\nskipped: none\nstreak: 0/%s\nall-pass: %s\nplanning-failed: none\ndecision: build\n' \
-    "$RUNS" "$all_pass"
+  printf 'entries: 0 (no ledger yet)\nskipped: none\nstreak: 0/%s\nhigh-water: %s\nall-pass: %s\nplanning-failed: none\ndecision: build\n' \
+    "$RUNS" "$resume_mark" "$all_pass"
   exit 0
 fi
 
-# gh's --jq has no --arg, so RUNS, ALLPASS, and RESUME are written in as literals. Comments
+# gh's --jq has no --arg, so RUNS, ALLPASS, RESUME, and MARKP are written in as literals. Comments
 # come oldest first. Every type test sits in an `if`, so a malformed entry never makes jq fail.
 filter='
 def keys9: ["time", "mode", "cycles_used", "merged", "held", "proposals_filed", "metric",
@@ -88,9 +94,9 @@ def num: if type == "object" then
     else false end)
   else false end;
 def allpass: (.metric | num) and (.metric.passed == .metric.total);
-def gains($prev): if .kind == "observe" then false
-  elif (.metric | num) and ($prev != null) and ($prev.metric | num) then
-    .metric.passed > $prev.metric.passed
+def mark: [.[] | select(.metric | num) | .metric.passed] | max;
+def gains($mark): if .kind == "observe" then false
+  elif (.metric | num) and ($mark != null) then .metric.passed > $mark
   else ((.merged | type) == "number") and (.merged >= 1) end;
 [.comments[] | select(.body | contains("```json"))] as $c
 | ($c | map(select(.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")))) as $ok
@@ -102,7 +108,7 @@ def gains($prev): if .kind == "observe" then false
 | (if RESUME then "since --resume" elif $hit == null then "all"
    elif $v[$hit].kind == "reset" then "since the last reset"
    else "since the last all-pass entry" end) as $why
-| [range(0; $stop) as $i | $v[$i] | gains($v[$i + 1])] as $g
+| [range(0; $stop) as $i | $v[$i] | gains($v[$i + 1:$stop + 1] | mark)] as $g
 | ([range(0; $g | length) | select($g[.])] | .[0] // ($g | length)) as $streak
 | ([$v[] | select(.kind != "observe")] | .[0]) as $last
 | (if $last.kind == "run" then $last.planning_failed else null end) as $pf
@@ -114,9 +120,11 @@ def gains($prev): if .kind == "observe" then false
 | "entries: \($stop) (\($why))",
   "skipped: \(if $skipped == "" then "none" else $skipped end)",
   "streak: \($streak)/RUNS",
+  "high-water: \(if RESUME then "MARKP" else $v[0:$stop + 1] | mark // "none" end)",
   "all-pass: ALLPASS",
   "planning-failed: \($failed)",
   "decision: \(if $streak >= RUNS then "observe" else "build" end)"'
+filter="${filter//MARKP/$resume_mark}"
 filter="${filter//RESUME/$RESUME}"
 filter="${filter//ALLPASS/$all_pass}"
 filter="${filter//RUNS/$RUNS}"

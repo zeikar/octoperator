@@ -107,8 +107,10 @@ dispatch run in this repo, when the run's conclusion agrees (`scripts/octo-evals
 anywhere else, or when that annotation can't be read or disagrees, it is `null`. Autopilot reads the entries to detect convergence (`scripts/octo-ledger-state.sh`): after
 `convergence_runs` entries in a row without a gain (see `settings.md`), it switches to observe
 mode — `research` proposes, nothing is built — until a human runs `autopilot --resume`. An entry
-gains when P rose since the previous entry, if both have a metric, and otherwise when it merged
-something; an `observe` entry never gains. The count restarts at a `reset` entry or an entry where
+with a metric gains when its P exceeds the high-water mark: the highest P recorded since the
+count last restarted, the entry that restarted it included. Matching the mark is no gain, so an
+eval broken and fixed again is no progress. An entry without a metric, or with no earlier P to
+compare, gains when it merged something; an `observe` entry never gains. The count and the mark restart at a `reset` entry or an entry where
 every eval passed. When every eval passes (P == T) and nothing is buildable, autopilot asks
 `scripts/octo-milestone-gate.sh` whether to plan the next milestone. It observes while a
 next-milestone PR (an open `milestone-*` branch from this repo) waits to merge, while a declined
