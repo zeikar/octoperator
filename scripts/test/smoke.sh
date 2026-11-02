@@ -18,8 +18,10 @@
 #                            file list is cut short), another workflow's or PR's run, and a gh
 #                            error, against a stub `gh` that runs the helper's --jq filters with jq
 #   - octo-approval-match.sh : pattern normalization, malformed patterns, matching (renames
-#                            included, genesis's entries holding the evals guard and .claude/
-#                            but not evals/ or a milestone's files),
+#                            included, case ignored, Unicode folding too, genesis's entries
+#                            holding the evals guard, .claude/ (`.Claude/` too), GENESIS.md,
+#                            every CLAUDE.md, and the root .mcp.json, but not evals/ or a
+#                            milestone's files),
 #                            and the incomplete-file-list hold, against a stub `gh`
 #   - octo-genesis-check.sh : a valid proposal, a missing section or front-matter key, an
 #                            ungrounded proposal (and one with URLs or a misplaced or misspelled
@@ -464,24 +466,31 @@ matches '**/*.tf' 'main.tf modules/net/vpc.tf infra/main.tf'
 matches '.github/workflows/' '.github/workflows/ci.yml'
 matches 'modules/**/vpc.tf' 'modules/net/vpc.tf'
 matches '/infra' 'infra/main.tf'
-# Genesis's approval_paths (skeleton.md → Settings) holds a PR that changes the evals guard or the
-# Claude Code settings (they decide whether genesis --next may use the web), not one adding an
-# eval or a milestone's own files, so milestone PRs still merge unattended.
+# Genesis's approval_paths (skeleton.md → Settings) holds a PR that changes the evals guard, the
+# Claude Code settings (they decide whether genesis --next may use the web), GENESIS.md, a
+# CLAUDE.md at any depth, or the root .mcp.json, in any case, not one adding an eval or a
+# milestone's own files, so milestone PRs still merge unattended.
 gen_paths="$(awk '/^approval_paths:$/ { on = 1; next } on && /^  - "/ { print; next } on { exit }' \
   "$SCRIPTS_DIR/../skills/genesis/references/skeleton.md" | sed 's/^  - "//; s/"$//' \
   | paste -sd ' ' -)"
-expect 0 "genesis's approval_paths are .github/workflows/ and .claude/" \
-  test "$gen_paths" = ".github/workflows/ .claude/"
+expect 0 "genesis's approval_paths are the five skeleton.md lists" \
+  test "$gen_paths" = ".github/workflows/ .claude/ /GENESIS.md CLAUDE.md /.mcp.json"
 printf '%s\t\n' .github/workflows/evals-guard.yml evals/recall/check.sh evals/guard.sh \
-  .claude/settings.json .claude/settings.local.json docs/prd.md docs/research.md VISION.md \
-  evals/export-200-turns/scenario.md evals/export-200-turns/check.sh src/.claude/x GENESIS.md \
+  .claude/settings.json .claude/settings.local.json .Claude/settings.local.json docs/prd.md \
+  docs/research.md VISION.md evals/export-200-turns/scenario.md evals/export-200-turns/check.sh \
+  src/.claude/x GENESIS.md docs/GENESIS.md CLAUDE.md src/claude.md .mcp.json src/.mcp.json \
   docs/adr/0002-cache.md >"$STUB_FILES"
 # shellcheck disable=SC2086 # one pattern per word, as genesis writes them
 approval $gen_paths
-expect 0 "genesis's approval_paths match only the guard and .claude/" test "$am_rc" -eq 1 \
-  -a "$am_out" = ".github/workflows/evals-guard.yml$tab.github/workflows/
+expect 0 "genesis's approval_paths match only the guard, .claude/, GENESIS.md, CLAUDE.md, .mcp.json" \
+  test "$am_rc" -eq 1 -a "$am_out" = ".github/workflows/evals-guard.yml$tab.github/workflows/
 .claude/settings.json$tab.claude/
-.claude/settings.local.json$tab.claude/"
+.claude/settings.local.json$tab.claude/
+.Claude/settings.local.json$tab.claude/
+GENESIS.md$tab/GENESIS.md
+CLAUDE.md${tab}CLAUDE.md
+src/claude.md${tab}CLAUDE.md
+.mcp.json$tab/.mcp.json"
 printf '%s\t\n' docs/prd.md docs/research.md VISION.md evals/export-200-turns/scenario.md \
   evals/export-200-turns/check.sh >"$STUB_FILES"
 # shellcheck disable=SC2086
@@ -491,8 +500,19 @@ expect 0 "a milestone's files match none of genesis's approval_paths" \
 printf '%s\t\n' README.md main.tf main.tfvars modules/net/vpc.tf infra/main.tf infra-old/x \
   infrastructure/x deploy/infra/run.sh .github/workflows/ci.yml xgithub/workflows/ci.yml \
   >"$STUB_FILES"
-approval 'docs/**' 'secrets/**' 'Infra'
+approval 'docs/**' 'secrets/**' 'Infrastructures'
 expect 0 "no match: exits 0, prints nothing" test "$am_rc" -eq 0 -a -z "$am_out"
+# Matching ignores case, as macOS's file system does: a pattern's case and a path's both fold.
+matches 'Infra' 'infra/main.tf deploy/infra/run.sh'
+matches '.GitHub/Workflows/' '.github/workflows/ci.yml'
+# Unicode folding and normalization: ſ folds to s, and a decomposed é equals a composed É.
+printf '%s\t\n' "$(printf '.github/workflow\xc5\xbf/x.yml')" "$(printf 'cafe\xcc\x81/x')" README.md \
+  >"$STUB_FILES"
+matches '.github/workflows/' "$(printf '.github/workflow\xc5\xbf/x.yml')"
+matches "$(printf 'CAF\xc3\x89')" "$(printf 'cafe\xcc\x81/x')"
+printf '%s\t\n' README.md main.tf main.tfvars modules/net/vpc.tf infra/main.tf infra-old/x \
+  infrastructure/x deploy/infra/run.sh .github/workflows/ci.yml xgithub/workflows/ci.yml \
+  >"$STUB_FILES"
 printf 'docs/ci.yml%s.github/workflows/ci.yml\n' "$tab" >"$STUB_FILES"
 approval '.github/workflows/'
 expect 0 "rename: the old path alone matches" \

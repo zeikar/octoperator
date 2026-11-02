@@ -57,7 +57,7 @@ deletes nothing, and the access date is the session's current date.
 | `Bash(bash:*)` | `octo-genesis-check.sh` (the preflight, the proposal check, the skeleton check), `octo-genesis-plan.sh` (the `--approve` stage and steps, and its re-check after the commit), setup's `octo-setup.sh` probe, `octo-genesis-epic.sh` (the MVP epic lookup), and plan-epic's `octo-subissue.sh`; `--next`: `octo-evals-metric.sh`, `octo-milestone-gate.sh`, `octo-genesis-next.sh`, and `octo-worktree.sh` |
 | `Read` | the formats in `references/proposal.md`, `references/skeleton.md`, and `references/evals.md`, `docs/research.md` for stage 2, the ADR for the skeleton, `docs/prd.md` and the eval templates in `templates/` for the evals, `docs/prd.md` and plan-epic's procedure for stage 4, and the files to summarize |
 | `Write` | the five proposal files; under `--approve`, the skeleton files, the evals, and `.claude/octoperator.local.md`, each only when missing; under `--next`, the new evals, in its worktree |
-| `Edit` | `--approve`: fix a skeleton file this run wrote when the skeleton check fails, and add `.github/workflows/` and `.claude/` to an existing settings file's `approval_paths` when missing; `--next`: its PRD section, Roadmap item, and research refresh, and fixes after its check |
+| `Edit` | `--approve`: fix a skeleton file this run wrote when the skeleton check fails, and add skeleton.md's missing `approval_paths` entries to an existing settings file; `--next`: its PRD section, Roadmap item, and research refresh, and fixes after its check |
 | `Glob` | list what the run wrote, for the checkpoint's file list, and which skeleton files exist |
 | `Task` | plan-epic's `issue-planner` dispatch in stage 4, and in its `--dry-run`; the planner only reads |
 | `WebSearch` | find existing services and similar open-source projects (stage 1), and what they shipped since (`--next`; under autopilot, only when your own settings allow it) |
@@ -311,8 +311,9 @@ with the reason given here; the next `--approve` resumes from what exists.
    `.github/workflows/` covers `.github/workflows/evals-guard.yml` and `evals-model.yml`, so a
    change to the guard, or a schedule, cap, or timeout change to the model workflow, needs a
    human; so does a change under `.claude/`, whose settings decide whether `--next` may use the
-   web under autopilot. `evals/` is not in it, so a PR that only adds must-fail evals merges once
-   its guard checks pass. Genesis adds no secret here or anywhere. A probe
+   web under autopilot, to `GENESIS.md`, to a `CLAUDE.md`, or to `.mcp.json` (skeleton.md says
+   why). `evals/` is not in it, so a PR that only adds must-fail evals merges once its guard
+   checks pass. Genesis adds no secret here or anywhere. A probe
    `error`, a non-zero exit, or a failed label → stop with `setup failed`. A settings file whose
    `repo:` is not `<repo>` → stop with `settings repo mismatch`, before any label.
 

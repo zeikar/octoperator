@@ -9,25 +9,34 @@
 # objects (ls-tree, cat-file), never the work tree, so it needs no checkout, and no diff, color,
 # textconv, or pathspec setting in the user's git config changes what it reads. It compares the
 # root VISION.md at merge-base(--base, --head) with the one at --head:
+#   - a root entry at --head other than VISION.md whose name folds to it (`vision.md`,
+#     `Vision.md`, `viſion.md`: Unicode case folding, as macOS's default file system compares
+#     names): FAIL, even with no VISION.md. A case-insensitive checkout writes both to one file,
+#     so the reader could get the other one's text while the guard checks VISION.md;
 #   - no VISION.md on either side: ok;
 #   - VISION.md deleted, --head's not a regular file (a symlink, a submodule, a directory), or
 #     its mode changed: FAIL;
 #   - the `## Immutable constraints` section (from that exact heading line, trailing blanks
 #     aside, to the next `## ` line) differs: FAIL. A side with no such section has an empty
 #     one, so adding a section counts too;
-#   - the number of level-1 or level-2 headings named Immutable constraints differs: FAIL. A
-#     heading is CommonMark's ATX form (up to 3 spaces, `#` or `##`, then a space, a tab, or the
-#     line's end, so `##<tab>x` and ` ## x` count) or a setext one (a paragraph underlined with
-#     `=` or `-`, up to 3 spaces before it); names compare without case, a closing `#`
-#     sequence, or extra blanks. So a heading that renders as a second Immutable constraints
-#     section, where the exact match above doesn't see it, holds the PR. Fenced code isn't
-#     parsed: a heading-like line in one counts, which can only hold more.
+#   - the list of level-1 and level-2 headings differs (one added, removed, renamed, or moved):
+#     FAIL, so a heading that renders as a second Immutable constraints section, or as a parent
+#     that recasts it (`# Archive` above it), holds the PR whatever its name's spelling (`&#32;`,
+#     a no-break space). A heading is CommonMark's ATX form (up to 3 spaces, `#` or `##`, then a
+#     space, a tab, or the line's end, so `##<tab>x` and ` ## x` count) or a setext one (a
+#     paragraph underlined with `=` or `-`, up to 3 spaces before it); names compare without
+#     case, a closing `#` sequence, or extra blanks. A Roadmap change adds items, not headings;
+#   - the number of lines holding `<!--`, of lines holding `-->`, or of fence lines (up to 3
+#     spaces, then ``` or ~~~) differs: FAIL. Code fences and HTML aren't parsed, so wrapping the
+#     section in a comment or a fence would hide it from a reader while every check above still
+#     sees it; this check holds that instead. A fence, HTML, or blockquote line ends the open
+#     paragraph and starts the next one, so a setext underline after it counts as a heading, and
+#     a heading-like line inside a fence counts too: over-reading there only holds more.
 # With --milestone N (genesis --next's check, octo-genesis-next.sh --check), also: nothing outside
-# `## Roadmap` changes, the level-1 and level-2 headings are the same ones in the same order (a
-# milestone adds none), and the Roadmap names `Milestone N`.
+# `## Roadmap` changes, and the Roadmap names `Milestone N`.
 #
 # Prints one `FAIL: VISION.md: <problem>` line per problem, or one `ok: VISION.md: …` line.
-# Offline: git only, never gh; writes nothing.
+# Offline: git and perl only, never gh; writes nothing.
 #
 # Exit codes: 0 ok, 1 `FAIL:` lines (hold the PR), 2 bad arguments or DIR is not a directory,
 # 3 git failed (not a repository, a commit missing here, no merge base; git's output on stderr).
@@ -74,9 +83,20 @@ entry() {
   e="$(g ls-tree --full-tree "$1" -- VISION.md)" || return 1
   printf '%s' "${e%%$'\t'*}"
 }
+# Root names other than VISION.md that fold to it, each with any byte outside printable ASCII
+# shown as `?`. fc then NFD: macOS's file system ignores case and Unicode normalization.
+variants="$(g ls-tree -z --full-tree --name-only "$head" \
+  | perl -MUnicode::Normalize -Mfeature=fc -0 -ne 'chomp; my $n = $_; utf8::decode($n);
+      next if $_ eq "VISION.md" || NFD(fc(NFD($n))) ne "vision.md";
+      s/[^\x20-\x7e]/?/g; print "$_\n"')" || exit 3
+[ -z "$variants" ] || fail "the root also holds $(printf '%s' "$variants" | paste -sd ' ' -)," \
+  "which a case-insensitive checkout writes over VISION.md"
 be="$(entry "$mb")" || exit 3
 he="$(entry "$head")" || exit 3
-if [ -z "$be" ] && [ -z "$he" ]; then echo "ok: VISION.md: none on either side"; exit 0; fi
+if [ -z "$be" ] && [ -z "$he" ]; then
+  [ "$FAILS" -eq 0 ] || exit 1
+  echo "ok: VISION.md: none on either side"; exit 0
+fi
 [ -n "$he" ] || { fail "deleted: only a human removes the constitution"; exit 1; }
 read -r hmode htype hobj <<<"$he"
 case "$hmode" in
@@ -116,7 +136,9 @@ headings() {
       print lvl, name(t); para = ""; next }
     para != "" && line ~ /^(   |  | )?(=+|-+)[ \t]*$/ {
       print (line ~ /=/ ? 1 : 2), name(para); para = ""; next }
-    # A thematic break ends a paragraph; so does nothing else here but a blank or a heading.
+    # A fence, HTML, or blockquote line ends a paragraph and starts the next (the header says why).
+    line ~ /^(   |  | )?(```|~~~|<|>)/ { para = line; next }
+    # A thematic break ends a paragraph too, as do a blank and a heading.
     line ~ /^(   |  | )?(\*[ \t]*\*[ \t]*\*[*\t ]*|_[ \t]*_[ \t]*_[_\t ]*|-[ \t]*-[ \t]*-[-\t ]*)$/ {
       para = ""; next }
     # An indented line opens no paragraph (it is code), though it may continue one.
@@ -133,13 +155,18 @@ then
 fi
 headings "$tmp/base" >"$tmp/h.base" || exit 3
 headings "$tmp/head" >"$tmp/h.head" || exit 3
-ic() { grep -Ec '^[12] immutable constraints$' "$1"; }
-[ "$(ic "$tmp/h.base")" = "$(ic "$tmp/h.head")" ] \
-  || fail "a level-1 or level-2 heading named Immutable constraints was added or removed: only" \
-       "a human edits that section"
+cmp -s "$tmp/h.base" "$tmp/h.head" \
+  || fail "its level-1 or level-2 headings changed: only a human adds, removes, or renames one" \
+       "(a Roadmap change adds items, not headings)"
+# marks <file> : how many lines hold `<!--`, hold `-->`, and open or close a code fence.
+marks() {
+  awk '{ sub(/\r$/, "") } /<!--/ { o++ } /-->/ { c++ } /^(   |  | )?(```|~~~)/ { f++ }
+    END { print o + 0, c + 0, f + 0 }' "$1"
+}
+[ "$(marks "$tmp/base")" = "$(marks "$tmp/head")" ] \
+  || fail "an HTML comment or code fence line was added or removed: one can hide the" \
+       "Immutable constraints section"
 if [ -n "$MILESTONE" ]; then
-  cmp -s "$tmp/h.base" "$tmp/h.head" \
-    || fail "a milestone adds no level-1 or level-2 heading, only Roadmap items"
   section_of Roadmap "$tmp/head" | grep -Eq "Milestone $MILESTONE([^0-9]|$)" \
     || fail "## Roadmap needs an item for Milestone $MILESTONE"
 fi

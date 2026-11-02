@@ -60,20 +60,25 @@ constitution's Immutable constraints in front of a human:
   created, its `.github/workflows/` entry covers the evals guard and `evals-model.yml`, so a
   `schedule:` trigger (unattended model spend), a higher call cap, or a longer timeout there needs
   a human to merge; its `.claude/` entry covers the committed Claude Code settings, which decide
-  whether `genesis --next` may use the web under autopilot. It holds only the merge: a workflow
-  pushed on a branch runs, with the repo's secrets, before any PR exists. Keep a secret such as the model key in a GitHub Environment
+  whether `genesis --next` may use the web under autopilot, and its `/GENESIS.md`, `CLAUDE.md`,
+  and `/.mcp.json` entries cover the files that shape the skeleton check and an unattended run
+  (`skills/genesis/references/skeleton.md` → Settings). Matching ignores case, so `.Claude/`
+  counts as `.claude/`. It holds only the merge: a workflow pushed on a branch runs, with the
+  repo's secrets, before any PR exists. Keep a secret such as the model key in a GitHub Environment
   restricted to the default branch, named by the job that uses it (`environment:`), and use a
   repo secret only where environments aren't available (a private repo on GitHub Free);
   `skills/genesis/references/evals.md` → Model-judged evals has the steps.
 - **Vision check (`auto`).** For every PR, in any repo with a root `VISION.md`, `auto` merges
   only when `scripts/octo-vision-guard.sh` finds the reviewed commit leaves its
-  `## Immutable constraints` section as it was at the merge base: not changed or removed, the
-  file not deleted, made a symlink, or given another mode, and no second level-1 or level-2
-  heading named Immutable constraints (an ATX heading after a tab or indented up to 3 spaces, or
-  a setext one) that the exact `## ` match would miss. Otherwise it holds with `VISION.md
+  `## Immutable constraints` section as it was at the merge base: not changed or removed; the
+  file not deleted, made a symlink, given another mode, or shadowed by a root name that differs
+  only in case (`vision.md`, which a macOS checkout writes over it); the level-1 and level-2
+  headings the same (ATX, also after a tab or indented up to 3 spaces, or setext), so no heading
+  can render as a second section or recast the real one; and no HTML comment or code fence line
+  added or removed, since either can hide the section. Otherwise it holds with `VISION.md
   immutable constraints changed: a human merges this`. That holds Octoperator's own PRs too:
-  its `VISION.md` says only a human edits that section. The rest of the file stays open, so a
-  milestone can add its Roadmap item. The check can't judge meaning: other text that argues
+  its `VISION.md` says only a human edits that section. The rest of the file's text stays open,
+  so a milestone can add its Roadmap item. The check can't judge meaning: other text that argues
   against a constraint passes it, and only review catches that.
 - **Evals guard (`auto`).** Where the base branch has `.github/workflows/evals-guard.yml` (a repo
   genesis created), `auto` merges only when `scripts/octo-evals-guard.sh` finds both guard checks

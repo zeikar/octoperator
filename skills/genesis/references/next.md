@@ -306,8 +306,9 @@ in literally. Stop at the first failure with the reason given; nothing is create
 `--next` opens the PR and stops; it never reviews or merges. `/octoperator:auto --pr <M>` takes it
 through `auto`'s normal review, fix, and merge gate (`${CLAUDE_PLUGIN_ROOT}/skills/auto/SKILL.md`,
 step 3's `--pr`). The PR closes no issue, so the PR itself is the fixer's subject, and the
-milestone rules (step 7) bound its fixes. Genesis's `approval_paths` is `.github/workflows/` and
-`.claude/`, which the milestone never touches, and `evals/` is not in it. So the PR merges
+milestone rules (step 7) bound its fixes. Genesis's `approval_paths` (`.github/workflows/`,
+`.claude/`, `/GENESIS.md`, `CLAUDE.md`, `/.mcp.json`) names nothing the milestone touches, and
+`evals/` is not in it. So the PR merges
 unattended once its review is non-blocking, its checks are green, the vision check passes (the
 Roadmap may change), both `evals-guard` checks passed on the reviewed commit, and
 `octo-genesis-next.sh --check --head` passes there too. `auto` holds the PR

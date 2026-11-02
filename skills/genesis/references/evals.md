@@ -401,7 +401,7 @@ A failing guard job makes the PR `UNSTABLE`, so `auto` holds it. Weakening an ev
 runner or the guard, then takes a human.
 
 **Append-only additions merge automatically.** `approval_paths` holds the guard workflow, not
-`evals/`: genesis's settings list `.github/workflows/` (and `.claude/`), which covers
+`evals/`: genesis's settings list `.github/workflows/` (among others), which covers
 `.github/workflows/evals-guard.yml`, `evals.yml`, and `evals-model.yml`, so `auto` never merges a
 change to any of them without a human. `evals/` stays out, so a PR that only adds must-fail evals
 merges like any other, once `auto`'s evals-guard gate sees both guard checks pass.

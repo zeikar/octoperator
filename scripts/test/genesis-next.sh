@@ -349,7 +349,7 @@ for h in $'##\tImmutable constraints' ' ## Immutable constraints' '   # Vision' 
   printf '\n%s\n\n- New constraint\n' "$h" >>"$c/VISION.md" && commit "$c" heading
   check
   fails "a Roadmap line that is a heading ('$(printf '%s' "${h//$'\t'/<tab>}" | paste -sd '/' -)') fails" \
-    "VISION.md: a milestone adds no level-1 or level-2 heading, only Roadmap items"
+    "VISION.md: its level-1 or level-2 headings changed: only a human adds, removes, or renames one (a Roadmap change adds items, not headings)"
 done
 # The check runs in auto's merge gate under the user's git config, so forced diff color or an
 # external diff must not blind it.
@@ -358,7 +358,7 @@ printf '\n## Immutable constraints\n\n- New constraint\n' >>"$c/VISION.md" && co
 GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=color.ui GIT_CONFIG_VALUE_0=always \
   GIT_CONFIG_KEY_1=diff.external GIT_CONFIG_VALUE_1=true check
 fails "a Roadmap heading still fails with color.ui=always and diff.external set" \
-  "VISION.md: a milestone adds no level-1 or level-2 heading, only Roadmap items"
+  "VISION.md: its level-1 or level-2 headings changed: only a human adds, removes, or renames one (a Roadmap change adds items, not headings)"
 for h in '    ## code, not a heading' '### Sub-item' '##not a heading'; do
   case_repo
   printf '\n%s\n' "$h" >>"$c/VISION.md" && commit "$c" nonheading

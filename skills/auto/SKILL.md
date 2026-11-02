@@ -219,10 +219,11 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-vision-guard.sh" --base "origin/$DEFAUL
 ```
 
 Run them one at a time. Exit 0 → continue: the repo has no `VISION.md`, or the PR left that
-section alone (its Goal or Roadmap may change). Exit 1 → it printed `FAIL:` lines: the section
-changed or was removed, `VISION.md` was deleted, became a symlink, or changed mode, or a second
-level-1 or level-2 heading named Immutable constraints appeared (such as `##<tab>…` or a setext
-underline). Hold the PR with the reason `VISION.md immutable constraints changed: a human merges
+section alone (the text of its Goal or Roadmap may change, not a heading). Exit 1 → it printed
+`FAIL:` lines: the section changed or was removed, `VISION.md` was deleted, became a symlink,
+changed mode, or gained a root twin such as `vision.md`, a level-1 or level-2 heading was added,
+removed, renamed, or moved (such as `##<tab>…` or a setext underline), or an HTML comment or
+code fence line was added or removed. Hold the PR with the reason `VISION.md immutable constraints changed: a human merges
 this`, listing the `FAIL:` lines in the report. A failed fetch or any other exit → hold (reason:
 vision check unavailable). Like the approval-path hold, only a human lifts it, in Octoperator's
 own repo too.

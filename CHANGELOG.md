@@ -40,7 +40,8 @@ All notable changes to Octoperator are documented in this file. The format is ba
   reason, and the name), runs
   `gh repo create --private` (`--public` only for `visibility: public`) with the sentence as the
   description, and runs setup with fixed answers: no board, the labels, and settings with
-  `approval_paths: [".github/workflows/", ".claude/"]` (`.claude/` since #102). A failing
+  `approval_paths: [".github/workflows/", ".claude/", "/GENESIS.md", "CLAUDE.md",
+  "/.mcp.json"]` (all but the first since #102). A failing
   test stops before any git or `gh` write; a missing `workflow` scope stops with the
   `gh auth refresh -s workflow` hint. A re-run resumes from the folder's git state and creates
   nothing twice. `--dry-run` prints the ordered commands and writes nothing. New offline helper
@@ -286,16 +287,22 @@ All notable changes to Octoperator are documented in this file. The format is ba
   `scripts/octo-vision-guard.sh` compares the root `VISION.md` at the merge base with the
   reviewed commit, from git's objects, so no checkout is needed and the user's diff settings don't
   apply. It holds when the `## Immutable constraints` section changed or was removed, the file
-  was deleted, made a symlink, or changed mode, or a second level-1 or level-2 heading of that
-  name appeared (ATX after a tab or up to 3 spaces, or setext). A repo with no `VISION.md`, and a
-  change to its other sections, pass. The hold reason is `VISION.md immutable constraints
+  was deleted, made a symlink, or changed mode, a root name such as `vision.md` would replace it
+  on a case-insensitive checkout, any level-1 or level-2 heading was added, removed, renamed, or
+  moved (ATX after a tab or up to 3 spaces, or setext), or an HTML comment or code fence line was
+  added or removed, since either can hide the section. A repo with no `VISION.md`, and a change
+  to the text of its other sections, pass. The hold reason is `VISION.md immutable constraints
   changed: a human merges this`. It applies to Octoperator's own repo too, whose `VISION.md`
   says only a human edits that section. `octo-genesis-next.sh --check` now runs its VISION.md
   rules through the same helper (`--milestone <n>`), which also catches a setext heading added to
   the Roadmap. Genesis's `approval_paths` adds `.claude/`, whose committed settings decide
-  whether `genesis --next` may use the web under autopilot. `--approve` adds it to an existing
-  settings file too. `GENESIS.md` and `docs/adr/` stay out: they grant nothing, and an issue may
-  rightly add an ADR. A milestone PR touches none of these paths, so it still merges unattended.
+  whether `genesis --next` may use the web under autopilot, `/GENESIS.md`, whose `test_command`
+  drives the skeleton check, and `CLAUDE.md` (at any depth) and `/.mcp.json`, which shape what an
+  unattended Claude Code run does. `--approve` adds the missing ones to an existing settings file
+  too. `docs/adr/` stays out: an issue may rightly add an ADR. A milestone PR touches none of
+  these paths, so it still merges unattended. `octo-approval-match.sh` now ignores case
+  (Unicode case folding, as macOS's file system does), so `.Claude/settings.local.json` matches
+  `.claude/`.
   New offline tests in `scripts/test/vision.sh`, which CI runs.
 - Lifecycle steps no longer stop unattended runs on permission prompts: every command `implement`,
   `auto`, `review`, `autopilot`, and `research` tell the agent to run is one plain `gh` / `git` /
