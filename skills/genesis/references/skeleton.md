@@ -90,7 +90,8 @@ questions:
 - **Probe** — `octo-setup.sh --repo <repo>`, as setup's step 1. An `error` stops the run.
 - **Existing settings** — when `.claude/octoperator.local.md` exists and its `repo:` is
   `GENESIS.md`'s `repo` (case aside), keep it. If its `approval_paths` lacks
-  `.github/workflows/`, add that one entry with Edit and change nothing else. Any other `repo:`,
+  `.github/workflows/` or `.claude/`, add the missing entries with Edit and change nothing else.
+  Any other `repo:`,
   or none, is a file from another project: stop with `settings repo mismatch` before any label,
   so plan-epic never files issues in that repo. Genesis doesn't edit or delete it; the human
   does, then runs `--approve` again.
@@ -124,12 +125,25 @@ statuses:
 
 # Files a human must approve: auto holds any PR that touches one. This covers
 # .github/workflows/evals-guard.yml and evals-model.yml (its trigger, call cap,
-# and timeout); evals/ stays out, so PRs that only add must-fail evals merge
-# (the guard holds the rest).
+# and timeout), and .claude/'s Claude Code settings, which decide whether
+# genesis --next may use the web under autopilot; evals/ stays out, so PRs that
+# only add must-fail evals merge (the guard holds the rest).
 approval_paths:
   - ".github/workflows/"
+  - ".claude/"
 ---
 
 # Notes
 Free-form project notes for humans; Octoperator ignores this section.
 ```
+
+The two entries are the paths whose change grants an unattended run more than review can see:
+`.github/workflows/` holds what runs with the repo's secrets and what spends, and `.claude/`
+holds the committed Claude Code settings, which decide what an unattended run may do, such as
+whether `genesis --next` may use the web under autopilot (`octo-web-allowed.sh`). `GENESIS.md`
+and `docs/adr/` stay out: they grant nothing, an issue may rightly add an ADR, and `auto`'s
+review reads them like any change; a human who wants them held adds `/GENESIS.md` and
+`docs/adr/`. A milestone PR touches none of these paths (`references/next.md` step 7), so it
+still merges unattended. VISION.md's Immutable constraints need no entry: `auto` checks that
+section on every PR (`scripts/octo-vision-guard.sh`), and the rest of VISION.md stays open, so a
+milestone can add its Roadmap item.

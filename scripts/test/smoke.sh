@@ -18,7 +18,8 @@
 #                            file list is cut short), another workflow's or PR's run, and a gh
 #                            error, against a stub `gh` that runs the helper's --jq filters with jq
 #   - octo-approval-match.sh : pattern normalization, malformed patterns, matching (renames
-#                            included, genesis's entry holding the evals guard but not evals/),
+#                            included, genesis's entries holding the evals guard and .claude/
+#                            but not evals/ or a milestone's files),
 #                            and the incomplete-file-list hold, against a stub `gh`
 #   - octo-genesis-check.sh : a valid proposal, a missing section or front-matter key, an
 #                            ungrounded proposal (and one with URLs or a misplaced or misspelled
@@ -60,7 +61,8 @@
 # The helpers behind autopilot's run ledger, its P == T decision, and its web access
 # (octo-evals-metric.sh, octo-ledger-state.sh, octo-milestone-gate.sh, octo-web-allowed.sh) have
 # their own tests too: scripts/test/autopilot.sh;
-# and so does genesis --next's offline helper, octo-genesis-next.sh: scripts/test/genesis-next.sh.
+# and so does genesis --next's offline helper, octo-genesis-next.sh: scripts/test/genesis-next.sh,
+# and auto's VISION.md check, octo-vision-guard.sh: scripts/test/vision.sh.
 # The proposal fixture the genesis tests share is in scripts/test/genesis-fixture.sh.
 #
 # It deliberately never invokes a helper in a way that reaches the real gh / the network.
@@ -137,6 +139,8 @@ expect 2 "octo-milestone-gate.sh --head exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-milestone-gate.sh" --repo o/n --rate none --head
 expect 2 "octo-genesis-next.sh --branch exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-genesis-next.sh" --check --base main --branch
+expect 2 "octo-vision-guard.sh --head exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-vision-guard.sh" --base main --head
 expect 2 "octo-approval-match.sh --pr exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-approval-match.sh" --pattern a --repo o/n --pr
 expect 2 "octo-approval-match.sh with no --pattern exits 2" \
@@ -460,10 +464,30 @@ matches '**/*.tf' 'main.tf modules/net/vpc.tf infra/main.tf'
 matches '.github/workflows/' '.github/workflows/ci.yml'
 matches 'modules/**/vpc.tf' 'modules/net/vpc.tf'
 matches '/infra' 'infra/main.tf'
-# Genesis's approval_paths entry holds a PR that changes the evals guard, not one adding an eval.
+# Genesis's approval_paths (skeleton.md → Settings) holds a PR that changes the evals guard or the
+# Claude Code settings (they decide whether genesis --next may use the web), not one adding an
+# eval or a milestone's own files, so milestone PRs still merge unattended.
+gen_paths="$(awk '/^approval_paths:$/ { on = 1; next } on && /^  - "/ { print; next } on { exit }' \
+  "$SCRIPTS_DIR/../skills/genesis/references/skeleton.md" | sed 's/^  - "//; s/"$//' \
+  | paste -sd ' ' -)"
+expect 0 "genesis's approval_paths are .github/workflows/ and .claude/" \
+  test "$gen_paths" = ".github/workflows/ .claude/"
 printf '%s\t\n' .github/workflows/evals-guard.yml evals/recall/check.sh evals/guard.sh \
-  >"$STUB_FILES"
-matches '.github/workflows/' '.github/workflows/evals-guard.yml'
+  .claude/settings.json .claude/settings.local.json docs/prd.md docs/research.md VISION.md \
+  evals/export-200-turns/scenario.md evals/export-200-turns/check.sh src/.claude/x GENESIS.md \
+  docs/adr/0002-cache.md >"$STUB_FILES"
+# shellcheck disable=SC2086 # one pattern per word, as genesis writes them
+approval $gen_paths
+expect 0 "genesis's approval_paths match only the guard and .claude/" test "$am_rc" -eq 1 \
+  -a "$am_out" = ".github/workflows/evals-guard.yml$tab.github/workflows/
+.claude/settings.json$tab.claude/
+.claude/settings.local.json$tab.claude/"
+printf '%s\t\n' docs/prd.md docs/research.md VISION.md evals/export-200-turns/scenario.md \
+  evals/export-200-turns/check.sh >"$STUB_FILES"
+# shellcheck disable=SC2086
+approval $gen_paths
+expect 0 "a milestone's files match none of genesis's approval_paths" \
+  test "$am_rc" -eq 0 -a -z "$am_out"
 printf '%s\t\n' README.md main.tf main.tfvars modules/net/vpc.tf infra/main.tf infra-old/x \
   infrastructure/x deploy/infra/run.sh .github/workflows/ci.yml xgithub/workflows/ci.yml \
   >"$STUB_FILES"
