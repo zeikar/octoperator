@@ -137,7 +137,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-ledger-state.sh" --repo "$REPO" --issue
 
 It prints `entries: <k> (<where the walk stopped>)`, `skipped: <none | counts by author
 association>`, `streak: <s>/<N>` (the newest entries without a gain), `high-water: none | <P>`
-(the P this run's entry must exceed to gain, ledger.md → Convergence), `all-pass: yes|no`,
+(the P this run's entry must exceed to gain, ledger.md → Convergence; with `--resume`, this run's
+P, which the reset entry carries), `all-pass: yes|no`,
 `planning-failed: none | <tip> <reason>` (the last run's next-milestone planning failed at that
 tip), and `decision: observe` (converged) or `build`. Exit 3 means the ledger couldn't be read. With no
 ledger yet, leave out `--issue`. When `skipped` isn't `none`, report it — "N entry-shaped comments
@@ -156,7 +157,8 @@ Parse and validate flags:
   value above `10` is passed, clamp to `10` and say so; reject a non-positive value.
 - `--max M` — parallelism cap passed through to `auto` per cycle (default `3`).
 - `--resume` — end observe mode: append a `reset` entry to the ledger, then run normally (step 3).
-  Harmless when not converged — it only restarts the no-gain count.
+  Harmless when not converged — it restarts the no-gain count and the high-water mark, at this
+  run's P.
 - `--dry-run` — plan only, no mutation.
 
 ### 2. Dry-run gate (BEFORE any mutation)

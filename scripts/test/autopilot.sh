@@ -471,9 +471,11 @@ HW=4 AP=yes decides "P == T over a converged ledger: all-pass, beside the ledger
 state --metric 4/6
 HW=4 decides "the same ledger, P < T: observe" "3 (all)" none 3/3 observe
 state --metric 4/6 --resume
-decides "--resume: the walk is empty, so build" "0 (since --resume)" none 0/3 build
+HW=4 decides "--resume: the walk is empty, so build" "0 (since --resume)" none 0/3 build
 state --metric 6/6 --resume
-AP=yes decides "--resume with P == T: all-pass, beside build" "0 (since --resume)" none 0/3 build
+HW=6 AP=yes decides "--resume with P == T: all-pass, beside build" "0 (since --resume)" none 0/3 build
+state --metric none --resume
+decides "--resume with no metric: no high-water mark" "0 (since --resume)" none 0/3 build
 state --metric none --runs 2
 HW=4 decides "--runs sets N" "3 (all)" none 3/2 observe
 ledger "$O|$(e run 0 "$(m 4 6)")" "$O|$(e run 0 "$(m 4 6)")" "$O|$(e run 0 "$(m 6 6)")"
@@ -490,6 +492,8 @@ nolog
 decides "no ledger yet: build" "0 (no ledger yet)" none 0/3 build
 nolog --metric 2/2
 AP=yes decides "no ledger yet, P == T: all-pass, beside build" "0 (no ledger yet)" none 0/3 build
+nolog --metric 3/6 --resume
+HW=3 decides "no ledger yet, --resume: the mark is this run's P" "0 (no ledger yet)" none 0/3 build
 
 # Validity: only an allowed author's well-formed entry counts.
 ledger "$O|$(e run 0 null)" "MEMBER|$(e run 0 null)" "COLLABORATOR|$(e run 0 null)" \
@@ -537,7 +541,7 @@ state --metric 5/5
 HW=5 AP=yes PF="$T7 milestone invalid" decides "observe entries after it are passed over" \
   "0 (since the last all-pass entry)" none 0/3 build
 state --metric 5/5 --resume
-AP=yes decides "--resume: none" "0 (since --resume)" none 0/3 build
+HW=5 AP=yes decides "--resume: none" "0 (since --resume)" none 0/3 build
 ledger "$O|$(pf "$T7" "milestone invalid")" "$O|$(e reset 0 "$(m 5 5)")"
 state --metric 5/5
 HW=5 AP=yes decides "a reset after it: none" "0 (since the last reset)" none 0/3 build

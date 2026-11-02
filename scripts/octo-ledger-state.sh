@@ -29,7 +29,8 @@
 #   entries: <k> (since the last reset | since the last all-pass entry | since --resume | all)
 #   skipped: none | <count> (<authorAssociation>), …   (entry-shaped comments by other authors)
 #   streak: <entries without a gain, newest first>/<N>
-#   high-water: none | <P>   (the mark this run's entry must exceed; none with --resume)
+#   high-water: none | <P>   (the mark this run's entry must exceed; with --resume, --metric's P,
+#                            which the reset entry about to be appended carries)
 #   all-pass: yes | no
 #   planning-failed: none | <tip> <reason, at most 80 characters on one line>
 #   decision: observe | build
@@ -58,21 +59,23 @@ done
 int='(0|[1-9][0-9]{0,8})'
 [[ "$RUNS" =~ ^$int$ ]] && [ "$RUNS" -ge 1 ] || { echo "--runs must be a positive integer" >&2; exit 2; }
 [ -z "$ISSUE" ] || [[ "$ISSUE" =~ ^$int$ ]] || { echo "--issue must be a number" >&2; exit 2; }
-all_pass=no
+all_pass=no resume_mark=none
 if [ "$METRIC" != none ]; then
   [[ "$METRIC" =~ ^$int/$int$ ]] && [ "${BASH_REMATCH[1]}" -le "${BASH_REMATCH[2]}" ] \
     && [ "${BASH_REMATCH[2]}" -ge 1 ] \
     || { echo "--metric must be P/T (whole numbers, P <= T, T >= 1) or none" >&2; exit 2; }
   [ "${BASH_REMATCH[1]}" -eq "${BASH_REMATCH[2]}" ] && all_pass=yes
+  # --resume appends a reset entry carrying this metric, so its P is the mark the run must beat.
+  [ "$RESUME" = false ] || resume_mark="${BASH_REMATCH[1]}"
 fi
 
 if [ -z "$ISSUE" ]; then
-  printf 'entries: 0 (no ledger yet)\nskipped: none\nstreak: 0/%s\nhigh-water: none\nall-pass: %s\nplanning-failed: none\ndecision: build\n' \
-    "$RUNS" "$all_pass"
+  printf 'entries: 0 (no ledger yet)\nskipped: none\nstreak: 0/%s\nhigh-water: %s\nall-pass: %s\nplanning-failed: none\ndecision: build\n' \
+    "$RUNS" "$resume_mark" "$all_pass"
   exit 0
 fi
 
-# gh's --jq has no --arg, so RUNS, ALLPASS, and RESUME are written in as literals. Comments
+# gh's --jq has no --arg, so RUNS, ALLPASS, RESUME, and MARKP are written in as literals. Comments
 # come oldest first. Every type test sits in an `if`, so a malformed entry never makes jq fail.
 filter='
 def keys9: ["time", "mode", "cycles_used", "merged", "held", "proposals_filed", "metric",
@@ -117,10 +120,11 @@ def gains($mark): if .kind == "observe" then false
 | "entries: \($stop) (\($why))",
   "skipped: \(if $skipped == "" then "none" else $skipped end)",
   "streak: \($streak)/RUNS",
-  "high-water: \(if RESUME then "none" else $v[0:$stop + 1] | mark // "none" end)",
+  "high-water: \(if RESUME then "MARKP" else $v[0:$stop + 1] | mark // "none" end)",
   "all-pass: ALLPASS",
   "planning-failed: \($failed)",
   "decision: \(if $streak >= RUNS then "observe" else "build" end)"'
+filter="${filter//MARKP/$resume_mark}"
 filter="${filter//RESUME/$RESUME}"
 filter="${filter//ALLPASS/$all_pass}"
 filter="${filter//RUNS/$RUNS}"

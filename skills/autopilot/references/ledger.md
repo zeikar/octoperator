@@ -54,7 +54,7 @@ mark restarts; with no numeric value among them there is no mark. The entry **ga
 - otherwise (no evals, a `null` metric, or no mark yet), when `merged` is at least 1.
 
 `octo-ledger-state.sh` prints the mark this run's entry would have to exceed as `high-water:`
-(`none` without one, and with `--resume`).
+(`none` without one; with `--resume`, this run's P (the reset entry's), or `none` with no metric).
 
 Walk the valid entries newest first, stopping at the first `reset` or all-pass entry. Autopilot is
 **converged** when the walk finds at least N entries before it stops and none of the newest N
