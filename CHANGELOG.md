@@ -301,9 +301,10 @@ All notable changes to Octoperator are documented in this file. The format is ba
   repo too. `octo-genesis-next.sh --check` now runs its VISION.md rules through the same helper
   (`--milestone <n>`, which also needs a Roadmap item for the milestone). The genesis proposal
   check runs the guard's rule on the proposed `VISION.md` too (`--plain-roadmap <file>`), so a
-  template `<placeholder>` or a `Result<T>` code span left in the Roadmap fails at the human
-  checkpoint rather than holding every later change; `genesis --next` stops with `milestone
-  invalid` at once on a merge-base Roadmap it can't fix. Genesis's
+  template `<placeholder>` or a `Result<T>` code span left in the Roadmap, or a NUL, bare CR,
+  control byte, or Unicode line break anywhere in the file, fails at the human checkpoint
+  rather than holding every later change; `genesis --next` stops with `milestone invalid` at
+  once on a merge-base Roadmap it can't fix. Genesis's
   `approval_paths` adds `.claude/`, whose committed settings decide whether `genesis --next` may
   use the web under autopilot, `/GENESIS.md`, whose `test_command` drives the skeleton check, and
   `CLAUDE.md` and `CLAUDE.local.md` (at any depth) and `/.mcp.json`, which shape what an

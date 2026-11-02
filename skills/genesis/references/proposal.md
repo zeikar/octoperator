@@ -319,6 +319,7 @@ Rules:
   change cites evidence, as Octoperator's own does. **Checked:** every Roadmap line is plain
   text, by the vision guard's own rule (`octo-vision-guard.sh --plain-roadmap`): no
   `<placeholder>` left from the template, no line that opens with `#` (even an issue ref), and no
-  `<` before a letter, even in a code span (`Result<T>`). The full rule is in `next.md`, step 7's
+  `<` before a letter, even in a code span (`Result<T>`); and no NUL, bare CR, other control
+  byte, or Unicode line break anywhere in the file. The full rule is in `next.md`, step 7's
   `VISION.md` item. The guard holds every later change to a `VISION.md` whose merge base fails
   it, and no unattended run can fix that, so it fails here, at the checkpoint.
