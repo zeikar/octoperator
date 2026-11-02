@@ -7,18 +7,23 @@
 #   - octo-evals-metric.sh : the evals metric read, against a stub `gh` that runs the helper's
 #                            --jq filters with jq: no evals.yml on the default branch, a metric
 #                            read across the run's jobs (beside other annotations, on a default
-#                            branch not named main), P == T, no completed run (none listed, or
-#                            the workflow unknown to GitHub), no annotation, two (ambiguous), a
-#                            title that only nearly matches, malformed messages (leading zero,
-#                            extra space, trailing text, a newline, not a number), P > T, T = 0,
-#                            and gh errors, each printing `metric: null` with the reason and
-#                            exiting 0
+#                            branch not named main), P == T, a dispatch run, the run filter
+#                            (a fork's pull_request run, or a push from another repo, on the
+#                            branch is skipped for an older matching run), no completed run (none
+#                            listed, none matching, or the workflow unknown to GitHub), no
+#                            annotation, two (ambiguous), a title that only nearly matches, a
+#                            level other than notice, malformed messages (leading zero, extra
+#                            space, trailing text, a newline, not a number), P > T, T = 0, a
+#                            conclusion that disagrees (a forged P == T on a failed run, a forged
+#                            P < T on a passing one, a cancelled run), and gh errors, each
+#                            printing `metric: null` and `rate: none` with the reason and exiting 0
 #   - octo-ledger-state.sh : the convergence decision against a stub ledger: the merge rule
 #                            without a metric, the P-gain rule (an idle merge is no gain, P rising
 #                            is one without a merge, P falling or T rising is not, a metric on
 #                            one side only falls back to merges, observe entries never gain), the
-#                            walk stopping at a reset or an all-pass entry, the all-pass decision
-#                            first (over a converged ledger, and with --resume), --resume, no
+#                            walk stopping at a reset or an all-pass entry, the all-pass line
+#                            beside the ledger's own decision (over a converged ledger, and with
+#                            --resume), --resume, no
 #                            ledger yet, the validity rules (author association, a malformed or
 #                            incomplete entry, an unknown kind, two blocks, a non-numeric metric),
 #                            a gh error, and bad arguments
@@ -82,7 +87,7 @@ case "$cmd" in
       */actions/workflows/evals.yml/runs)
         [ "${ST_FAIL:-}" != runs ] || fail
         [ -z "${ST_NORUNS:-}" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
-        case "$params" in *" branch=$ST_BRANCH "*"status=completed"*) ;;
+        case "$params" in *" branch=$ST_BRANCH "*"status=completed per_page=20"*) ;;
           *) echo "stub: bad params:$params" >&2; exit 9 ;; esac
         f="$ST_DIR/runs.json" ;;
       */actions/runs/*/jobs*) [ "${ST_FAIL:-}" != jobs ] || fail
@@ -102,11 +107,18 @@ export ST_DIR ST_BRANCH=trunk
 echo "• octo-evals-metric.sh (offline, stub gh)"
 printf '{"defaultBranchRef":{"name":"trunk"}}\n' >"$ST_DIR/repo.json"
 URL=https://github.com/o/n/actions/runs/77
-# runs <id conclusion>? : the latest completed run, or none.
+# runs [<id>:<conclusion>[:<event>[:<head repo>]]]... : the completed runs, newest first (event
+# push and head repo o/n unless given), or none.
 runs() {
-  if [ $# -eq 0 ]; then echo '{"total_count":0,"workflow_runs":[]}' >"$ST_DIR/runs.json"; return; fi
-  printf '{"total_count":1,"workflow_runs":[{"id":%s,"conclusion":"%s","html_url":"%s"}]}\n' \
-    "$1" "$2" "https://github.com/o/n/actions/runs/$1" >"$ST_DIR/runs.json"
+  local sep="" body="" r id c ev hr
+  for r in "$@"; do
+    IFS=: read -r id c ev hr <<<"$r"
+    body="$body$sep$(printf '{"id":%s,"conclusion":"%s","html_url":"%s","event":"%s",%s}' \
+      "$id" "$c" "https://github.com/o/n/actions/runs/$id" "${ev:-push}" \
+      "\"head_repository\":{\"full_name\":\"${hr:-o/n}\"}")"
+    sep=","
+  done
+  printf '{"total_count":%s,"workflow_runs":[%s]}\n' "$#" "$body" >"$ST_DIR/runs.json"
 }
 # jobs <run> <check-run id>... : that run's jobs.
 jobs() {
@@ -124,68 +136,106 @@ metric() {
   out="$(PATH="$stub:$PATH" bounded 10 bash "$METRIC" --repo o/n 2>/dev/null)"
   rc=$?
 }
-# reads <label> <source line> : the helper exited 0 with no metric and that source.
-reads_null() { same "$1" "0|metric: null|source: $2" "$rc|$(printf '%s' "$out" | paste -sd '|' -)"; }
+# reads_null <label> <source line> : the helper exited 0 with no metric and that source.
+reads_null() {
+  same "$1" "0|metric: null|rate: none|source: $2" "$rc|$(printf '%s' "$out" | paste -sd '|' -)"
+}
+# reads <label> <P> <T> <run id> <conclusion> : the helper exited 0 with that metric.
+reads() {
+  same "$1" \
+    "0|metric: {\"passed\":$2,\"total\":$3}|rate: $2/$3|source: run $4 ($5) https://github.com/o/n/actions/runs/$4: $2/$3 evals pass" \
+    "$rc|$(printf '%s' "$out" | paste -sd '|' -)"
+}
 
 ST_NOWF=1 metric
 reads_null "no evals.yml on the default branch: no evals workflow" "no evals workflow"
-runs 77 failure
+# notice <title> <message> : one notice annotation's JSON.
+notice() { printf '{"annotation_level":"notice","title":"%s","message":"%s"}' "$1" "$2"; }
+runs 77:failure
 jobs 77 501 502
-ann 501 '[{"title":"other","message":"x"},{"title":"evals-metric","message":"passed=4 total=6"}]'
-ann 502 '[{"title":"evals-guard-base","message":"abc"}]'
+ann 501 "[$(notice other x),$(notice evals-metric 'passed=4 total=6')]"
+ann 502 "[$(notice evals-guard-base abc)]"
 metric
-same "a failing run's metric, read across its jobs beside other annotations" \
-  "0|metric: {\"passed\":4,\"total\":6}|source: run 77 (failure) $URL: 4/6 evals pass" \
-  "$rc|$(printf '%s' "$out" | paste -sd '|' -)"
-runs 78 success
+reads "a failing run's metric, read across its jobs beside other annotations" 4 6 77 failure
+runs 78:success
 jobs 78 503
-ann 503 '[{"title":"evals-metric","message":"passed=5 total=5"}]'
+ann 503 "[$(notice evals-metric 'passed=5 total=5')]"
 metric
-same "every eval passing: P == T" \
-  "0|metric: {\"passed\":5,\"total\":5}|source: run 78 (success) https://github.com/o/n/actions/runs/78: 5/5 evals pass" \
-  "$rc|$(printf '%s' "$out" | paste -sd '|' -)"
+reads "every eval passing: P == T" 5 5 78 success
+runs 78:success:workflow_dispatch
+metric
+reads "a workflow_dispatch run counts" 5 5 78 success
+runs 79:failure:pull_request:fork/n 80:success:push:fork/n 78:success
+jobs 79 504
+ann 504 "[$(notice evals-metric 'passed=6 total=6')]"
+metric
+reads "a fork's pull_request run and another repo's push on the branch are skipped" 5 5 78 success
+runs 78:success:push:O/N
+metric
+reads "the head repository compares case-insensitively" 5 5 78 success
+NOMATCH="unreadable: no completed push or dispatch run of evals.yml on trunk (newest 20 checked)"
+runs 79:failure:pull_request:fork/n 81:success:schedule
+metric
+reads_null "only runs the filter skips: no completed run" "$NOMATCH"
 runs
 metric
-reads_null "no completed run on the default branch" "unreadable: no completed evals.yml run on trunk"
+reads_null "no completed run on the default branch" "$NOMATCH"
 ST_NORUNS=1 metric
-reads_null "a workflow GitHub never registered (404): no completed run" \
-  "unreadable: no completed evals.yml run on trunk"
-runs 77 cancelled
-ann 501 '[{"title":"other","message":"passed=4 total=6"}]'
+reads_null "a workflow GitHub never registered (404): no completed run" "$NOMATCH"
+runs 77:cancelled
+ann 501 "[$(notice other 'passed=4 total=6')]"
 ann 502 '[]'
 metric
 reads_null "a run with no evals-metric annotation" \
   "unreadable: no evals-metric annotation on run 77 (cancelled) $URL"
-runs 77 failure
-ann 501 '[{"title":"evals-metric ","message":"passed=4 total=6"},{"title":"Evals-metric","message":"passed=4 total=6"}]'
+runs 77:failure
+ann 501 "[$(notice 'evals-metric ' 'passed=4 total=6'),$(notice Evals-metric 'passed=4 total=6')]"
 metric
 reads_null "titles that only nearly match are not the metric" \
   "unreadable: no evals-metric annotation on run 77 (failure) $URL"
-ann 501 '[{"title":"evals-metric","message":"passed=4 total=6"}]'
-ann 502 '[{"title":"evals-metric","message":"passed=6 total=6"}]'
+ann 501 '[{"annotation_level":"warning","title":"evals-metric","message":"passed=4 total=6"}]'
+metric
+reads_null "an evals-metric annotation that is not a notice is not the metric" \
+  "unreadable: no evals-metric annotation on run 77 (failure) $URL"
+ann 501 "[$(notice evals-metric 'passed=6 total=6')]"
+metric
+reads_null "a forged P == T on a failed run (run.sh never printed): disagrees" \
+  "unreadable: metric disagrees with run conclusion on run 77 (failure) $URL: passed=6 total=6"
+runs 77:success
+ann 501 "[$(notice evals-metric 'passed=4 total=6')]"
+metric
+reads_null "a forged P < T on a passing run: disagrees" \
+  "unreadable: metric disagrees with run conclusion on run 77 (success) $URL: passed=4 total=6"
+runs 77:cancelled
+metric
+reads_null "a cancelled run's metric is not trusted" \
+  "unreadable: metric disagrees with run conclusion on run 77 (cancelled) $URL: passed=4 total=6"
+runs 77:failure
+ann 501 "[$(notice evals-metric 'passed=4 total=6')]"
+ann 502 "[$(notice evals-metric 'passed=6 total=6')]"
 metric
 reads_null "two evals-metric annotations (one per job): ambiguous" \
   "unreadable: 2 evals-metric annotations on run 77 (failure) $URL (ambiguous)"
 ann 502 '[]'
 for bad in 'passed=04 total=6' 'passed=4  total=6' 'passed=4 total=6 ' 'passed=4 total=six' \
     'passed=-1 total=6' 'passed=4 total=6 passed=6' 'passed=1234567890 total=1234567890'; do
-  ann 501 "[{\"title\":\"evals-metric\",\"message\":\"$bad\"}]"
+  ann 501 "[$(notice evals-metric "$bad")]"
   metric
   reads_null "a malformed message ($bad)" \
     "unreadable: malformed evals-metric annotation on run 77 (failure) $URL: \"$bad\""
 done
-ann 501 '[{"title":"evals-metric","message":"passed=4 total=6\npassed=6 total=6"}]'
+ann 501 "[$(notice evals-metric 'passed=4 total=6\npassed=6 total=6')]"
 metric
 reads_null "a message holding a newline counts once, as malformed" \
   "unreadable: malformed evals-metric annotation on run 77 (failure) $URL: \"passed=4 total=6\\npassed=6 total=6\""
-ann 501 '[{"title":"evals-metric","message":"passed=7 total=6"}]'
+ann 501 "[$(notice evals-metric 'passed=7 total=6')]"
 metric
 reads_null "P > T" "unreadable: evals-metric says passed=7 > total=6 on run 77 (failure) $URL"
-ann 501 '[{"title":"evals-metric","message":"passed=0 total=0"}]'
+ann 501 "[$(notice evals-metric 'passed=0 total=0')]"
 metric
 reads_null "T = 0 (no script evals)" \
   "unreadable: evals-metric says total=0 (no script evals) on run 77 (failure) $URL"
-ann 501 '[{"title":"evals-metric","message":"passed=4 total=6"}]'
+ann 501 "[$(notice evals-metric 'passed=4 total=6')]"
 for step in repo contents runs jobs annotations; do
   ST_FAIL=$step metric
   reads_null "a gh error reading $step: no metric, exit 0" \
@@ -193,6 +243,8 @@ for step in repo contents runs jobs annotations; do
 done
 out="$(bash "$METRIC" 2>/dev/null)"; rc=$?
 same "no --repo exits 2" "2|" "$rc|$out"
+out="$(bash "$METRIC" --repo 'o/n"' 2>/dev/null)"; rc=$?
+same "a --repo with a quote exits 2" "2|" "$rc|$out"
 
 echo "• octo-ledger-state.sh (offline, stub gh)"
 # e <kind> <merged> <metric json> : one entry's JSON.
@@ -222,9 +274,10 @@ state() {
   rc=$?
   out="$(printf '%s' "$out" | paste -sd '|' -)"
 }
-# decides <label> <entries> <skipped> <streak> <decision> : the helper exited 0 with these lines.
+# [AP=yes] decides <label> <entries> <skipped> <streak> <decision> : the helper exited 0 with
+# these lines, and `all-pass: no` (or $AP).
 decides() {
-  same "$1" "0|entries: $2|skipped: $3|streak: $4|decision: $5" "$rc|$out"
+  same "$1" "0|entries: $2|skipped: $3|streak: $4|all-pass: ${AP:-no}|decision: $5" "$rc|$out"
 }
 O=OWNER
 m() { printf '{"passed": %s, "total": %s}' "$1" "$2"; }
@@ -288,15 +341,20 @@ decides "the walk stops at an all-pass entry: a new milestone starts the count a
 ledger "$O|$(e observe 0 "$(m 4 6)")" "$O|$(e observe 0 "$(m 4 6)")" \
   "$O|$(e observe 0 "$(m 4 6)")"
 state --metric 6/6
-decides "P == T over a converged ledger: all-pass" "3 (all)" none 3/3 all-pass
+AP=yes decides "P == T over a converged ledger: all-pass, beside the ledger's observe" "3 (all)" \
+  none 3/3 observe
 state --metric 4/6
 decides "the same ledger, P < T: observe" "3 (all)" none 3/3 observe
 state --metric 4/6 --resume
 decides "--resume: the walk is empty, so build" "0 (since --resume)" none 0/3 build
 state --metric 6/6 --resume
-decides "--resume with P == T: all-pass" "0 (since --resume)" none 0/3 all-pass
+AP=yes decides "--resume with P == T: all-pass, beside build" "0 (since --resume)" none 0/3 build
 state --metric none --runs 2
 decides "--runs sets N" "3 (all)" none 3/2 observe
+ledger "$O|$(e run 0 "$(m 4 6)")" "$O|$(e run 0 "$(m 4 6)")" "$O|$(e run 0 "$(m 6 6)")"
+state --metric 6/6
+AP=yes decides "P == T again after an all-pass entry: the walk is empty, so build" \
+  "0 (since the last all-pass entry)" none 0/3 build
 # nolog <args...> : run the helper with no --issue; sets out / rc.
 nolog() {
   out="$(PATH="$stub:$PATH" bounded 10 bash "$STATE" --repo o/n --runs 3 "$@" 2>/dev/null)"
@@ -306,7 +364,7 @@ nolog() {
 nolog
 decides "no ledger yet: build" "0 (no ledger yet)" none 0/3 build
 nolog --metric 2/2
-decides "no ledger yet, P == T: all-pass" "0 (no ledger yet)" none 0/3 all-pass
+AP=yes decides "no ledger yet, P == T: all-pass, beside build" "0 (no ledger yet)" none 0/3 build
 
 # Validity: only an allowed author's well-formed entry counts.
 ledger "$O|$(e run 0 null)" "MEMBER|$(e run 0 null)" "COLLABORATOR|$(e run 0 null)" \

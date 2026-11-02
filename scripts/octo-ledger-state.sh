@@ -14,16 +14,16 @@
 # empty, as the reset entry about to be appended ends it). Converged: the newest N entries of
 # the walk exist and none gains. With no --issue (no ledger yet) the walk is empty.
 #
-# --metric is this run's pass rate (default none). The decision, in this order:
-#   all-pass   the metric is numeric and all-pass: hand off to next-milestone planning
-#   observe    converged
-#   build      anything else
+# --metric is this run's pass rate (default none), octo-evals-metric.sh's `rate:` value. The
+# decision is `observe` when converged and `build` otherwise; `all-pass` reports whether every
+# eval passes, which the skill checks first (Run ledger → All evals pass).
 #
-# Prints four lines:
+# Prints five lines:
 #   entries: <k> (since the last reset | since the last all-pass entry | since --resume | all)
 #   skipped: none | <count> (<authorAssociation>), …   (entry-shaped comments by other authors)
 #   streak: <entries without a gain, newest first>/<N>
-#   decision: all-pass | observe | build
+#   all-pass: yes | no
+#   decision: observe | build
 # Read-only: one `gh issue view`.
 #
 # Exit codes: 0 decided, 2 bad arguments, 3 a gh error (the ledger is unreadable).
@@ -49,24 +49,21 @@ done
 int='(0|[1-9][0-9]{0,8})'
 [[ "$RUNS" =~ ^$int$ ]] && [ "$RUNS" -ge 1 ] || { echo "--runs must be a positive integer" >&2; exit 2; }
 [ -z "$ISSUE" ] || [[ "$ISSUE" =~ ^$int$ ]] || { echo "--issue must be a number" >&2; exit 2; }
-all_pass=false m=null
+all_pass=no
 if [ "$METRIC" != none ]; then
   [[ "$METRIC" =~ ^$int/$int$ ]] && [ "${BASH_REMATCH[1]}" -le "${BASH_REMATCH[2]}" ] \
     && [ "${BASH_REMATCH[2]}" -ge 1 ] \
     || { echo "--metric must be P/T (whole numbers, P <= T, T >= 1) or none" >&2; exit 2; }
-  m="{\"passed\":${BASH_REMATCH[1]},\"total\":${BASH_REMATCH[2]}}"
-  [ "${BASH_REMATCH[1]}" -eq "${BASH_REMATCH[2]}" ] && all_pass=true
+  [ "${BASH_REMATCH[1]}" -eq "${BASH_REMATCH[2]}" ] && all_pass=yes
 fi
 
 if [ -z "$ISSUE" ]; then
-  decision=build
-  [ "$all_pass" = false ] || decision=all-pass
-  printf 'entries: 0 (no ledger yet)\nskipped: none\nstreak: 0/%s\ndecision: %s\n' "$RUNS" \
-    "$decision"
+  printf 'entries: 0 (no ledger yet)\nskipped: none\nstreak: 0/%s\nall-pass: %s\ndecision: build\n' \
+    "$RUNS" "$all_pass"
   exit 0
 fi
 
-# gh's --jq has no --arg, so RUNS, the metric, and RESUME are written in as literals. Comments
+# gh's --jq has no --arg, so RUNS, ALLPASS, and RESUME are written in as literals. Comments
 # come oldest first. Every type test sits in an `if`, so a malformed entry never makes jq fail.
 filter='
 def keys9: ["time", "mode", "cycles_used", "merged", "held", "proposals_filed", "metric",
@@ -101,14 +98,13 @@ def gains($prev): if .kind == "observe" then false
    else "since the last all-pass entry" end) as $why
 | [range(0; $stop) as $i | $v[$i] | gains($v[$i + 1])] as $g
 | ([range(0; $g | length) | select($g[.])] | .[0] // ($g | length)) as $streak
-| (METRIC) as $m
 | "entries: \($stop) (\($why))",
   "skipped: \(if $skipped == "" then "none" else $skipped end)",
   "streak: \($streak)/RUNS",
-  "decision: \(if ($m | num) and ($m.passed == $m.total) then "all-pass"
-    elif $streak >= RUNS then "observe" else "build" end)"'
+  "all-pass: ALLPASS",
+  "decision: \(if $streak >= RUNS then "observe" else "build" end)"'
 filter="${filter//RESUME/$RESUME}"
-filter="${filter//METRIC/$m}"
+filter="${filter//ALLPASS/$all_pass}"
 filter="${filter//RUNS/$RUNS}"
 
 err="$(mktemp)" && [ -n "$err" ] || { echo "mktemp failed" >&2; exit 3; }

@@ -135,18 +135,23 @@ All notable changes to Octoperator are documented in this file. The format is ba
   new `scripts/octo-evals-metric.sh` reads the latest completed default-branch run of that
   workflow, its jobs, and their check runs' annotations. It trusts exactly one annotation titled
   `evals-metric` whose message is exactly `passed=<P> total=<T>`, with P ≤ T and T ≥ 1, and the
-  entry records `{"passed": P, "total": T}`. Otherwise (no evals workflow, no completed run, no
-  annotation, more than one, a malformed one, or a gh error) `metric` stays `null`, the reason is
-  reported, and the run goes on. Convergence now uses the metric: when an entry and the previous
+  entry records `{"passed": P, "total": T}`. It reads only push and `workflow_dispatch` runs
+  from this repo (never a fork's `pull_request` run), only `notice` annotations, and only when
+  the run's conclusion agrees (`success` for P == T, `failure` for P < T), so a notice forged by
+  setup code on a run where `run.sh` never printed can't claim every eval passes. Otherwise (no
+  evals workflow, no completed run, no annotation, more than one, a malformed one, a conclusion
+  that disagrees, or a gh error) `metric` stays `null`, the reason is reported, and the run goes
+  on. It also prints `rate: P/T` (or `none`) for the ledger helper's `--metric`. Convergence now uses the metric: when an entry and the previous
   valid one both have it, the entry gains only if P rose, so merges that move no eval no longer
   count; otherwise `merged ≥ 1` still decides. `observe` entries never gain, and the count restarts
   at a `reset` or all-pass entry. The new `scripts/octo-ledger-state.sh` applies these rules and
-  prints the decision. When every eval passes (P == T), the run prints `autopilot: all evals pass →
-  planning next milestone` and hands off to next-milestone planning. That planning (#93) isn't
-  built yet, so for now the run observes and ends with `autopilot: stopped: next-milestone planning
-  not built yet (#93)`. If a next-milestone PR (an open `milestone-*` branch from this repo) is
-  already open, it observes and ends with `stopped: next-milestone PR #<pr> open`. Neither ends a
-  schedule. `--dry-run` prints the metric's source run and P/T, `no evals workflow`, or why the
+  prints whether every eval passes and the build/observe decision. When every eval passes
+  (P == T), the run prints the progress line `autopilot: all evals pass → planning next
+  milestone`. If a next-milestone PR (an open `milestone-*` branch from this repo) is open, it
+  observes, ends with `stopped: next-milestone PR #<pr> open`, and leaves the schedule running.
+  Otherwise, until next-milestone planning (#93) is built, it goes on by the ledger's own
+  decision, so `ready` work is still built and a semi run with nothing to do ends `nothing to do`.
+  The entry records P == T either way, so the count restarts. `--dry-run` prints the metric's source run and P/T, `no evals workflow`, or why the
   rate is unreadable. A repo without the workflow, Octoperator's own included, behaves as before.
   New offline tests in `scripts/test/autopilot.sh`, which CI runs.
 - README → "Running continuously": copy-paste recipes for re-running `autopilot` with Claude

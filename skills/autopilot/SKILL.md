@@ -45,7 +45,7 @@ not caught here — `auto`'s `approval_paths` hold (see
 
 Either mode drops into **observe mode** once the ledger shows convergence (see Run ledger): research
 proposes without filing, and nothing is built or merged until a human passes `--resume`. In a repo
-whose evals all pass, it hands off to next-milestone planning instead (Run ledger → All evals pass).
+whose evals all pass, it plans the next milestone instead (Run ledger → All evals pass).
 
 ## Untrusted input rule
 
@@ -79,8 +79,8 @@ hold reasons), then a fenced `json` block in this fixed shape:
   as Octoperator's own, has none, so its entries keep `null`.
 - `cost_usd` — always `null`: autopilot can't read its own spend. A `claude -p --output-format json`
   run reports it as `total_cost_usd`, where a wrapper could pick it up.
-- `kind` — `run` (a normal run), `observe` (a converged or all-pass run, step 3), or `reset`
-  (`--resume`).
+- `kind` — `run` (a normal run), `observe` (a converged run, or an all-pass run while a
+  next-milestone PR is open, step 3), or `reset` (`--resume`).
 
 **Valid entries.** People comment on the ledger too, and on a public repo anyone can. Count a
 comment as an entry only if its `authorAssociation` is `OWNER`, `MEMBER`, or `COLLABORATOR` and its
@@ -111,29 +111,32 @@ there, and the runs spent waiting while every eval passed are not held against i
 **Evals metric.** A repo has the evals workflow when its default branch holds
 `.github/workflows/evals.yml`, the file genesis writes. Autopilot detects it by that path, not by
 the workflow's name, which the repo can change and which `Evals (model)` nearly shares. The metric
-is read from that workflow's latest completed run on the default branch, the run `research` reads
-for `eval` evidence: the run's jobs, then their check runs' annotations. Only exactly one
-annotation titled `evals-metric` whose message is exactly `passed=<P> total=<T>`, with P ≤ T and
-T ≥ 1, counts. Anything else leaves `metric` `null` with the reason and never fails the run. One
-plain call does it:
+is read from that workflow's latest completed default-branch run that a `push` or
+`workflow_dispatch` in this repo started (never a fork's `pull_request` run): its jobs, then their
+check runs' annotations. Only exactly one `notice` annotation titled `evals-metric` whose message
+is exactly `passed=<P> total=<T>`, with P ≤ T and T ≥ 1, counts, and only when the run's
+conclusion agrees (`run.sh` exits 0 exactly when every eval passes): `success` for P == T,
+`failure` for P < T. Anything else leaves `metric` `null` with the reason and never fails the run:
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-evals-metric.sh" --repo "$REPO"
 ```
 
-It prints `metric: {"passed":P,"total":T}` or `metric: null`, then `source:` — the run's id,
-conclusion, URL, and P/T, `no evals workflow`, or `unreadable: <reason>` (no completed run, no
-annotation, more than one, malformed, P > T, T = 0, a gh error) — and exits 0 (2 only on bad
-arguments). Write the `metric:` value into the entry literally. Step 3 reads it once, for the
-decision and for a `reset` or `observe` entry; step 5 reads it again for a `run` entry, so the
-run's own merges can count. An evals run that a merge started may still be running then: its
-result lands in the next entry, so that gain is credited one entry late.
+It prints `metric: {"passed":P,"total":T}` or `metric: null`, `rate: P/T` or `rate: none`, then
+`source:` — the run's id, conclusion, URL, and P/T, `no evals workflow`, or `unreadable: <reason>`
+(no completed run, no annotation, more than one, malformed, P > T, T = 0, `metric disagrees with
+run conclusion`, a gh error) — and exits 0 (2 only on bad arguments). Write the `metric:` value
+into the entry literally. Step 3 reads it once, for the decision and for a `reset` or `observe`
+entry; step 5 reads it again for a `run` entry, so the run's own merges can count. An evals run
+that a merge started may still be running then: its result lands in the next entry, so that gain
+is credited one entry late.
 
-**All evals pass.** When this run's metric is all-pass, autopilot neither builds nor converges: the
-product meets every eval, so it plans what comes next (the all-pass decision comes first, even
-over a converged ledger, and `--resume` doesn't skip it). First check for a next-milestone PR: an
-open PR from this repo whose head branch starts with `milestone-` (the branch next-milestone
-planning opens, #93):
+**All evals pass.** When this run's metric is all-pass (`all-pass: yes`, below), the product meets
+every eval, and the entry records it, so the next run's walk starts after it. Before the ledger's
+decision, even with `--resume`, print `autopilot: all evals pass → planning next milestone` — a
+progress line, not the final status line (step 5); #93 decides its final form — then check for a
+next-milestone PR: an open PR from this repo whose head branch starts with `milestone-` (the
+branch next-milestone planning opens, #93):
 
 ```bash
 gh pr list --repo "$REPO" --state open --limit 200 \
@@ -143,14 +146,12 @@ gh pr list --repo "$REPO" --state open --limit 200 \
 ```
 
 - **One is open** → observe mode (step 3) while it waits for its guard and merge, so no second
-  milestone is filed; the run ends `autopilot: stopped: next-milestone PR #<pr> open`.
-- **None** → print `autopilot: all evals pass → planning next milestone` and run the
-  **next-milestone planning** procedure. It is not built yet (#93, `genesis --next`); until it
-  is, observe mode stands in for it, reported as `next-milestone planning not built yet (#93)`,
-  and the run ends `autopilot: stopped: next-milestone planning not built yet (#93)`.
-
-Either way the entry is `kind: observe`, and the schedule keeps running (step 5): P == T is not
-convergence, since planning continues and the next fire picks up the milestone PR.
+  milestone is filed. The entry is `kind: observe`, the schedule keeps running (step 5), and the
+  run ends `autopilot: stopped: next-milestone PR #<pr> open`.
+- **None** → fall through to the ledger's `decision:` (step 3), and the run ends like any other:
+  `ready` work still gets built, and semi mode with nothing to build ends `nothing to do`, ending
+  a schedule. **#93 hook:** #93 (`genesis --next`) replaces this fall-through with invoking its
+  next-milestone planning procedure, and restores "a P == T run never ends a schedule".
 
 Ledger commands — each one plain `gh` call (see `implement`'s command rule):
 
@@ -170,18 +171,18 @@ gh issue view <ledger#> --repo "$REPO" --json comments \
 
 The read command is for reading entries by hand (and for `research`); autopilot doesn't parse
 them itself. One helper applies every rule above to all of the ledger's comments, given this run's
-metric (`P/T` from the `metric:` line, or `none`) and `--resume` when that flag was passed:
+metric (the `rate:` line's value, verbatim) and `--resume` when that flag was passed:
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-ledger-state.sh" --repo "$REPO" --issue <ledger#> \
-  --runs <convergence_runs> --metric <P/T|none> [--resume]
+  --runs <convergence_runs> --metric <rate> [--resume]
 ```
 
 It prints `entries: <k> (<where the walk stopped>)`, `skipped: <none | counts by author
-association>`, `streak: <s>/<N>` (the newest entries without a gain), and `decision: all-pass`,
-`observe` (converged), or `build`. Exit 3 means the ledger couldn't be read. With no ledger yet,
-leave out `--issue`. When `skipped` isn't `none`, report it — "N entry-shaped comments skipped
-(author association X)" — so a runner posting under the wrong identity is visible.
+association>`, `streak: <s>/<N>` (the newest entries without a gain), `all-pass: yes|no`, and
+`decision: observe` (converged) or `build`. Exit 3 means the ledger couldn't be read. With no
+ledger yet, leave out `--issue`. When `skipped` isn't `none`, report it — "N entry-shaped comments
+skipped (author association X)" — so a runner posting under the wrong identity is visible.
 
 ## Steps
 
@@ -211,12 +212,12 @@ Also print the **convergence state**, using only the read commands in Run ledger
 metric's `metric:` and `source:` lines (the source run's id, URL, and P/T, or `no evals
 workflow`, or why it is unreadable), the ledger issue (or "none yet — the first real run creates
 it"), then `octo-ledger-state.sh`'s entries, skipped comments, and no-gain streak against
-`convergence_runs`, and what this run would do: build normally, `converged → observe mode`
-(research propose-only, then stop), or, for `all-pass`, `all evals pass → planning next
-milestone` (with the next-milestone PR check's result: observe while one is open; until #93,
-observe). With `--resume`, say a `reset` entry would be appended first. Mutate nothing: no label,
-ledger issue, or entry, and never end a schedule. End with the status line `autopilot: stopped:
-dry run` (step 5).
+`convergence_runs`, and what this run would do: build normally or `converged → observe mode`
+(research propose-only, then stop), after, for `all-pass: yes`, `all evals pass → planning next
+milestone` and the next-milestone PR check's result (observe while one is open; until #93,
+otherwise the ledger's decision). With `--resume`, say a `reset` entry would be appended first.
+Mutate nothing: no label, ledger issue, or entry, and never end a schedule. End with the status
+line `autopilot: stopped: dry run` (step 5).
 
 ### 3. The loop (repeat up to `--cycles` times)
 
@@ -256,10 +257,11 @@ If the ledger can't be found or created (e.g. the token can't write issues), rep
 STOP — a run that can't record itself can't be checked for convergence. Otherwise read the evals
 metric (Run ledger → Evals metric), then the ledger state (`octo-ledger-state.sh`, forwarding
 `--resume`); if that exits 3, report it and STOP with `ledger unavailable`. Then branch:
-- **`--resume`** → first append a `kind: reset` entry (step 5's recipe), then go on by the
-  decision below, which is never `observe` with `--resume`.
-- **`decision: all-pass`** → Run ledger → All evals pass. Its observe mode is the one below,
-  except that it never ends a schedule, and its report opens with the reason instead.
+- **`--resume`** → first append a `kind: reset` entry (step 5's recipe), then go on below; the
+  decision is never `observe` with `--resume`.
+- **`all-pass: yes`** → Run ledger → All evals pass, first. While a next-milestone PR is open, its
+  observe mode is the one below, except that it never ends a schedule and its report opens with
+  the reason; otherwise go on by the decision.
 - **`decision: observe`** (converged) → **observe mode**: run the **`research`** procedure
   (`${CLAUDE_PLUGIN_ROOT}/skills/research/SKILL.md`) **without `--create`** — propose-only, it writes
   nothing. Append a `kind: observe` entry (step 5's recipe), end the schedule if one started this
@@ -389,14 +391,14 @@ gh issue comment <ledger#> --repo "$REPO" --body 'Autopilot run (semi): merged #
 
 `reset` and `observe` entries use the same recipe, with step 3's metric and a summary such as
 `Autopilot reset (--resume).`, `Autopilot observe: converged after 3 runs without a gain.`, or
-`Autopilot observe: all evals pass (5/5), next-milestone planning not built yet (#93).` If posting
+`Autopilot observe: all evals pass (5/5), next-milestone PR #31 open.` If posting
 fails, print the entry in the report so a human can add it by hand.
 
 **End the schedule when nothing is left to do.** Only when the run's status line (below) will be
-`nothing to do` or `converged → observe`. An all-pass run never ends it: its status line is a
-`stopped:` one, since planning the next milestone continues. Autopilot gets no flag saying how it
-was started, and a scheduled fire delivers the same message a hand-typed run would, so decide
-mechanically, in order:
+`nothing to do` or `converged → observe`. An all-pass run that observed for an open
+next-milestone PR never ends it: its status line is a `stopped:` one, since that milestone is
+still in flight. Autopilot gets no flag saying how it was started, and a scheduled fire delivers
+the same message a hand-typed run would, so decide mechanically, in order:
 
 1. Call `CronList`. Keep only **recurring** tasks whose prompt exactly equals the message that
    started this turn. A one-shot task never counts, even with the same prompt: a self-paced loop's
@@ -446,10 +448,9 @@ Then print a per-cycle summary and an overall result:
 **Observe run** (step 3): open with `converged → observe mode` and the streak that triggered it,
 then research's ranked proposals and its **Unevidenced (not filed)** list, the entry's comment URL,
 and the next action: "file any proposal worth building (or run `research --create`), then re-run
-with `--resume`". An all-pass run opens with `autopilot: all evals pass → planning next milestone`
-(when no next-milestone PR is open) and its reason instead, then the same lists and URL, and the
-next action: "review and merge next-milestone PR #<pr>", or, until #93, "add a failing eval for the
-next milestone (a PR the evals guard accepts)".
+with `--resume`". An all-pass run observing a next-milestone PR opens with that reason, then the
+same lists and URL, and "review and merge next-milestone PR #<pr>"; until #93, one that fell
+through adds "add a failing eval for the next milestone (a PR the evals guard accepts)".
 
 If the schedule step ran, print its `schedule:` line just before the status line. Never silently
 drop an issue; every issue touched appears in the summary.
@@ -457,8 +458,8 @@ drop an issue; every issue touched appears in the summary.
 **Final status line.** Every run ends with exactly one status line, printed last: nothing else in
 autopilot's report follows it. A self-paced `/loop`'s own `ScheduleWakeup` call (and its delay
 note) may still come after. This includes a dry run and a run that stops early (a rejected flag, a
-ledger it can't use). A `/goal` condition or a log reader matches on it (README → Running
-continuously):
+ledger it can't use); the all-pass line (Run ledger → All evals pass) is a progress line, not a
+status line. A `/goal` condition or a log reader matches on it (README → Running continuously):
 
 ```text
 autopilot: merged <N>
@@ -473,7 +474,7 @@ autopilot: stopped: <reason>
   refill stop: autopilot can't build anything more until a human acts.
 - `stopped: <reason>` — any other end, with a short reason on the same line: `all held`, `cycle
   cap`, `dry run`, `invalid flag <flag>`, `ledger unavailable`, or, for an all-pass run,
-  `next-milestone PR #<pr> open` or `next-milestone planning not built yet (#93)`.
+  `next-milestone PR #<pr> open`.
 
 ## Notes
 
