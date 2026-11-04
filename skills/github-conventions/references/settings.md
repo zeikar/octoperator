@@ -60,7 +60,8 @@ convergence_runs: 3
 # system does.
 # `?`, `[...]`, `{...}`, `!`, and a backslash are unsupported; a pattern using
 # them holds every PR. `scripts/octo-approval-match.sh` applies these rules.
-# Default: empty (no gate). Genesis writes `.github/workflows/`, `.claude/`,
+# Default: empty (no gate) when the key is absent. `setup` writes `.github/workflows/` and
+# `.claude/` in a new settings file; genesis writes `.github/workflows/`, `.claude/`,
 # `/GENESIS.md`, `CLAUDE.md`, `CLAUDE.local.md`, and `/.mcp.json`.
 approval_paths:
   - ".github/workflows/"

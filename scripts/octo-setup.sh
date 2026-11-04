@@ -10,6 +10,7 @@
 #
 # Output JSON:
 #   { "repo", "default_branch", "project_owner", "projects_capable", "boards":[{number,title,url}], "note" }
+#   or, on failure, { "error", "detail" } (detail: gh's own message, when gh failed) and exit 1.
 set -uo pipefail
 
 REPO="" POWNER=""
@@ -25,20 +26,34 @@ while [ $# -gt 0 ]; do
 done
 
 command -v gh >/dev/null 2>&1 || { echo '{"error":"gh CLI not found"}'; exit 1; }
-gh auth status >/dev/null 2>&1 || { echo '{"error":"not authenticated; run: gh auth login"}'; exit 1; }
 
-[ -n "$REPO" ] || REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null || true)
-[ -n "$REPO" ] || { echo '{"error":"no repo: pass --repo OWNER/NAME or run inside a repo"}'; exit 1; }
+ERRF=$(mktemp)
+trap 'rm -f "$ERRF"' EXIT
+# gh's stderr, made safe for a JSON string: no quotes, backslashes or control characters, and at
+# most 200 characters.
+detail() { tr '\n\r\t' '   ' <"$ERRF" | tr -d '"\\[:cntrl:]' | cut -c1-200; }
+# fail <message> : print the error JSON, with gh's stderr as its detail, and exit 1.
+fail() { printf '{"error":"%s","detail":"%s"}\n' "$1" "$(detail)"; exit 1; }
 
-DEFAULT=$(gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo "")
+# No `gh auth status` gate: it checks every stored host and token, so it can fail where the token
+# this run uses works (a Claude Code cloud session's). The repo lookups below are the real probe,
+# and a failure reports gh's own message.
+if [ -z "$REPO" ]; then
+  REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>"$ERRF") \
+    || fail "no repo: pass --repo OWNER/NAME or run inside a repo (or gh is not authenticated)"
+fi
+[ -n "$REPO" ] || fail "no repo: pass --repo OWNER/NAME or run inside a repo"
+[[ "$REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] \
+  || { echo '{"error":"--repo must be OWNER/NAME"}'; exit 2; }
+
+DEFAULT=$(gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBranchRef.name' 2>"$ERRF") \
+  || fail "cannot read $REPO (not found, no access, or gh is not authenticated: gh auth login)"
 [ -n "$POWNER" ] || POWNER="${REPO%%/*}"
 
 # Read-only Projects v2 capability probe: list boards for the owner.
 # NOTE: success here means READ access only. A token can list projects yet still lack write
 # (board creation / item edits) — write is proven only by attempting those operations, so the
 # setup skill must handle a later create/edit failure gracefully.
-ERRF=$(mktemp)
-trap 'rm -f "$ERRF"' EXIT
 # gh lists at most 30 projects by default; raise it so busy owners are not cut off at 30.
 if BOARDS=$(gh project list --owner "$POWNER" --limit 100 --format json \
      --jq '[.projects[] | {number, title, url}]' 2>"$ERRF"); then
@@ -47,7 +62,7 @@ if BOARDS=$(gh project list --owner "$POWNER" --limit 100 --format json \
 else
   CAPABLE=false
   BOARDS="[]"
-  NOTE=$(tr -d '"\n' <"$ERRF" | cut -c1-200)
+  NOTE=$(detail)
   [ -n "$NOTE" ] || NOTE="Projects not accessible (user-owned Projects v2 require a classic PAT with the project scope)."
 fi
 

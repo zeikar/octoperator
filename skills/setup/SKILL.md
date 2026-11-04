@@ -18,7 +18,9 @@ Follow the `github-conventions` skill for the settings schema
 1. **Probe the environment (read-only).** Run
    `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-setup.sh [--repo OWNER/NAME]` and parse the JSON:
    `repo`, `default_branch`, `project_owner`, `projects_capable`, `boards[]`, `note`. If it returns an
-   `error` (no gh / not authenticated / no repo), report it and stop with the fix.
+   `error` (no gh, no repo, or a repo it can't read), report it with its `detail` (gh's own
+   message) and stop with the fix. It never runs `gh auth status`, which can fail where the token
+   works (a Claude Code cloud session's).
 
 2. **Check for existing settings.** If `.claude/octoperator.local.md` already exists, read it and
    preserve the user's values; confirm before overwriting. Otherwise create it fresh.
@@ -39,8 +41,11 @@ Follow the `github-conventions` skill for the settings schema
 
 4. **Write settings.** Write `.claude/octoperator.local.md` (Write tool) using the schema from
    `references/settings.md`: always include `repo`, `branch_pattern`, and `statuses`; include
-   `project_owner`/`project_number`/`project_url` only when a board was resolved. Keep it minimal and
-   commented. Then run `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-exclude.sh` so the file (and future
+   `project_owner`/`project_number`/`project_url` only when a board was resolved. In a new file, set
+   `approval_paths: [".github/workflows/", ".claude/"]`: a PR that adds or changes a workflow (a
+   deploy included) or the committed Claude Code settings waits for a human, while an ordinary
+   merge still deploys as before. On a re-run keep the user's existing `approval_paths`, even an
+   empty one. Keep it minimal and commented. Then run `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-exclude.sh` so the file (and future
    `.octoperator/worktrees/`) stays out of `git status` via the repo-local `.git/info/exclude`.
 
 5. **Offer label bootstrap.** Ask whether to ensure the Octoperator labels now; if yes, run the
