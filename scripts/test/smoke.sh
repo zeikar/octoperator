@@ -208,6 +208,50 @@ expect 0 "detach --ref of an unknown commit fails" \
   test "$(worktree detach --name review-2 --ref 0123456789abcdef0123456789abcdef01234567 >/dev/null 2>&1; echo $?)" -ne 0
 expect 0 "remove --force removes a detached tree" worktree remove --path "$dout" --force
 
+echo "• octo-setup.sh (offline, stub gh)"
+# A stub `gh` whose `auth status` always fails, as in a Claude Code cloud session whose token
+# still works: setup must not depend on it. $SETUP_REPO_RC makes `repo view` fail with a message.
+sstub="$wtmp/setup-bin"
+mkdir -p "$sstub"
+cat >"$sstub/gh" <<'STUB'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "auth status") echo "X github.com: authentication failed" >&2; exit 1 ;;
+  "repo view")
+    case "${SETUP_REPO_RC:-0}" in
+      1) printf 'HTTP 403: "Forbidden"\\\n(graphql)\n' >&2; exit 1 ;;
+      2) printf 'bad\377 \303 end\n' >&2; exit 1 ;;
+    esac
+    case "$*" in
+      *nameWithOwner*) echo o/n ;;
+      *) echo main ;;
+    esac ;;
+  "project list") echo '[]' ;;
+  "api user") echo octo-smoke ;;
+  "--version "*) echo "gh version 0.0.0 (stub)" ;;
+  *) echo "unexpected: $*" >&2; exit 9 ;;
+esac
+STUB
+chmod +x "$sstub/gh"
+su_out="$(PATH="$sstub:$PATH" bounded 10 bash "$SCRIPTS_DIR/octo-setup.sh" 2>/dev/null)"; su_rc=$?
+expect 0 "a failing gh auth status no longer stops setup: the repo and default branch print" \
+  test "$su_rc" -eq 0 -a "$(printf '%s' "$su_out" | jq -r '.repo + " " + .default_branch')" = "o/n main"
+su_out="$(SETUP_REPO_RC=1 PATH="$sstub:$PATH" bounded 10 bash "$SCRIPTS_DIR/octo-setup.sh" \
+  --repo o/n 2>/dev/null)"; su_rc=$?
+expect 0 "a failing repo lookup: exit 1, valid JSON whose detail is gh's message, made safe" \
+  test "$su_rc" -eq 1 -a "$(printf '%s' "$su_out" | jq -r .detail)" = 'HTTP 403: Forbidden (graphql)'
+expect 2 "octo-setup.sh --repo 'o/n\"x' exits 2" \
+  bounded 10 env PATH="$sstub:$PATH" bash "$SCRIPTS_DIR/octo-setup.sh" --repo 'o/n"x'
+expect 2 "octo-setup.sh --owner 'a\"b' exits 2" \
+  bounded 10 env PATH="$sstub:$PATH" bash "$SCRIPTS_DIR/octo-setup.sh" --repo o/n --owner 'a"b'
+# Bytes outside printable ASCII never reach the JSON, in a UTF-8 locale too (BSD tr aborts there).
+su_out="$(SETUP_REPO_RC=2 LC_ALL=en_US.UTF-8 PATH="$sstub:$PATH" bounded 10 \
+  bash "$SCRIPTS_DIR/octo-setup.sh" --repo o/n 2>/dev/null)"
+expect 0 "invalid UTF-8 in gh's message: dropped, the rest kept, the JSON valid UTF-8" \
+  test "$(printf '%s' "$su_out" | jq -r .detail)" = 'bad  end'
+expect 0 "octo-doctor.sh: a failing gh auth status no longer stops it (gh api user is the probe)" \
+  bounded 10 env PATH="$sstub:$PATH" bash "$SCRIPTS_DIR/octo-doctor.sh" --repo o/n
+
 echo "• octo-merge-state.sh (offline, stub gh)"
 # A stub `gh` first on PATH: it counts its calls in a file beside itself, prints UNKNOWN for the
 # first $STUB_UNKNOWN calls and CLEAN after, or exits $STUB_GH_RC when that is non-zero.

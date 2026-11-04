@@ -285,6 +285,16 @@ All notable changes to Octoperator are documented in this file. The format is ba
   fix loop use it.
 
 ### Fixed
+- `setup` no longer stops at `gh auth status`, which checks every stored host and token and so
+  can fail where the token in use works (seen in a Claude Code cloud session). `octo-setup.sh`
+  probes with the repo lookups it needs instead, and an `error` now carries gh's own message as
+  `detail` (printable ASCII only, in any locale). `octo-doctor.sh`, which setup runs to confirm a
+  board, drops the same gate (`gh api user` is its probe), and the conventions no longer list
+  `gh auth status` as a prerequisite. `setup` also writes
+  `approval_paths: [".github/workflows/", ".claude/"]` in a new settings file, so adding or
+  changing a workflow (a deploy included) or the committed Claude Code settings waits for a
+  human, while an ordinary merge still deploys as before; a re-run keeps the existing value, and
+  a settings file with no `approval_paths` still has no gate (#106).
 - `auto`'s merge gate now holds, for a human, any PR that changes `VISION.md` outside its
   Roadmap body, or adds a Roadmap line that isn't plain text, not only `milestone-*` PRs (#102).
   New offline helper `scripts/octo-vision-guard.sh` compares the root `VISION.md` at the merge

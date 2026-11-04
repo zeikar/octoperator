@@ -28,8 +28,10 @@ ok()   { echo "✓ $1"; }
 command -v gh >/dev/null 2>&1 || fail "gh CLI not found. Install: https://cli.github.com"
 ok "gh CLI present ($(gh --version | head -1))"
 
-gh auth status >/dev/null 2>&1 || fail "Not authenticated. Run: gh auth login"
-ME=$(gh api user --jq '.login' 2>/dev/null) || fail "Could not read authenticated user."
+# No `gh auth status` gate: it checks every stored host and token, so it can fail where the token
+# in use works (a Claude Code cloud session's). Reading the user is the real probe.
+ME=$(gh api user --jq '.login' 2>&1) \
+  || fail "Could not read the authenticated user (not authenticated? gh auth login): ${ME:0:200}"
 ok "Authenticated as @$ME"
 
 [ -n "$REPO" ] || fail "Missing --repo OWNER/NAME"
