@@ -55,7 +55,9 @@ another skill or plugin being available.
 
 Octoperator drives the `gh` CLI. Before the first write in a session, verify:
 
-- `gh auth status` succeeds (the user is authenticated).
+- A read call such as `gh repo view` succeeds (the user is authenticated). Don't gate on
+  `gh auth status`: it checks every stored host and token, so it can fail where the token in use
+  works (a Claude Code cloud session's).
 - Projects v2 board operations are **optional**. They need a **classic PAT** with the `project` scope
   (user-owned Projects v2 are not supported by fine-grained PATs; org-owned projects work via a
   fine-grained token's Projects permission). When a `gh project ...` call fails with a permission

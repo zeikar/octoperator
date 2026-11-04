@@ -218,12 +218,17 @@ cat >"$sstub/gh" <<'STUB'
 case "$1 $2" in
   "auth status") echo "X github.com: authentication failed" >&2; exit 1 ;;
   "repo view")
-    [ "${SETUP_REPO_RC:-0}" -eq 0 ] || { printf 'HTTP 403: "Forbidden"\\\n(graphql)\n' >&2; exit 1; }
+    case "${SETUP_REPO_RC:-0}" in
+      1) printf 'HTTP 403: "Forbidden"\\\n(graphql)\n' >&2; exit 1 ;;
+      2) printf 'bad\377 \303 end\n' >&2; exit 1 ;;
+    esac
     case "$*" in
       *nameWithOwner*) echo o/n ;;
       *) echo main ;;
     esac ;;
   "project list") echo '[]' ;;
+  "api user") echo octo-smoke ;;
+  "--version "*) echo "gh version 0.0.0 (stub)" ;;
   *) echo "unexpected: $*" >&2; exit 9 ;;
 esac
 STUB
@@ -234,9 +239,18 @@ expect 0 "a failing gh auth status no longer stops setup: the repo and default b
 su_out="$(SETUP_REPO_RC=1 PATH="$sstub:$PATH" bounded 10 bash "$SCRIPTS_DIR/octo-setup.sh" \
   --repo o/n 2>/dev/null)"; su_rc=$?
 expect 0 "a failing repo lookup: exit 1, valid JSON whose detail is gh's message, made safe" \
-  test "$su_rc" -eq 1 -a "$(printf '%s' "$su_out" | jq -r .detail)" = 'HTTP 403: Forbidden (graphql) '
+  test "$su_rc" -eq 1 -a "$(printf '%s' "$su_out" | jq -r .detail)" = 'HTTP 403: Forbidden (graphql)'
 expect 2 "octo-setup.sh --repo 'o/n\"x' exits 2" \
   bounded 10 env PATH="$sstub:$PATH" bash "$SCRIPTS_DIR/octo-setup.sh" --repo 'o/n"x'
+expect 2 "octo-setup.sh --owner 'a\"b' exits 2" \
+  bounded 10 env PATH="$sstub:$PATH" bash "$SCRIPTS_DIR/octo-setup.sh" --repo o/n --owner 'a"b'
+# Bytes outside printable ASCII never reach the JSON, in a UTF-8 locale too (BSD tr aborts there).
+su_out="$(SETUP_REPO_RC=2 LC_ALL=en_US.UTF-8 PATH="$sstub:$PATH" bounded 10 \
+  bash "$SCRIPTS_DIR/octo-setup.sh" --repo o/n 2>/dev/null)"
+expect 0 "invalid UTF-8 in gh's message: dropped, the rest kept, the JSON valid UTF-8" \
+  test "$(printf '%s' "$su_out" | jq -r .detail)" = 'bad  end'
+expect 0 "octo-doctor.sh: a failing gh auth status no longer stops it (gh api user is the probe)" \
+  bounded 10 env PATH="$sstub:$PATH" bash "$SCRIPTS_DIR/octo-doctor.sh" --repo o/n
 
 echo "• octo-merge-state.sh (offline, stub gh)"
 # A stub `gh` first on PATH: it counts its calls in a file beside itself, prints UNKNOWN for the

@@ -45,8 +45,11 @@ Follow the `github-conventions` skill for the settings schema
    `approval_paths: [".github/workflows/", ".claude/"]`: a PR that adds or changes a workflow (a
    deploy included) or the committed Claude Code settings waits for a human, while an ordinary
    merge still deploys as before. On a re-run keep the user's existing `approval_paths`, even an
-   empty one. Keep it minimal and commented. Then run `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-exclude.sh` so the file (and future
-   `.octoperator/worktrees/`) stays out of `git status` via the repo-local `.git/info/exclude`.
+   empty one. If the existing file has no `approval_paths` key, leave it absent (no gate, as
+   before): offer the two-path default and add it only if the user agrees. Keep it minimal and
+   commented. Then run `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-exclude.sh` so the file (and
+   future `.octoperator/worktrees/`) stays out of `git status` via the repo-local
+   `.git/info/exclude`.
 
 5. **Offer label bootstrap.** Ask whether to ensure the Octoperator labels now; if yes, run the
    "ensure labels" recipe from the cookbook (idempotent `gh label create --force`).

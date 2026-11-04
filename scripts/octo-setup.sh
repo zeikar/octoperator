@@ -29,9 +29,12 @@ command -v gh >/dev/null 2>&1 || { echo '{"error":"gh CLI not found"}'; exit 1; 
 
 ERRF=$(mktemp)
 trap 'rm -f "$ERRF"' EXIT
-# gh's stderr, made safe for a JSON string: no quotes, backslashes or control characters, and at
-# most 200 characters.
-detail() { tr '\n\r\t' '   ' <"$ERRF" | tr -d '"\\[:cntrl:]' | cut -c1-200; }
+# gh's stderr, made safe for a JSON string in any locale: printable ASCII only, no quotes or
+# backslashes, no trailing spaces, and at most 200 bytes.
+detail() {
+  LC_ALL=C tr '\n\r\t' '   ' <"$ERRF" | LC_ALL=C tr -cd ' -~' | LC_ALL=C tr -d '"\\' \
+    | LC_ALL=C cut -c1-200 | LC_ALL=C sed 's/ *$//'
+}
 # fail <message> : print the error JSON, with gh's stderr as its detail, and exit 1.
 fail() { printf '{"error":"%s","detail":"%s"}\n' "$1" "$(detail)"; exit 1; }
 
@@ -49,6 +52,7 @@ fi
 DEFAULT=$(gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBranchRef.name' 2>"$ERRF") \
   || fail "cannot read $REPO (not found, no access, or gh is not authenticated: gh auth login)"
 [ -n "$POWNER" ] || POWNER="${REPO%%/*}"
+[[ "$POWNER" =~ ^[A-Za-z0-9-]+$ ]] || { echo '{"error":"--owner must be a GitHub login"}'; exit 2; }
 
 # Read-only Projects v2 capability probe: list boards for the owner.
 # NOTE: success here means READ access only. A token can list projects yet still lack write
