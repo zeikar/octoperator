@@ -62,7 +62,10 @@ autonomous shipping, plus the always-on knowledge layer.
 - **`octo-worktree.sh`** — manage Git worktrees (`add`, `attach`, `detach`, `remove`, `list`); used by `implement` for per-issue worktrees (`attach` resumes on a branch already on the remote, reusing a local branch only when it matches or is ahead) and by `review` / `auto` for throwaway detached checkouts of a PR head.
 - **`octo-exclude.sh`** — idempotently add the settings file and `.octoperator/` (worktrees) to the repo-local `.git/info/exclude` so they never dirty `git status`; used by `setup` and `implement`.
 - **`octo-doctor.sh`** — verify auth/repo/project access and print the board's Status options.
-- **`octo-subissue.sh`** — link a child issue to its epic as a native sub-issue (falls back to a task list).
+- **`octo-subissue.sh`** — link a child issue to its epic as a native sub-issue, over REST by the child's numeric id (exits 1 on failure, so the caller falls back to a task list).
+- **`octo-labels.sh`** — make sure labels exist: create each missing one, with Octoperator's colour and description for its own labels, and leave existing ones alone; REST only (`created`, `exists`, or `failed` per label); used by `issue`, `plan-epic`, `setup`, `autopilot`, and the flaky-test procedure.
+- **`octo-issue-find.sh`** — find the open issues whose title or body contains a text, matched as a plain string ignoring case, over REST (the REST stand-in for `--search`); used by the flaky-test procedure to find an issue for a test.
+- **`octo-ledger-read.sh`** — print the newest entry-shaped comments on autopilot's run ledger from allowed authors, and a count of the skipped ones, as JSON; read-only, REST only; the ledger read command for a human or `research`.
 - **`octo-project-status.sh`** — add an issue/PR to the board and set its Status by name.
 - **`octo-merge-state.sh`** — print a PR's `mergeStateStatus`, waiting out GitHub's `UNKNOWN`; used by `auto`'s merge gate.
 - **`octo-after-merge.sh`** — after a merge, close the issue the PR closes (`--issue N`) if GitHub left it open, with a comment naming the PR, then each epic of that issue (native parent or `## Children` list) once every child is closed; never one with an open child or no children. REST only; prints what it closed, `warn: …`, or `nothing to close`, and always exits 0; used by `auto` after each merge.

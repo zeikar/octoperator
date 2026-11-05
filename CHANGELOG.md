@@ -323,6 +323,30 @@ All notable changes to Octoperator are documented in this file. The format is ba
   parameter, and its `Files changed` now counts every commit on the branch.
 
 ### Changed
+- Issues, labels, and sub-issues now go over REST (`gh api repos/{o}/{r}/...`) in every skill and
+  agent but `genesis`, so they work in a Claude Code cloud session, whose proxy refuses GraphQL
+  (part of epic #79, #111). `issue`, `plan-epic`, `research`, `sync`, `implement`, `auto`,
+  `autopilot`, `setup`, `issue-implementer`, `issue-planner`, the conventions' flaky-test
+  procedure, and the cookbook no longer run `gh issue …` or `gh label …`. The cookbook's new
+  "REST, not GraphQL" section sets the pattern: one plain `gh api` call where one call does the
+  job, and a tested `scripts/octo-*.sh` helper where a step needs logic. Text goes in `-f`, and
+  `-F` only for the numeric `milestone` and `sub_issue_id`. A body is one single-quoted `-f body='…'`
+  argument, with `'` written `'\''`. Issue lists drop pull requests
+  (`select(.pull_request == null)`) and page with `--paginate`, and a milestone is resolved to
+  its number once. `octo-subissue.sh` links with `POST .../issues/<epic>/sub_issues` and the
+  child's numeric `id`. It keeps its arguments, its success line, and its exit codes (1 on
+  failure), and now also exits 2 on a malformed `--repo`, `--parent`, or `--child`. Labels are
+  created only when missing, so an existing label's colour and description are no longer reset as
+  `gh label create --force` did. Three new REST-only helpers do the steps that need logic.
+  `octo-labels.sh` creates each missing label, with Octoperator's colour and description for its
+  own labels, and prints `created`, `exists`, or `failed` per label. `octo-issue-find.sh` finds
+  open issues whose title or body contains a text, as a plain string, ignoring case. It stands in
+  for `gh issue list --search`, since REST issue search isn't known to pass the cloud proxy.
+  `octo-ledger-read.sh` is autopilot's ledger read command: the newest 20 entry-shaped comments
+  from allowed authors and the skipped count, the same JSON as before. New offline tests in
+  `scripts/test/rest.sh`, which CI runs, use a stub `gh` that serves REST, two items a page, and
+  refuses GraphQL and porcelain with the cloud proxy's 403. `smoke.sh` now fails if a skill or
+  agent file outside `genesis` names `gh issue` or `gh label`, outside a one-line allowlist.
 - The conventions gain a rule for a flaky test found mid-run, unrelated to the current issue.
   Re-run it at most twice more on the PR head and run it on the base (`origin/<default>`); one
   that passes on the base but fails on the head is a regression, fixed in the PR. A real flake

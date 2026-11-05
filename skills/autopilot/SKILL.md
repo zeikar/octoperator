@@ -111,20 +111,17 @@ what the run does on each, the one `evals.yml` dispatch a stale metric allows, a
 milestone is planned and shipped are all in
 [`references/milestone.md`](references/milestone.md). **A P == T run never ends a schedule.**
 
-Ledger commands — each one plain `gh` call (see `implement`'s command rule):
+Ledger commands — each one plain `gh` or `bash` call (see `implement`'s command rule), all REST
+(the cookbook's REST rules):
 
 ```bash
 # Find it (oldest first if several are open — use the first, mention the rest in the report):
-gh issue list --repo "$REPO" --label octoperator-ledger --state open \
-  --json number,url,createdAt --jq 'sort_by(.createdAt) | .[] | "\(.number) \(.url)"'
+gh api "repos/$REPO/issues?labels=octoperator-ledger&state=open&sort=created&direction=asc&per_page=100" \
+  --paginate --jq '.[] | select(.pull_request == null) | "\(.number) \(.html_url)"'
 # Read the newest 20 entry-shaped comments from allowed authors (newest last), plus a count of
-# entry-shaped comments skipped for their author association:
-gh issue view <ledger#> --repo "$REPO" --json comments \
-  --jq '[.comments[] | select(.body | contains("```json"))] as $c
-    | ($c | map(select(.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")))) as $ok
-    | {skipped: ($c - $ok | group_by(.authorAssociation)
-        | map("\(length) (\(.[0].authorAssociation))") | join(", ")),
-       entries: ($ok | .[-20:] | map({url, createdAt, authorAssociation, body}))}'
+# entry-shaped comments skipped for their author association, as one JSON object
+# {skipped, entries: [{url, createdAt, authorAssociation, body}]}:
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-ledger-read.sh" --repo "$REPO" --issue <ledger#>
 ```
 
 The read command is for reading entries by hand (and for `research`); autopilot doesn't parse
@@ -188,25 +185,20 @@ line `autopilot: stopped: dry run` (step 5).
 
 **Before the first cycle** (and never under `--dry-run`), ensure the workflow labels exist so semi
 mode's `proposed → ready` handoff works even in a fresh repo, and the ledger label exists for the
-ledger. Run each as its own call; an "already exists" failure is the expected idempotent case —
-ignore it (no `|| true`, which falls outside the pre-allowed prefixes; see `implement`'s command
-rule):
+ledger. One call creates each missing one and leaves existing labels alone (cookbook → Ensure
+labels); a `failed` line is reported, and the run goes on:
 
 ```bash
-gh label create ready    --repo "$REPO" --color 0E8A16 \
-  --description "Blessed for automated build (autopilot)"
-gh label create proposed --repo "$REPO" --color BFD4F2 \
-  --description "Research-proposed; awaiting human triage"
-gh label create octoperator-ledger --repo "$REPO" --color 5319E7 \
-  --description "Autopilot run ledger: one entry per run"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-labels.sh" --repo "$REPO" ready proposed octoperator-ledger
 ```
 
-Then find the ledger (Run ledger's find command). If none is open, create it and take its number
-from the printed URL. The body goes in single quotes so its backticks stay literal:
+Then find the ledger (Run ledger's find command). If none is open, create it; the call prints its
+number and URL. The body goes in single quotes so its backticks stay literal:
 
 ```bash
-gh issue create --repo "$REPO" --title "Octoperator run ledger" --label octoperator-ledger \
-  --body 'Octoperator autopilot appends one comment here per run: a summary line and a fenced
+gh api "repos/$REPO/issues" -f title='Octoperator run ledger' -f 'labels[]=octoperator-ledger' \
+  --jq '"\(.number) \(.html_url)"' \
+  -f body='Octoperator autopilot appends one comment here per run: a summary line and a fenced
 `json` entry (time, mode, cycles used, merged, held, proposals filed, metric, cost, kind).
 
 Autopilot reads the newest entries to detect convergence. After `convergence_runs` runs in a row
@@ -245,7 +237,9 @@ For each cycle `c` from 1 to `--cycles`:
 **(a) Discover actionable issues.**
 
 ```bash
-gh issue list --repo "$REPO" --state open --json number,title,labels --limit 100
+# Open issues as "<issue#><TAB><title><TAB><label,…>" lines (the issues API lists PRs too):
+gh api "repos/$REPO/issues?state=open&per_page=100" --paginate \
+  --jq '.[] | select(.pull_request == null) | "\(.number)\t\(.title)\t\([.labels[].name] | join(","))"'
 # Open PRs as "<pr#> <headRefName> <closed issue#,…>" lines — closing references from this repo
 # only, compared case-insensitively since GitHub names are case-insensitive:
 gh pr list --repo "$REPO" --state open --limit 200 \
@@ -352,7 +346,7 @@ literal; keep apostrophes out of the summary line:
 
 ````bash
 gh api rate_limit --jq 'now | todate'
-gh issue comment <ledger#> --repo "$REPO" --body 'Autopilot run (semi): merged #12 (closed epic #9); held #14 (CI red).
+gh api "repos/$REPO/issues/<ledger#>/comments" -f body='Autopilot run (semi): merged #12 (closed epic #9); held #14 (CI red).
 
 ```json
 {"time": "2026-11-01T09:30:00Z", "mode": "semi", "cycles_used": 2, "merged": 1, "held": 1,

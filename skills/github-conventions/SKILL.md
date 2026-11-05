@@ -92,12 +92,16 @@ The complete taxonomy, naming rules, epic model, and the full traceability matri
 
 All concrete `gh` commands for each operation (create issue, link sub-issue, create branch, open PR,
 post review, add to project, set status, query board) live in **`references/gh-cli-cookbook.md`**.
-Consult it rather than improvising `gh` syntax. The error-prone GraphQL/Projects-v2 operations are
-wrapped in helper scripts under `${CLAUDE_PLUGIN_ROOT}/scripts/` — prefer those:
+Consult it rather than improvising `gh` syntax. Issues, labels, and sub-issues go through REST
+(`gh api repos/...`), never `gh` porcelain, since a Claude Code cloud session refuses GraphQL; the
+cookbook's "REST, not GraphQL" section has the rules. The error-prone operations are wrapped in
+helper scripts under `${CLAUDE_PLUGIN_ROOT}/scripts/` — prefer those:
 
 - **`octo-doctor.sh`** — verify auth/repo/project access; print board Status options.
-- **`octo-subissue.sh`** — link a child issue to its parent epic as a native sub-issue (exits non-zero
-  on failure so the caller can fall back to a task-list entry).
+- **`octo-subissue.sh`** — link a child issue to its parent epic as a native sub-issue, over REST
+  (exits non-zero on failure so the caller can fall back to a task-list entry).
+- **`octo-labels.sh`** — create each missing label, leaving existing ones alone, over REST.
+- **`octo-issue-find.sh`** — find the open issues whose title or body contains a text, over REST.
 - **`octo-project-status.sh`** — add an issue/PR to the project if absent and set its Status field by
   human-readable name (resolves the field/option IDs automatically).
 

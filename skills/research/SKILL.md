@@ -48,13 +48,16 @@ Build an evidence base before proposing — read, do not write:
   (`${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`, or `.claude-plugin/plugin.json` relative to the
   repo root).
 - **Inventory:** `skills/`, `agents/`, `scripts/` — what capabilities already exist.
-- **Done & in-flight work (dedupe source):**
+- **Done & in-flight work (dedupe source):** every issue, one line each, over REST (the issues
+  API lists PRs too, so they are dropped), then the PRs:
   ```bash
-  gh issue list --repo "$REPO" --state all --limit 500 --json number,title,state,labels
-  gh pr    list --repo "$REPO" --state all --limit 500 --json number,title,state,closingIssuesReferences
+  gh api "repos/$REPO/issues?state=all&per_page=100" --paginate \
+    --jq '.[] | select(.pull_request == null) | "#\(.number) \(.state) \(.title) [\([.labels[].name] | join(","))]"'
+  gh pr list --repo "$REPO" --state all --limit 500 --json number,title,state,closingIssuesReferences
   ```
-  If either list returns exactly its `--limit` (so it was likely truncated), say so and dedupe
-  conservatively — do not file a proposal you cannot confirm is novel against the full history.
+  The issue list is complete. If the PR list returns exactly its `--limit` (so it was likely
+  truncated), say so and dedupe conservatively — do not file a proposal you cannot confirm is
+  novel against the full history.
 - **Code-level gaps:** `grep`/Glob for `TODO`, `FIXME`, `HACK`, stubbed paths, missing error handling,
   inconsistencies between docs and code, untested helpers.
 - **Evidence** — the only things a filed proposal may rest on. Collect them with a pointer that can be
@@ -93,9 +96,12 @@ Build an evidence base before proposing — read, do not write:
     to it. Format, validity rules, and the read command (the newest 20 entry-shaped comments from
     allowed authors) are in the Run ledger section of
     `${CLAUDE_PLUGIN_ROOT}/skills/autopilot/SKILL.md` and its
-    `${CLAUDE_PLUGIN_ROOT}/skills/autopilot/references/ledger.md`; find the issue with:
+    `${CLAUDE_PLUGIN_ROOT}/skills/autopilot/references/ledger.md`. The read command is a
+    `bash …/octo-ledger-read.sh` call, which autopilot's turn pre-allows; run on its own,
+    research pre-allows only `gh`, so that one call asks first. Find the issue with:
     ```bash
-    gh issue list --repo "$REPO" --label octoperator-ledger --state open --json number,url
+    gh api "repos/$REPO/issues?labels=octoperator-ledger&state=open&sort=created&direction=asc&per_page=100" \
+      --paginate --jq '.[] | select(.pull_request == null) | "\(.number) \(.html_url)"'
     ```
     A valid entry counts only when `held` is above 0 (its summary line names the held issues and
     reasons) or it is part of a no-gain streak: one of `convergence_runs` (the setting in
@@ -115,12 +121,14 @@ Build an evidence base before proposing — read, do not write:
     whose body opens with `Part of #<epic>`); descriptions of PRs on Octoperator branches (matching
     `branch_pattern`, default `{number}-{slug}`); Octoperator reviews; and the ledger issue (label
     `octoperator-ledger`) with every comment on it — autopilot writes its entries, and a run's
-    record is failure-log evidence at most. Read a candidate with:
+    record is failure-log evidence at most. Read a candidate, then its comments:
     ```bash
-    gh issue view <n> --repo "$REPO" --json url,body,state,stateReason,comments
+    gh api "repos/$REPO/issues/<n>" --jq '{url: .html_url, body, state, state_reason}'
+    gh api "repos/$REPO/issues/<n>/comments?per_page=100" --paginate \
+      --jq '.[] | "--- \(.html_url) \(.author_association)\n\(.body)"'
     ```
     Cite the issue or comment URL. An issue *body* stops counting once its issue is closed as
-    completed (`stateReason` `COMPLETED`), whenever that happened — the request was already met. A
+    completed (`state_reason` `completed`), whenever that happened — the request was already met. A
     cited *comment* counts as long as it exists, whatever its issue's state.
 
   Code-level gaps above are leads, not evidence: a TODO or a doc/code mismatch can point at a problem,
@@ -190,7 +198,8 @@ File the top `--count` **evidenced** proposals — never fill `--count` with une
 **Re-check the evidence first.** Right before filing a proposal, re-read every entry it cites, using
 the step 2 command for its type: re-run the eval's `gh run list --branch <default> --workflow "<name>"
 … --limit 1` query, `gh pr view <n> --repo "$REPO" --json state,isDraft,reviews` for a failure-log PR,
-`gh issue view` (or the comment's issue) for a user-feedback link or a ledger entry, Read for a
+the issue and comment reads above (or the comment's issue) for a user-feedback link or a
+ledger entry, Read for a
 benchmark file. Confirm the cited run, PR, comment, or task line is really there and still says
 what the entry claims. If any entry can't be found or no longer holds — a newer run of the
 workflow on the default branch is no longer a failure, the run was re-run green, the PR merged or
@@ -204,22 +213,23 @@ File them using Octoperator's own label taxonomy (see
 `github-conventions/references/conventions.md`): exactly one **type** label (`feature` / `bug` /
 `chore` / `docs`, default `feature`) and exactly one **priority** label (`p0`–`p3`, default `p2`), plus
 the `proposed` label. Ensure every label used exists first (idempotent — never let a missing label fail
-the create):
+the create). Research runs only `gh`, so each label is one REST create, which never changes an
+existing label (cookbook → Ensure labels); then the issue, quoted by the cookbook's REST rules:
 
 ```bash
 # Ensure the proposal label exists (type/priority labels are part of the standard taxonomy —
-# create any that are missing the same way before using them):
-# An "already exists" failure is the expected idempotent case — ignore it:
-gh label create proposed --repo "$REPO" --color BFD4F2 \
-  --description "Research-proposed; awaiting human triage"
+# create any that are missing the same way, with the cookbook's colours, before using them).
+# A 422 "already_exists" failure is the expected idempotent case — ignore it:
+gh api "repos/$REPO/labels" -f name=proposed -f color=BFD4F2 \
+  -f description='Research-proposed; awaiting human triage'
 
-gh issue create --repo "$REPO" \
-  --title "<proposal title>" \
-  --label proposed --label <feature|bug|chore|docs> --label <p0|p1|p2|p3> \
-  --body "<problem/motivation, proposed change, scope, acceptance criteria, ## Evidence>"
+gh api "repos/$REPO/issues" -f title='<proposal title>' \
+  -f 'labels[]=proposed' -f 'labels[]=<feature|bug|chore|docs>' -f 'labels[]=<p0|p1|p2|p3>' \
+  -f body='<problem/motivation, proposed change, scope, acceptance criteria, ## Evidence>' \
+  --jq '"\(.number) \(.html_url)"'
 ```
 
-**Approval gate.** Also add `--label needs-approval` when the proposed change would do any of these
+**Approval gate.** Also add `-f 'labels[]=needs-approval'` when the proposed change would do any of these
 once built:
 - **deploy** — deploy, release, or publish anything (a tag, a package, a site, a production config);
 - **spend** — incur cost or provision paid resources (cloud services, paid APIs, CI capacity);
@@ -232,14 +242,14 @@ both labels exist the same idempotent way, so the human can apply `approved` wit
 Research only creates the `approved` label — it never adds it to an issue:
 
 ```bash
-gh label create needs-approval --repo "$REPO" --color D93F0B \
-  --description "Deploys, spends, or deletes: needs a human to add approved"
-gh label create approved --repo "$REPO" --color 0E8A16 \
-  --description "Human-approved to build a needs-approval issue (never set by Octoperator)"
+gh api "repos/$REPO/labels" -f name=needs-approval -f color=D93F0B \
+  -f description='Deploys, spends, or deletes: needs a human to add approved'
+gh api "repos/$REPO/labels" -f name=approved -f color=0E8A16 \
+  -f description='Human-approved to build a needs-approval issue (never set by Octoperator)'
 ```
 
-`approved` is a common label name. If its create reports that the label already exists, read the
-existing description:
+`approved` is a common label name. If its create reports that the label already exists (a 422
+naming `already_exists`), read the existing description:
 
 ```bash
 gh api "repos/$REPO/labels/approved" --jq .description

@@ -159,7 +159,8 @@ branch.
 A test that fails intermittently and has nothing to do with the current issue is not that issue's
 work: record it and carry on. Prove it is a flake first, because re-running the same commit only
 shows the test is intermittent, not that this change didn't cause it. Each command below is one
-plain `gh`, `git`, or `bash` call:
+plain `gh`, `git`, or `bash` call, and every issue and label call is REST (the cookbook's REST
+rules):
 
 1. **Re-run it on the PR head**, at most twice more per commit (3 runs in total), and keep every
    result.
@@ -173,38 +174,40 @@ plain `gh`, `git`, or `bash` call:
 3. **Decide.** A test that passes on the base but fails at least once on the PR head is a
    regression from this change, not a flake: fix it in this PR. It is a flake only when it also
    fails at least once on the base and passes at least once on the head. Then:
-   1. Look for an open issue that already covers it, by the test's name:
+   1. Look for an open issue that already covers it, by the test's name. The helper matches the
+      name as plain text in each open issue's title and body, ignoring case, and prints
+      `<number> <url>` lines or `none`:
       ```bash
-      gh issue list --repo <owner>/<name> --state open --search "<test name> in:title,body" \
-        --json number,title,url
+      bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-issue-find.sh" --repo <owner>/<name> --text '<test name>'
       ```
    2. One covers it → comment the new occurrence there (the error, the runs, the commits):
       ```bash
-      gh issue comment <n> --repo <owner>/<name> --body "<occurrence>"
+      gh api repos/<owner>/<name>/issues/<n>/comments -f body='<occurrence>'
       ```
    3. None does → file one, with exactly one priority label: `p2` by default, or `p1` when the test
       fails CI on the default branch or blocks merges. List the repo's labels once and check the
       exact names `bug`, `flaky`, and that priority in the output:
       ```bash
-      gh label list --repo <owner>/<name> --json name --limit 200
+      gh api "repos/<owner>/<name>/labels?per_page=100" --paginate --jq '.[].name'
       ```
-      Create `bug` or the priority label when missing, one plain call each, with the colours from
-      the cookbook's ensure-labels lines:
+      When `bug` or the priority label is missing, create both in one call, which leaves an
+      existing label alone and uses the cookbook's colours:
       ```bash
-      gh label create bug --repo <owner>/<name> --color d73a4a --description "Defect" --force
-      gh label create p2 --repo <owner>/<name> --color ededed --force
+      bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-labels.sh" --repo <owner>/<name> bug <p2|p1>
       ```
       `flaky` is added only when it is already there; it is never created. The body names the
-      test, quotes the error, and gives every run on the head and the base, with their commits:
+      test, quotes the error, and gives every run on the head and the base, with their commits
+      (quoting per the cookbook's REST rules); it prints `<number> <url>`:
       ```bash
-      gh issue create --repo <owner>/<name> --title "Flaky test: <test name>" \
-        --label bug --label <p2|p1> [--label flaky] --body "<body>"
+      gh api repos/<owner>/<name>/issues -f title='Flaky test: <test name>' \
+        -f 'labels[]=bug' -f 'labels[]=<p2|p1>' [-f 'labels[]=flaky'] -f body='<body>' \
+        --jq '"\(.number) \(.html_url)"'
       ```
       If a duplicate flake issue for the same test appears (e.g. filed by a parallel implementer),
-      close the newer one as a duplicate of the older:
+      close the newer one as a duplicate of the older, comment first:
       ```bash
-      gh issue close <newer> --repo <owner>/<name> --reason "not planned" \
-        --comment "Duplicate of #<older>."
+      gh api repos/<owner>/<name>/issues/<newer>/comments -f body='Duplicate of #<older>.'
+      gh api -X PATCH repos/<owner>/<name>/issues/<newer> -f state=closed -f state_reason=not_planned
       ```
 4. **Report every run and carry on** with the current issue. The PR's test status never says a
    bare `pass`: it reads e.g. `Result: fail (1 of 3), flaky per #<n>`, plus a line

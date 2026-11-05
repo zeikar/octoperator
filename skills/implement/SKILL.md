@@ -87,10 +87,11 @@ Both the single-issue path and the parallel preflight reference `$DEFAULT`. Noth
 
 Parse the issue-number list from the arguments.
 
-**Fetch each issue** (include `body` so the full requirement is available):
+**Fetch each issue** over REST (include `body` so the full requirement is available; `state` is
+`open` or `closed`):
 
 ```bash
-gh issue view <n> --repo "$REPO" --json number,title,body,state,url
+gh api "repos/$REPO/issues/<n>" --jq '{number, title, body, state, url: .html_url}'
 ```
 
 **Compute each issue's branch name** (step 4 below) so PR matching can use it.
@@ -551,7 +552,7 @@ fixed-field Markdown block defined in `agents/issue-implementer.md`). Record per
 - `test_result` — `pass`, `fail`, or `none`.
 - `failure_reason` — error message, or `none`.
 - `worktree` — absolute path (from P2).
-- `issue_url` — the GitHub issue URL (sourced from step-3 `gh issue view ... --json url` metadata).
+- `issue_url` — the GitHub issue URL (sourced from step 3's issue read, its `url`).
 
 Do NOT inline diffs, logs, or raw subagent output into the final report. PR URLs and status only.
 

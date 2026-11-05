@@ -16,7 +16,9 @@ immediately unless `--dry-run` is passed, then echo the issue URL.
 
 1. **Load settings.** Read `.claude/octoperator.local.md` for `repo`, `project_owner`,
    `project_number`, `milestone`, and `statuses.todo` (default `Todo`). Fall back to the current repo if the file is
-   absent (and skip the board step).
+   absent (and skip the board step). When a milestone is set (or the request names one), resolve
+   its number once, as the REST API takes (cookbook → Resolve a milestone's number); no number
+   printed → stop and report the milestone as not found.
 
 2. **Draft the issue.** From the request, write:
    - a clear, imperative **title**;
@@ -24,14 +26,19 @@ immediately unless `--dry-run` is passed, then echo the issue URL.
    - exactly one **type label** (`feature`/`bug`/`chore`/`docs`) and one **priority** (default `p2`),
      inferred from the request.
 
-3. **Dry-run gate.** If `--dry-run` is present, print the drafted issue and the `gh issue create`
+3. **Dry-run gate.** If `--dry-run` is present, print the drafted issue and the `gh api` create
    command that would run, then stop.
 
-4. **Ensure labels.** Create any missing labels used (idempotent `gh label create --force` — see the
-   cookbook).
+4. **Ensure labels.** Create any missing label used, leaving existing ones alone:
+   `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-labels.sh --repo <repo> <type> <priority>`.
 
-5. **Create the issue.** Run `gh issue create` with the title, body, labels, and configured milestone.
-   Capture the number/URL.
+5. **Create the issue.** One REST call (cookbook → Create an issue; quote the title and body by
+   its REST rules), which prints `<number> <url>`:
+   ```bash
+   gh api repos/<repo>/issues -f title='<title>' -f body='<body>' \
+     -f 'labels[]=<type>' -f 'labels[]=<priority>' [-F milestone=<number>] \
+     --jq '"\(.number) \(.html_url)"'
+   ```
 
 6. **Add to the board.** If a project is configured, run
    `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh --owner <project_owner> --project <number> --url <url> --status "<statuses.todo>"`.

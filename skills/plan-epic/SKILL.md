@@ -19,7 +19,9 @@ exact commands. Octoperator is autonomous: execute the creation immediately unle
 1. **Load settings.** Read `.claude/octoperator.local.md` for `repo`, `project_owner`,
    `project_number`, `milestone`, `reviewers`, and `statuses.todo` (default `Todo`). If absent, resolve the repo
    from `gh repo view --json nameWithOwner` and warn that no project board is configured (skip board
-   steps in that case). See `github-conventions/references/settings.md`.
+   steps in that case). See `github-conventions/references/settings.md`. When a milestone is set
+   (or the request names one), resolve its number once, as the REST API takes (cookbook → Resolve
+   a milestone's number); no number printed → stop and report the milestone as not found.
 
 2. **Decompose.** Dispatch the `issue-planner` agent (Task tool) with the request and the repo context.
    It returns a structured plan: the epic (title, summary, the original request verbatim) and a list of
@@ -29,24 +31,36 @@ exact commands. Octoperator is autonomous: execute the creation immediately unle
 3. **Dry-run gate.** If the argument contains `--dry-run` (or the user said "dry run"), print the
    proposed epic and child issues and the `gh` commands that would create them, then stop. Do not write.
 
-4. **Ensure labels.** Run the "ensure labels" recipe from the cookbook so every type/priority label
-   used by the plan exists (idempotent `gh label create --force`).
+4. **Ensure labels.** Make sure `epic` and every type/priority label the plan uses exist, in one
+   call that creates the missing ones and leaves the rest alone (cookbook → Ensure labels):
+   `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-labels.sh --repo <repo> epic <every label the plan uses>`.
 
-5. **Create the epic issue.** `gh issue create` with the `epic` label + priority, the configured
-   milestone, and a body containing: the original request, a short summary, acceptance criteria, and a
+5. **Create the epic issue.** One REST call (cookbook → Create an issue; quote the title and body
+   by its REST rules) with the `epic` label + priority, the milestone's number, and a body
+   containing: the original request, a short summary, acceptance criteria, and a
    `## Children` heading with no list items under it. Never pre-fill it with planned children: the
    only lines ever added there are step 7's `- [ ] #<child#>` fallback lines, since an item that
-   doesn't start with `#N` keeps the epic from being closed. Capture its number/URL.
+   doesn't start with `#N` keeps the epic from being closed. It prints the epic's number and URL:
+   ```bash
+   gh api repos/<repo>/issues -f title='<title>' -f body='<body>' \
+     -f 'labels[]=epic' -f 'labels[]=<priority>' [-F milestone=<number>] \
+     --jq '"\(.number) \(.html_url)"'
+   ```
 
-6. **Create each child issue.** For each child: `gh issue create` with its type+priority labels and the
+6. **Create each child issue.** For each child, the same call with its type+priority labels and the
    milestone; the body opens with `Part of #<epic>` then context + acceptance criteria. Capture each
    number/URL.
 
 7. **Link children to the epic.** For each child run
    `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-subissue.sh --repo <repo> --parent <epic#> --child <child#>`.
    If it exits non-zero, note the error it printed (e.g. the child already has a parent) for the
-   report, then fall back: append `- [ ] #<child#>` to the epic body's `## Children` checklist via
-   `gh issue edit`.
+   report, then fall back: append `- [ ] #<child#>` to the epic body's `## Children` checklist.
+   REST replaces the whole body, so read it, then write it back with the line added at the end
+   of that section and nothing else changed:
+   ```bash
+   gh api repos/<repo>/issues/<epic#> --jq .body
+   gh api -X PATCH repos/<repo>/issues/<epic#> -f body='<that body, with the line added>'
+   ```
 
 8. **Add to the board.** If a project is configured, add the epic and every child with
    `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh --owner <project_owner> --project <number> --url <url> --status "<statuses.todo>"`.
