@@ -1981,6 +1981,9 @@ no_calls "solve --dry-run" 0 solve "$r" 1 --dry-run
 no_calls "check --dry-run" 0 check vsort-numeric "$r" --dry-run
 no_calls "cleanup --dry-run" 0 cleanup --run-id r1 --dry-run
 no_calls "run --dry-run" 0 run --tasks all --run-id r1 --max-cost-usd 5 --dry-run
+no_calls "run --max-cost-usd with a second line is refused" 2 \
+  run --tasks all --run-id r1 --max-cost-usd $'5\nx' --dry-run
+no_calls "run --max-cost-usd 1.x is refused" 2 run --tasks all --run-id r1 --max-cost-usd 1.x --dry-run
 no_calls "--live --dry-run is still a dry run" 0 setup vsort-numeric --run-id r1 --live --dry-run
 no_calls "solve refuses a non-bench repo" 2 solve zeikar/octoperator 77 --dry-run
 no_calls "solve refuses an unknown task's repo" 2 solve o/octo-bench-nosuch-r1 1 --dry-run
@@ -2335,16 +2338,19 @@ echo "• no reader that stops early sits behind a pipe in a pipefail script"
 # done: the writer dies of SIGPIPE (141), or gets EPIPE (1) when SIGPIPE is ignored, so a check
 # reads the wrong way (#123, #133). A reader that can stop early reads a here-string
 # (`grep -q … <<<"$x"`), or, behind a command, is one that reads to the end (`grep -c … >/dev/null`).
-# Scope: every scripts/octo-*.sh, bench/*.sh, and genesis eval template that sets pipefail. A
-# reader is `| grep` with -q, -m, -l, or -L (or a long form), `| head`, `| sed` with a q command,
-# or `| awk` with an `exit` outside an END block on the same line. A line ending in `\` or `|` is
-# joined with the next; comment lines are skipped.
+# Scope: every scripts/octo-*.sh, bench/*.sh, bench/tasks/*/check.sh, and genesis eval template
+# that sets pipefail. A reader is `| grep` with -q, -m, -l, or -L (or a long form), `| head`,
+# `| sed` with a q command, or `| awk` with an `exit` outside an END block on the same line. A line
+# ending in `\` or `|` is joined with the next; comment lines are skipped.
+# Known gaps, which it does not catch: an awk program over several lines behind a pipe (only its
+# first line is seen), a reader in a group (`| { grep -q …; }`), `| command grep`, `|&`, a flag
+# after the pattern (`| grep y -q`), and `awk -f <file>`.
 # PIPE_ALLOW lists the pipes allowed, one "<path> TAB <text on the line> TAB <why>" each: a line
 # passes when, with every matching entry's text taken out, no reader is left. An entry that no
 # longer matches a line fails the check.
 PIPE_ALLOW="$(printf '%s\t%s\t%s\n' \
   scripts/octo-doctor.sh 'gh --version | head -1' \
-    "its status is unused: the version is only text in ok's message" \
+    "its status is unused: the version is only text in ok's message (set -e doesn't reach a command substitution in an argument)" \
   scripts/octo-bench.sh "\\1/p' | head -n 1" \
     'its status is unused (no set -e): LOGIN is checked for empty, and head prints the first' \
   scripts/octo-bench.sh "| head -n 1 | sed 's/[[:space:]]*\$//'" \
@@ -2447,9 +2453,10 @@ expect 1 "an entry for another file allows nothing" \
   pipe_allowed $'b.sh\tgh --version | head -1\twhy' 'a.sh:1:gh --version | head -1'
 pscope=()
 while IFS= read -r f; do pscope+=("$f"); done <<<"$(cd "$ROOT" && pipefail_files scripts/octo-*.sh \
-  bench/*.sh skills/genesis/templates/evals/*.sh)"
-expect 0 "the check covers the pipefail scripts (${#pscope[@]} files), the eval templates and bench/validate.sh too" \
-  test "${#pscope[@]}" -ge 29 \
+  bench/*.sh bench/tasks/*/check.sh skills/genesis/templates/evals/*.sh)"
+expect 0 "the check covers the pipefail scripts (${#pscope[@]} files), the eval templates, bench/validate.sh, and the bench task checks too" \
+  test "${#pscope[@]}" -ge 39 \
+    -a -n "$(printf '%s\n' "${pscope[@]}" | grep -Fx bench/tasks/wordfreq-top/check.sh)" \
     -a -n "$(printf '%s\n' "${pscope[@]}" | grep -Fx skills/genesis/templates/evals/guard.sh)" \
     -a -n "$(printf '%s\n' "${pscope[@]}" | grep -Fx skills/genesis/templates/evals/run.sh)" \
     -a -n "$(printf '%s\n' "${pscope[@]}" | grep -Fx bench/validate.sh)"

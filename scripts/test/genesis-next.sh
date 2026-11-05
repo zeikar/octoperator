@@ -441,6 +441,15 @@ printf '   See https://x.example.\n' >>"$c/VISION.md" && commit "$c" vurl
 check
 fails "an ungrounded milestone that cites a URL in VISION.md fails" \
   "VISION.md: an ungrounded milestone read no source, so it cites no URL"
+# More than a pipe holds (~64 KB) after the URL line, so a reader that stops at the URL leaves
+# its writer to die of SIGPIPE, and under pipefail the URL reads as missing (#133).
+case_repo ungrounded
+{ printf '   See https://x.example.\n'
+  for i in $(seq 1 8000); do printf '   plain roadmap note number %s, nothing more\n' "$i"; done
+} >>"$c/VISION.md" && commit "$c" vurl-long
+check
+fails "an ungrounded milestone that cites a URL in VISION.md, then 380 KB more, still fails" \
+  "VISION.md: an ungrounded milestone read no source, so it cites no URL"
 case_repo
 printf -- '- not a source\n' >>"$c/docs/research.md" && commit "$c" badsource
 check
