@@ -283,6 +283,22 @@ All notable changes to Octoperator are documented in this file. The format is ba
 - `octo-worktree.sh detach --name <prefix> --ref <commit>`: creates a throwaway detached worktree at a
   unique `.octoperator/worktrees/<prefix>-<pid>` path and prints only that path. `review` and `auto`'s
   fix loop use it.
+- `implement` and `auto` push work early and resume a restarted issue (#109). A container restart
+  in a Claude Code cloud session once lost an implementer's uncommitted work. The implementer (and
+  `implement`'s in-tree path) now commits and pushes at checkpoints: once the first meaningful
+  change exists, then after each passing test run. Each checkpoint is an ordinary conventional
+  commit that references the issue (no `wip`, since regular merges keep every commit), pushed
+  without force. When an issue's `<issue#>-<slug>` branch exists on the remote and a REST check
+  (`gh api repos/<o>/<r>/pulls?head=<owner>:<b>&state=all`) finds no PR in any state for it,
+  `implement` resumes on it instead of rejecting it: it starts from the branch's commits and its
+  diff against the default branch. An issue with an open PR is still rejected, and so is a branch
+  a closed or merged PR already used, since a human closed or shipped that work. A local branch
+  left by a crashed run is reused when it matches the remote or is ahead of it; one that is behind
+  or has diverged stops the issue for a human, and nothing is reset, deleted, or force-pushed. New
+  `octo-worktree.sh attach --branch <b> --path <p>` fetches `origin/<b>` and creates a worktree
+  on a local branch tracking it, refusing a branch checked out elsewhere; the parallel path uses
+  it, and the in-tree path switches with plain `git` calls. `issue-implementer` gains a `resume`
+  parameter, and its `Files changed` now counts every commit on the branch.
 
 ### Changed
 - The conventions gain a rule for a flaky test found mid-run, unrelated to the current issue.

@@ -145,6 +145,9 @@ branch.
   `…-before-each-encounter` (`each` is not at the end, so it stays).
 - The pattern is configurable via `branch_pattern` in settings using the tokens `{number}` and
   `{slug}` (default `{number}-{slug}`).
+- Work is pushed early, in ordinary conventional checkpoint commits that reference the issue (never
+  force-pushed), so a branch on the remote that no PR has used is resumed, not rejected
+  (`implement` step 5). A branch any PR has used, even a closed or merged one, is rejected.
 - **Next-milestone branches** are the one exception: `genesis --next` plans a milestone, not an
   issue, on `milestone-<n>-<slug>` (`<n>` the milestone's number, the slug from its title by the
   rules above), whatever `branch_pattern` says. Autopilot and genesis find an open next-milestone
