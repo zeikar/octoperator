@@ -52,7 +52,9 @@ Follow the `github-conventions` skill for the settings schema
    `.git/info/exclude`.
 
 5. **Offer label bootstrap.** Ask whether to ensure the Octoperator labels now; if yes, run the
-   "ensure labels" recipe from the cookbook (idempotent `gh label create --force`).
+   "ensure labels" recipe from the cookbook, which creates each missing label and leaves existing
+   ones alone:
+   `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-labels.sh --repo <repo> epic feature bug chore docs p0 p1 p2 p3`.
 
 6. **Report.** Print the resolved repo, whether board mode is ON (with the board URL) or OFF (with the
    one-line enable hint), and the path of the settings file written.

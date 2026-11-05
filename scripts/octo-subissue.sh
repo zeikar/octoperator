@@ -4,9 +4,13 @@
 # Usage:
 #   octo-subissue.sh --repo OWNER/NAME --parent <epic#> --child <child#>
 #
-# Exits 0 on success. Exits non-zero if the sub-issue API is unavailable or the call fails
-# (printing GitHub's error on stderr), so the caller can fall back to a task-list entry in the
-# epic body.
+# REST only (`gh api repos/...`): a Claude Code cloud session's proxy refuses GraphQL. It reads
+# both issues (`GET .../issues/N`), then links the child by its numeric `id`
+# (`POST .../issues/<epic#>/sub_issues` with `sub_issue_id`).
+#
+# Exits 0 on success. Exits 1 if either issue can't be read or the link fails (printing GitHub's
+# error on stderr), so the caller can fall back to a task-list entry in the epic body; exits 2 on
+# bad arguments.
 set -euo pipefail
 
 REPO="" PARENT="" CHILD=""
@@ -24,30 +28,31 @@ done
 
 [ -n "$REPO" ] && [ -n "$PARENT" ] && [ -n "$CHILD" ] || {
   echo "Usage: octo-subissue.sh --repo OWNER/NAME --parent <epic#> --child <child#>" >&2; exit 2; }
+# The values go into REST paths, so nothing but OWNER/NAME and plain issue numbers.
+case "$REPO" in
+  */*/* | /* | */ | *[!A-Za-z0-9._/-]*) echo "--repo must be OWNER/NAME" >&2; exit 2 ;;
+  */*) ;;
+  *) echo "--repo must be OWNER/NAME" >&2; exit 2 ;;
+esac
+for n in "$PARENT" "$CHILD"; do
+  [[ "$n" =~ ^[1-9][0-9]{0,8}$ ]] || {
+    echo "--parent and --child must be issue numbers (1 to 9 digits, no leading zero)" >&2; exit 2; }
+done
 
-OWNER="${REPO%%/*}"; NAME="${REPO##*/}"
+# The REST `id` (a number), which sub_issue_id takes; not the issue number or the node id.
+issue_id() { gh api "repos/$REPO/issues/$1" --jq '.id'; }
 
-node_id() {
-  # shellcheck disable=SC2016  # $o/$n/$num are GraphQL variables — must stay literal, not shell-expanded
-  gh api graphql \
-    -f query='query($o:String!,$n:String!,$num:Int!){repository(owner:$o,name:$n){issue(number:$num){id}}}' \
-    -f o="$OWNER" -f n="$NAME" -F num="$1" --jq '.data.repository.issue.id'
-}
+issue_id "$PARENT" >/dev/null || { echo "Could not resolve epic #$PARENT" >&2; exit 1; }
+CID=$(issue_id "$CHILD") || { echo "Could not resolve child #$CHILD" >&2; exit 1; }
 
-PID=$(node_id "$PARENT") || { echo "Could not resolve epic #$PARENT" >&2; exit 1; }
-CID=$(node_id "$CHILD")  || { echo "Could not resolve child #$CHILD" >&2; exit 1; }
-
-# The sub_issues GraphQL feature header is harmless once the feature is GA.
 # Keep gh's stderr: the real cause (already has a parent, permissions, limits, API missing)
-# matters to the caller and must not be collapsed into one generic message.
-# shellcheck disable=SC2016  # $p/$c are GraphQL variables — must stay literal, not shell-expanded
-if ERR=$(gh api graphql -H "GraphQL-Features: sub_issues" \
-     -f query='mutation($p:ID!,$c:ID!){addSubIssue(input:{issueId:$p,subIssueId:$c}){issue{number}}}' \
-     -f p="$PID" -f c="$CID" 2>&1 >/dev/null); then
+# matters to the caller and must not be collapsed into one generic message. -F sends the id as a
+# number, which the endpoint requires.
+if ERR=$(gh api "repos/$REPO/issues/$PARENT/sub_issues" -F sub_issue_id="$CID" 2>&1 >/dev/null); then
   echo "Linked #$CHILD as sub-issue of #$PARENT"
   exit 0
 fi
 
-echo "addSubIssue failed for #$CHILD -> #$PARENT: ${ERR:-no error output from gh}" >&2
+echo "Sub-issue link failed for #$CHILD -> #$PARENT: ${ERR:-no error output from gh}" >&2
 echo "Caller should fall back to a task-list entry." >&2
 exit 1

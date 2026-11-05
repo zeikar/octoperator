@@ -21,7 +21,12 @@ changes.
    issues/PRs/milestones only.
 
 2. **Gather state (read-only).**
-   - Open issues: `gh issue list --repo <repo> --state open --json number,title,labels,milestone,assignees`.
+   - Open issues, over REST (the issues API lists PRs too, so they are dropped):
+     ```bash
+     gh api "repos/<repo>/issues?state=open&per_page=100" --paginate --jq '.[] | select(.pull_request == null)
+       | {number, title, url: .html_url, labels: [.labels[].name], milestone: .milestone.title,
+          assignees: [.assignees[].login]}'
+     ```
    - Open PRs: `gh pr list --repo <repo> --state open --json number,title,headRefName,isDraft,reviewDecision,mergeable`.
    - Recently merged PRs: `gh pr list --repo <repo> --state merged --limit 20 --json number,title,closingIssuesReferences,mergedAt`.
    - Board items (if configured): `gh project item-list <number> --owner <project_owner> --format json`.

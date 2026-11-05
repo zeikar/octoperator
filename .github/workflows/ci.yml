@@ -47,6 +47,10 @@ jobs:
         # Offline: closing the merged PR's issue and a finished epic, against a stub gh that
         # serves REST and refuses GraphQL and porcelain, as a Claude Code cloud session does.
         run: bash scripts/test/after-merge.sh
+      - name: REST issue and label helper tests
+        # Offline: the sub-issue link, label creation, open-issue text match, and ledger read,
+        # against a stub gh that serves REST and refuses GraphQL and porcelain.
+        run: bash scripts/test/rest.sh
       - name: Benchmark task validation
         # Offline: each task's hidden check must fail on its seed and pass with its reference patch.
         run: bash bench/validate.sh

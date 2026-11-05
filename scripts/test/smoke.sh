@@ -62,6 +62,9 @@
 #   - octo-bench.sh        : the --live gate and --dry-run make no gh / claude call; preflight,
 #                            check's metrics, run's cost cap, and cleanup, against a stub `gh`
 #                            and `claude`
+#   - skills and agents    : no skill or agent file but genesis's runs `gh issue` or `gh label`
+#                            (GraphQL-backed), outside a short allowlist of lines that only
+#                            mention them
 #
 # The eval templates genesis copies (run.sh, guard.sh) have their own tests: scripts/test/evals.sh.
 # The helpers behind autopilot's run ledger, its P == T decision, and its web access
@@ -70,7 +73,9 @@
 # and so does genesis --next's offline helper, octo-genesis-next.sh: scripts/test/genesis-next.sh,
 # and auto's VISION.md check, octo-vision-guard.sh: scripts/test/vision.sh,
 # and auto's after-merge closing of issues and epics, octo-after-merge.sh:
-# scripts/test/after-merge.sh.
+# scripts/test/after-merge.sh,
+# and the REST issue, label, and sub-issue helpers (octo-subissue.sh, octo-labels.sh,
+# octo-issue-find.sh, octo-ledger-read.sh): scripts/test/rest.sh.
 # The proposal fixture the genesis tests share is in scripts/test/genesis-fixture.sh.
 #
 # It deliberately never invokes a helper in a way that reaches the real gh / the network.
@@ -125,6 +130,11 @@ expect 2 "octo-setup.sh --repo exits 2"           bounded 10 bash "$SCRIPTS_DIR/
 expect 2 "octo-doctor.sh --repo exits 2"          bounded 10 bash "$SCRIPTS_DIR/octo-doctor.sh" --repo
 expect 2 "octo-subissue.sh --child exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-subissue.sh" --repo o/n --parent 1 --child
+expect 2 "octo-labels.sh --repo exits 2"          bounded 10 bash "$SCRIPTS_DIR/octo-labels.sh" --repo
+expect 2 "octo-issue-find.sh --text exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-issue-find.sh" --repo o/n --text
+expect 2 "octo-ledger-read.sh --last exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-ledger-read.sh" --repo o/n --issue 1 --last
 expect 2 "octo-project-status.sh --status exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-project-status.sh" --owner o --project 1 --status
 expect 2 "octo-worktree.sh add --base exits 2" \
@@ -1864,6 +1874,53 @@ expect 0 "cleanup without delete_repo deletes nothing, lists the repos, and exit
   test "$cl_rc" -eq 1 -a -z "$(grep '^gh repo delete' "$STUB_LOG")" \
     -a -n "$(printf '%s\n' "$cl_err" | grep -Fx '  stub/octo-bench-retry-docs-r1')" \
     -a -n "$(printf '%s\n' "$cl_err" | grep -Fx '  stub/octo-bench-vsort-numeric-r1')"
+
+echo "• skills and agents read and write issues and labels over REST"
+# `gh issue …` and `gh label …` use GraphQL, which a Claude Code cloud session's proxy refuses, so
+# no skill or agent file may run them; issues and labels go through `gh api repos/...` (the
+# cookbook's REST rules). genesis runs only locally, where GraphQL works, and is left out.
+# PORCELAIN_ALLOW lists the lines that only mention a command, one "<path>|<text on the line>" each.
+PORCELAIN_ALLOW='skills/github-conventions/references/gh-cli-cookbook.md|never the porcelain'
+# porcelain_hits <file...> : "<path>:<line>:<text>" for each line naming gh issue or gh label,
+# after any spaces and global flags (`gh -R o/n issue`, `gh --repo=o/n label`).
+porcelain_hits() {
+  grep -nE '(^|[^[:alnum:]_-])gh([[:space:]]+-[^[:space:]]*([[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+(issue|label)([^[:alnum:]_-]|$)' \
+    "$@" 2>/dev/null
+}
+printf '%s\n' 'run `gh issue view 5` here' 'gh label create x' 'the gh issues page' \
+  'gh -R o/n issue list' 'gh --repo o/n label create x' 'gh  issue view 5' \
+  'gh --repo=o/n issue view 5' 'gh api repos/o/n/issues/5 --jq .title' 'gh -R o/n issues' \
+  'gh pr view --json title' >"$tmp/porcelain-sample"
+expect 0 "the check finds gh issue and gh label, after flags or extra spaces, and not gh issues" \
+  test "$(porcelain_hits "$tmp/porcelain-sample" | cut -d: -f1 | tr '\n' ' ')" = "1 2 4 5 6 7 "
+ROOT="$(cd "$SCRIPTS_DIR/.." && pwd)"
+scope=()
+for f in "$ROOT"/skills/*/SKILL.md "$ROOT"/skills/*/references/*.md "$ROOT"/agents/*.md; do
+  case "$f" in "$ROOT"/skills/genesis/*) ;; *) scope+=("${f#"$ROOT"/}") ;; esac
+done
+expect 0 "the check covers the skills and agents (${#scope[@]} files)" test "${#scope[@]}" -ge 15
+left=""
+while IFS= read -r hit; do
+  [ -n "$hit" ] || continue
+  file=${hit%%:*} text=${hit#*:*:} allowed=0
+  while IFS='|' read -r af at; do
+    [ "$file" = "$af" ] && [[ "$text" == *"$at"* ]] && allowed=1
+  done <<<"$PORCELAIN_ALLOW"
+  [ "$allowed" -eq 1 ] || left="$left  $hit"$'\n'
+done <<<"$(cd "$ROOT" && porcelain_hits "${scope[@]}")"
+if [ -z "$left" ]; then ok "no gh issue / gh label outside the allowlist"; else
+  no "no gh issue / gh label outside the allowlist; found:"; printf '%s' "$left"; fi
+# A body is `-F body=@-` with a quoted heredoc (the cookbook's REST rules), never a quoted
+# literal (`-f`, `-F`, `--field`, `--raw-field`), where one missed `'` turns the rest of the text
+# into shell (and `-F` would also turn a body like `123` into a number).
+body_hits() { grep -nE -- "(-[fF]|--(raw-)?field)[[:space:]=]+['\"]?body=" "$@" | grep -v 'body=@-'; }
+sample="$(printf '%s\n' "gh api x -f body='a'" "gh api x -F body='a'" "gh api x --field body=a" \
+  "gh api x --raw-field=body=a" "gh api x -F body=@- <<'OCTO_BODY_EOF'" | body_hits -)"
+expect 0 "the body check catches -f, -F, --field and --raw-field literals, not -F body=@-" \
+  test "$(printf '%s\n' "$sample" | grep -c .)" -eq 4
+left="$(cd "$ROOT" && body_hits "${scope[@]}")"
+if [ -z "$left" ]; then ok "no body sent as a quoted literal"; else
+  no "no body sent as a quoted literal; found:"; printf '  %s\n' "$left"; fi
 
 echo
 echo "smoke: $pass passed, $fail failed"
