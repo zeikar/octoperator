@@ -16,7 +16,7 @@ pull requests, reviews, and the repo itself go through `gh api repos/OWNER/NAME/
 never the porcelain. REST works locally too, so one path serves both. That includes the merge
 gate's checks wait, merge state, and merge. `gh run` and `gh workflow` are REST already. Only
 Projects v2 has no REST API at all. `scripts/test/smoke.sh` fails on any GraphQL call or
-GraphQL-backed porcelain in a script, skill, or agent outside genesis (which runs only locally),
+GraphQL-backed porcelain in a script, skill, or agent outside genesis `--approve` (local only),
 except the few lines its allowlist names, such as the Projects v2 commands.
 
 The rules every REST step follows:
