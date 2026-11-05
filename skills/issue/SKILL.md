@@ -32,12 +32,14 @@ immediately unless `--dry-run` is passed, then echo the issue URL.
 4. **Ensure labels.** Create any missing label used, leaving existing ones alone:
    `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-labels.sh --repo <repo> <type> <priority>`.
 
-5. **Create the issue.** One REST call (cookbook → Create an issue; quote the title and body by
-   its REST rules), which prints `<number> <url>`:
+5. **Create the issue.** One REST call (cookbook → Create an issue; the title single-quoted and
+   the body on stdin, by its REST rules), which prints `<number> <url>`:
    ```bash
-   gh api repos/<repo>/issues -f title='<title>' -f body='<body>' \
-     -f 'labels[]=<type>' -f 'labels[]=<priority>' [-F milestone=<number>] \
-     --jq '"\(.number) \(.html_url)"'
+   gh api repos/<repo>/issues -f title='<title>' \
+     -f 'labels[]=<type>' -f 'labels[]=<priority>' [-F milestone=<number>] -F body=@- \
+     --jq '"\(.number) \(.html_url)"' <<'OCTO_BODY_EOF'
+   <body, verbatim>
+   OCTO_BODY_EOF
    ```
 
 6. **Add to the board.** If a project is configured, run

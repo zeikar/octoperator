@@ -182,7 +182,9 @@ rules):
       ```
    2. One covers it → comment the new occurrence there (the error, the runs, the commits):
       ```bash
-      gh api repos/<owner>/<name>/issues/<n>/comments -f body='<occurrence>'
+      gh api repos/<owner>/<name>/issues/<n>/comments -F body=@- <<'OCTO_BODY_EOF'
+      <occurrence>
+      OCTO_BODY_EOF
       ```
    3. None does → file one, with exactly one priority label: `p2` by default, or `p1` when the test
       fails CI on the default branch or blocks merges. List the repo's labels once and check the
@@ -197,16 +199,20 @@ rules):
       ```
       `flaky` is added only when it is already there; it is never created. The body names the
       test, quotes the error, and gives every run on the head and the base, with their commits
-      (quoting per the cookbook's REST rules); it prints `<number> <url>`:
+      (on stdin, per the cookbook's REST rules); it prints `<number> <url>`:
       ```bash
       gh api repos/<owner>/<name>/issues -f title='Flaky test: <test name>' \
-        -f 'labels[]=bug' -f 'labels[]=<p2|p1>' [-f 'labels[]=flaky'] -f body='<body>' \
-        --jq '"\(.number) \(.html_url)"'
+        -f 'labels[]=bug' -f 'labels[]=<p2|p1>' [-f 'labels[]=flaky'] -F body=@- \
+        --jq '"\(.number) \(.html_url)"' <<'OCTO_BODY_EOF'
+      <body, verbatim>
+      OCTO_BODY_EOF
       ```
       If a duplicate flake issue for the same test appears (e.g. filed by a parallel implementer),
       close the newer one as a duplicate of the older, comment first:
       ```bash
-      gh api repos/<owner>/<name>/issues/<newer>/comments -f body='Duplicate of #<older>.'
+      gh api repos/<owner>/<name>/issues/<newer>/comments -F body=@- <<'OCTO_BODY_EOF'
+      Duplicate of #<older>.
+      OCTO_BODY_EOF
       gh api -X PATCH repos/<owner>/<name>/issues/<newer> -f state=closed -f state_reason=not_planned
       ```
 4. **Report every run and carry on** with the current issue. The PR's test status never says a

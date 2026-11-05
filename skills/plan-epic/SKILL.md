@@ -35,16 +35,18 @@ exact commands. Octoperator is autonomous: execute the creation immediately unle
    call that creates the missing ones and leaves the rest alone (cookbook → Ensure labels):
    `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-labels.sh --repo <repo> epic <every label the plan uses>`.
 
-5. **Create the epic issue.** One REST call (cookbook → Create an issue; quote the title and body
-   by its REST rules) with the `epic` label + priority, the milestone's number, and a body
-   containing: the original request, a short summary, acceptance criteria, and a
-   `## Children` heading with no list items under it. Never pre-fill it with planned children: the
+5. **Create the epic issue.** One REST call (cookbook → Create an issue; the title single-quoted
+   and the body on stdin, by its REST rules) with the `epic` label + priority, the milestone's
+   number, and a body containing: the original request, a short summary, acceptance criteria, and
+   a `## Children` heading with no list items under it. Never pre-fill it with planned children: the
    only lines ever added there are step 7's `- [ ] #<child#>` fallback lines, since an item that
    doesn't start with `#N` keeps the epic from being closed. It prints the epic's number and URL:
    ```bash
-   gh api repos/<repo>/issues -f title='<title>' -f body='<body>' \
-     -f 'labels[]=epic' -f 'labels[]=<priority>' [-F milestone=<number>] \
-     --jq '"\(.number) \(.html_url)"'
+   gh api repos/<repo>/issues -f title='<title>' \
+     -f 'labels[]=epic' -f 'labels[]=<priority>' [-F milestone=<number>] -F body=@- \
+     --jq '"\(.number) \(.html_url)"' <<'OCTO_BODY_EOF'
+   <body, verbatim>
+   OCTO_BODY_EOF
    ```
 
 6. **Create each child issue.** For each child, the same call with its type+priority labels and the
@@ -59,7 +61,9 @@ exact commands. Octoperator is autonomous: execute the creation immediately unle
    of that section and nothing else changed:
    ```bash
    gh api repos/<repo>/issues/<epic#> --jq .body
-   gh api -X PATCH repos/<repo>/issues/<epic#> -f body='<that body, with the line added>'
+   gh api -X PATCH repos/<repo>/issues/<epic#> -F body=@- <<'OCTO_BODY_EOF'
+   <that body, with the line added>
+   OCTO_BODY_EOF
    ```
 
 8. **Add to the board.** If a project is configured, add the epic and every child with

@@ -193,12 +193,12 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-labels.sh" --repo "$REPO" ready propose
 ```
 
 Then find the ledger (Run ledger's find command). If none is open, create it; the call prints its
-number and URL. The body goes in single quotes so its backticks stay literal:
+number and URL. The body goes on stdin in a quoted heredoc, so its backticks stay literal:
 
 ```bash
 gh api "repos/$REPO/issues" -f title='Octoperator run ledger' -f 'labels[]=octoperator-ledger' \
-  --jq '"\(.number) \(.html_url)"' \
-  -f body='Octoperator autopilot appends one comment here per run: a summary line and a fenced
+  -F body=@- --jq '"\(.number) \(.html_url)"' <<'OCTO_BODY_EOF'
+Octoperator autopilot appends one comment here per run: a summary line and a fenced
 `json` entry (time, mode, cycles used, merged, held, proposals filed, metric, cost, kind).
 
 Autopilot reads the newest entries to detect convergence. After `convergence_runs` runs in a row
@@ -207,7 +207,8 @@ passing), it switches to observe mode: research proposes but nothing is built or
 `/octoperator:autopilot --resume` to end observe mode.
 
 Keep this issue open. Autopilot never builds it, and comments without a valid entry are ignored,
-so discussing runs here is fine.'
+so discussing runs here is fine.
+OCTO_BODY_EOF
 ```
 
 If the ledger can't be found or created (e.g. the token can't write issues), report the error and
@@ -341,17 +342,19 @@ Run the **`research`** procedure (`${CLAUDE_PLUGIN_ROOT}/skills/research/SKILL.m
 entry to the ledger with the run's totals (an observe run appended its `observe` entry in step 3
 instead), and its `metric` read again now (Run ledger → Evals metric). Read the timestamp from
 `gh` — never `date` — then post the comment, writing the time, the counts, and the metric in
-literally. The body goes in single quotes so its backticks and JSON quotes stay
-literal; keep apostrophes out of the summary line:
+literally. The body goes on stdin in a quoted heredoc, so its backticks, JSON quotes, and any
+apostrophe stay literal:
 
 ````bash
 gh api rate_limit --jq 'now | todate'
-gh api "repos/$REPO/issues/<ledger#>/comments" -f body='Autopilot run (semi): merged #12 (closed epic #9); held #14 (CI red).
+gh api "repos/$REPO/issues/<ledger#>/comments" -F body=@- <<'OCTO_BODY_EOF'
+Autopilot run (semi): merged #12 (closed epic #9); held #14 (CI red).
 
 ```json
 {"time": "2026-11-01T09:30:00Z", "mode": "semi", "cycles_used": 2, "merged": 1, "held": 1,
  "proposals_filed": 0, "metric": null, "cost_usd": null, "kind": "run"}
-```'
+```
+OCTO_BODY_EOF
 ````
 
 `reset` and `observe` entries use the same recipe, with step 3's metric and a summary such as

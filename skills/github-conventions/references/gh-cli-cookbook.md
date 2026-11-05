@@ -23,15 +23,28 @@ The rules every REST step follows:
   whole-list sort or count) gets a small `scripts/octo-*.sh` helper instead, REST only, tested
   in `scripts/test/rest.sh` against a stub `gh` that refuses GraphQL and porcelain as the proxy
   does.
-- **`-f` for text, `-F` only for numbers.** `-f k=v` sends a raw string. `-F` converts: `@x` reads
-  the file `x`, and `123`, `true`, or `null` stop being strings. So titles, bodies, label names,
-  and states always take `-f`; `-F` is for the numeric `milestone` and `sub_issue_id` only. Any
-  `-f`/`-F` makes the call a `POST`; pass `-X PATCH` (or `PUT`, `DELETE`) for other writes.
+- **`-f` for text, `-F` only for numbers and `body=@-`.** `-f k=v` sends a raw string. `-F`
+  converts: `@x` reads the file `x` (`@-` reads stdin), and `123`, `true`, or `null` stop being
+  strings. So titles, label names, and states always take `-f`; `-F` is for the numeric
+  `milestone` and `sub_issue_id`, and for a body read from stdin (next rule). Any `-f`/`-F` makes
+  the call a `POST`; pass `-X PATCH` (or `PUT`, `DELETE`) for other writes.
 - **Arrays** repeat the key with `[]`: `-f 'labels[]=feature' -f 'labels[]=p2'`.
-- **Bodies with newlines** are one single-quoted argument, `-f body='…'`, line breaks and all.
-  Nothing expands inside single quotes, so backticks, `$`, `\`, and `"` stay literal; write each
-  `'` in the text as `'\''`. That keeps any text safe in one plain call, with no `$(cat …)`,
-  heredoc, or temp file.
+- **Every body goes on stdin**, an issue's, a comment's, or a `PATCH`'s: `-F body=@-`, with the
+  text in a quoted heredoc that ends the call:
+  ```bash
+  gh api repos/OWNER/NAME/issues -f title='<title>' -f 'labels[]=feature' -F body=@- \
+    --jq '"\(.number) \(.html_url)"' <<'OCTO_BODY_EOF'
+  <body, verbatim>
+  OCTO_BODY_EOF
+  ```
+  The quoted delimiter means bash expands nothing in the body, so `'`, `"`, `\`, `$( )`,
+  backticks, and `;` reach GitHub as written, with no escaping, temp file, or Write. gh sends
+  what it reads through `@` as a string: the `123`/`true`/`null` conversion applies only to a
+  literal value. The one rule left: no body line may be exactly `OCTO_BODY_EOF`. The body is
+  the call's only stdin, so it never shares the call with `--input -` or a second `@-`. Bash ends
+  the body with a newline, which renders as nothing.
+- **Short values stay single-quoted.** A title or other one-line value is `-f title='…'`;
+  nothing expands inside single quotes, and each `'` in it is written `'\''`.
 - **Issue lists hold pull requests too.** `GET .../issues` returns PRs as well; drop them with
   `select(.pull_request == null)`. A single read (`GET .../issues/N`) also answers for a PR.
 - **Paginate, one line per item.** Lists take `per_page=100` and `--paginate`. `--jq` runs once
@@ -58,9 +71,9 @@ gh repo view --json nameWithOwner,defaultBranchRef --jq '{repo:.nameWithOwner, d
 
 ## Ensure labels exist (idempotent)
 
-`octo-labels.sh` creates each missing label with the colour and description in
-`conventions.md`, and leaves an existing one alone. It prints `created <label>`, `exists <label>`,
-or `failed <label>: <error>`, and exits 1 if any create failed:
+`octo-labels.sh` creates each missing label with its colour and description from the table
+below, and leaves an existing one alone. It prints `created <label>`, `exists <label>`, or
+`failed <label>: <error>`, and exits 1 if any create failed:
 
 ```bash
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-labels.sh --repo OWNER/NAME epic feature bug chore docs p0 p1 p2 p3
@@ -71,6 +84,27 @@ Under it, one `POST` per label; `422` with `already_exists` means the label is t
 ```bash
 gh api repos/OWNER/NAME/labels -f name=epic -f color=6f42c1 -f description='Large body of work'
 ```
+
+Every label Octoperator defines, with the colour and description its create uses (any other
+name gets `ededed` and no description). `octo-labels.sh` holds the same list, and
+`scripts/test/rest.sh` fails if the two differ:
+
+| Label | Colour | Description |
+|-------|--------|-------------|
+| `epic` | `6f42c1` | Large body of work |
+| `feature` | `0e8a16` | New capability |
+| `bug` | `d73a4a` | Defect |
+| `chore` | `fbca04` | Maintenance |
+| `docs` | `0075ca` | Documentation |
+| `p0` | `ededed` | |
+| `p1` | `ededed` | |
+| `p2` | `ededed` | |
+| `p3` | `ededed` | |
+| `ready` | `0E8A16` | Blessed for automated build (autopilot) |
+| `proposed` | `BFD4F2` | Research-proposed; awaiting human triage |
+| `octoperator-ledger` | `5319E7` | Autopilot run ledger: one entry per run |
+| `needs-approval` | `D93F0B` | Deploys, spends, or deletes: needs a human to add approved |
+| `approved` | `0E8A16` | Human-approved to build a needs-approval issue (never set by Octoperator) |
 
 To check whether a label exists without creating it, list the names:
 
@@ -93,14 +127,16 @@ gh api "repos/OWNER/NAME/milestones?state=open&per_page=100" --paginate \
 ```bash
 gh api repos/OWNER/NAME/issues \
   -f title='Add OAuth login' \
-  -f body='## Context
+  -f 'labels[]=feature' -f 'labels[]=p2' \
+  -F milestone=3 \
+  -F body=@- \
+  --jq '"\(.number) \(.html_url)"' <<'OCTO_BODY_EOF'
+## Context
 <why this matters>
 
 ## Acceptance criteria
-- [ ] ...' \
-  -f 'labels[]=feature' -f 'labels[]=p2' \
-  -F milestone=3 \
-  --jq '"\(.number) \(.html_url)"'
+- [ ] ...
+OCTO_BODY_EOF
 ```
 
 It prints `<number> <url>`. Omit `-F milestone` when none is configured. To assign someone, add
@@ -121,11 +157,20 @@ gh api "repos/OWNER/NAME/issues?state=open&per_page=100" --paginate \
   --jq '.[] | select(.pull_request == null) | "\(.number)\t\(.title)\t\([.labels[].name] | join(","))"'
 # Open issues whose title or body contains a text (no regex, no search syntax):
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-issue-find.sh --repo OWNER/NAME --text 'parses empty input'
-# Comment, add labels, replace the body, close:
-gh api repos/OWNER/NAME/issues/42/comments -f body='<comment>'
+# Add labels, close:
 gh api repos/OWNER/NAME/issues/42/labels -f 'labels[]=ready'
-gh api -X PATCH repos/OWNER/NAME/issues/42 -f body='<the whole new body>'
 gh api -X PATCH repos/OWNER/NAME/issues/42 -f state=closed -f state_reason=not_planned
+```
+
+Comment, or replace the whole body, with the body on stdin:
+
+```bash
+gh api repos/OWNER/NAME/issues/42/comments -F body=@- <<'OCTO_BODY_EOF'
+<comment>
+OCTO_BODY_EOF
+gh api -X PATCH repos/OWNER/NAME/issues/42 -F body=@- <<'OCTO_BODY_EOF'
+<the whole new body>
+OCTO_BODY_EOF
 ```
 
 ## Epic + sub-issues
@@ -141,7 +186,9 @@ write it back whole with `- [ ] #11` appended to that section:
 
 ```bash
 gh api repos/OWNER/NAME/issues/10 --jq .body
-gh api -X PATCH repos/OWNER/NAME/issues/10 -f body='<the body, with - [ ] #11 added under ## Children>'
+gh api -X PATCH repos/OWNER/NAME/issues/10 -F body=@- <<'OCTO_BODY_EOF'
+<the body, with - [ ] #11 added under ## Children>
+OCTO_BODY_EOF
 ```
 
 Underlying REST (what the script does): the child's numeric `id` (not its number), then the link,

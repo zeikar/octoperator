@@ -7,8 +7,9 @@
 #
 # REST only (`POST repos/OWNER/NAME/labels`): `gh label create` uses GraphQL, which a Claude Code
 # cloud session's proxy refuses. A label Octoperator defines (the type, priority, and workflow
-# labels in skills/github-conventions/references/conventions.md) is created with its color and
-# description from the table below; any other name gets color ededed and no description. GitHub
+# labels) is created with its color and description from spec() below, which mirrors the label
+# table in skills/github-conventions/references/gh-cli-cookbook.md (scripts/test/rest.sh checks
+# they agree); any other name gets color ededed and no description. GitHub
 # answers 422 `already_exists` for a label that is there, whatever its case, and that label is
 # not changed.
 #
@@ -43,7 +44,7 @@ for l in "${LABELS[@]}"; do
   esac
 done
 
-# spec <name> : "<color>|<description>" for a label Octoperator defines (conventions.md).
+# spec <name> : "<color>|<description>" for a label Octoperator defines (the cookbook's table).
 spec() {
   case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
     epic)               echo "6f42c1|Large body of work" ;;

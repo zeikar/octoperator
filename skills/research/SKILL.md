@@ -48,16 +48,16 @@ Build an evidence base before proposing — read, do not write:
   (`${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`, or `.claude-plugin/plugin.json` relative to the
   repo root).
 - **Inventory:** `skills/`, `agents/`, `scripts/` — what capabilities already exist.
-- **Done & in-flight work (dedupe source):** every issue, one line each, over REST (the issues
-  API lists PRs too, so they are dropped), then the PRs:
+- **Done & in-flight work (dedupe source):** every issue, one short line each (number, state,
+  title), over REST (the issues API lists PRs too, so they are dropped), then the PRs:
   ```bash
   gh api "repos/$REPO/issues?state=all&per_page=100" --paginate \
-    --jq '.[] | select(.pull_request == null) | "#\(.number) \(.state) \(.title) [\([.labels[].name] | join(","))]"'
+    --jq '.[] | select(.pull_request == null) | "#\(.number) \(.state) \(.title)"'
   gh pr list --repo "$REPO" --state all --limit 500 --json number,title,state,closingIssuesReferences
   ```
-  The issue list is complete. If the PR list returns exactly its `--limit` (so it was likely
-  truncated), say so and dedupe conservatively — do not file a proposal you cannot confirm is
-  novel against the full history.
+  The issue list is complete, and one short line an issue keeps it readable on a large repo. If
+  the PR list returns exactly its `--limit` (so it was likely truncated), say so and dedupe
+  conservatively — do not file a proposal you cannot confirm is novel against the full history.
 - **Code-level gaps:** `grep`/Glob for `TODO`, `FIXME`, `HACK`, stubbed paths, missing error handling,
   inconsistencies between docs and code, untested helpers.
 - **Evidence** — the only things a filed proposal may rest on. Collect them with a pointer that can be
@@ -214,19 +214,22 @@ File them using Octoperator's own label taxonomy (see
 `chore` / `docs`, default `feature`) and exactly one **priority** label (`p0`–`p3`, default `p2`), plus
 the `proposed` label. Ensure every label used exists first (idempotent — never let a missing label fail
 the create). Research runs only `gh`, so each label is one REST create, which never changes an
-existing label (cookbook → Ensure labels); then the issue, quoted by the cookbook's REST rules:
+existing label (cookbook → Ensure labels exist, whose table gives every label's colour and
+description); then the issue, its body on stdin by the cookbook's REST rules:
 
 ```bash
 # Ensure the proposal label exists (type/priority labels are part of the standard taxonomy —
-# create any that are missing the same way, with the cookbook's colours, before using them).
+# create any that are missing the same way, with the colour and description in the cookbook's
+# label table, before using them).
 # A 422 "already_exists" failure is the expected idempotent case — ignore it:
 gh api "repos/$REPO/labels" -f name=proposed -f color=BFD4F2 \
   -f description='Research-proposed; awaiting human triage'
 
 gh api "repos/$REPO/issues" -f title='<proposal title>' \
   -f 'labels[]=proposed' -f 'labels[]=<feature|bug|chore|docs>' -f 'labels[]=<p0|p1|p2|p3>' \
-  -f body='<problem/motivation, proposed change, scope, acceptance criteria, ## Evidence>' \
-  --jq '"\(.number) \(.html_url)"'
+  -F body=@- --jq '"\(.number) \(.html_url)"' <<'OCTO_BODY_EOF'
+<problem/motivation, proposed change, scope, acceptance criteria, ## Evidence>
+OCTO_BODY_EOF
 ```
 
 **Approval gate.** Also add `-f 'labels[]=needs-approval'` when the proposed change would do any of these

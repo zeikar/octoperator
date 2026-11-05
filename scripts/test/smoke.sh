@@ -1881,13 +1881,18 @@ echo "• skills and agents read and write issues and labels over REST"
 # cookbook's REST rules). genesis runs only locally, where GraphQL works, and is left out.
 # PORCELAIN_ALLOW lists the lines that only mention a command, one "<path>|<text on the line>" each.
 PORCELAIN_ALLOW='skills/github-conventions/references/gh-cli-cookbook.md|never the porcelain'
-# porcelain_hits <file...> : "<path>:<line>:<text>" for each line naming gh issue or gh label.
+# porcelain_hits <file...> : "<path>:<line>:<text>" for each line naming gh issue or gh label,
+# after any spaces and global flags (`gh -R o/n issue`, `gh --repo=o/n label`).
 porcelain_hits() {
-  grep -nE '(^|[^[:alnum:]_-])gh (issue|label)([^[:alnum:]_-]|$)' "$@" 2>/dev/null
+  grep -nE '(^|[^[:alnum:]_-])gh([[:space:]]+-[^[:space:]]*([[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+(issue|label)([^[:alnum:]_-]|$)' \
+    "$@" 2>/dev/null
 }
-printf 'run `gh issue view 5` here\ngh label create x\nthe gh issues page\n' >"$tmp/porcelain-sample"
-expect 0 "the check finds gh issue and gh label, and not gh issues" \
-  test "$(porcelain_hits "$tmp/porcelain-sample" | cut -d: -f1 | tr '\n' ' ')" = "1 2 "
+printf '%s\n' 'run `gh issue view 5` here' 'gh label create x' 'the gh issues page' \
+  'gh -R o/n issue list' 'gh --repo o/n label create x' 'gh  issue view 5' \
+  'gh --repo=o/n issue view 5' 'gh api repos/o/n/issues/5 --jq .title' 'gh -R o/n issues' \
+  'gh pr view --json title' >"$tmp/porcelain-sample"
+expect 0 "the check finds gh issue and gh label, after flags or extra spaces, and not gh issues" \
+  test "$(porcelain_hits "$tmp/porcelain-sample" | cut -d: -f1 | tr '\n' ' ')" = "1 2 4 5 6 7 "
 ROOT="$(cd "$SCRIPTS_DIR/.." && pwd)"
 scope=()
 for f in "$ROOT"/skills/*/SKILL.md "$ROOT"/skills/*/references/*.md "$ROOT"/agents/*.md; do
@@ -1905,6 +1910,11 @@ while IFS= read -r hit; do
 done <<<"$(cd "$ROOT" && porcelain_hits "${scope[@]}")"
 if [ -z "$left" ]; then ok "no gh issue / gh label outside the allowlist"; else
   no "no gh issue / gh label outside the allowlist; found:"; printf '%s' "$left"; fi
+# A body is `-F body=@-` with a quoted heredoc (the cookbook's REST rules), never a quoted
+# `-f body=` argument, where one missed `'` turns the rest of the text into shell.
+left="$(cd "$ROOT" && grep -nE -- "(-f|--raw-field)[[:space:]]+['\"]?body=" "${scope[@]}")"
+if [ -z "$left" ]; then ok "no body sent as a -f argument"; else
+  no "no body sent as a -f argument; found:"; printf '  %s\n' "$left"; fi
 
 echo
 echo "smoke: $pass passed, $fail failed"

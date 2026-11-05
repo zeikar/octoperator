@@ -62,7 +62,7 @@ from what the orchestrator specified.
 
 ```bash
 gh api repos/<repo>/issues/<issue_number> \
-  --jq '"#\(.number) \(.title) [\(.state)]\n\n\(.body // "")"'
+  --jq '"#\(.number) \(.title) [\(.state)]\nlabels: \([.labels[].name] | join(","))\n\n\(.body // "")"'
 gh api "repos/<repo>/issues/<issue_number>/comments?per_page=100" --paginate \
   --jq '.[] | "--- \(.user.login) (\(.author_association)) \(.created_at)\n\(.body)"'
 ```

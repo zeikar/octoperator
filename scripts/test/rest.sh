@@ -16,7 +16,9 @@
 # rest, and names sent as raw strings; the open-issue text match (case ignored, plain string,
 # pull requests and closed issues left out, every page read) and a gh error; and the ledger's
 # newest allowed entries, the skipped count by author association, exact bodies, an empty
-# ledger, and a gh error. No call is ever rejected.
+# ledger, and a gh error; a body sent on stdin by the cookbook's own heredoc recipes, arriving
+# byte for byte with nothing run; and the cookbook's label table against octo-labels.sh and every
+# raw label create in the docs. No call is ever rejected.
 #
 # Nothing here calls the real gh or the network. Exits 0 when every check passes, 1 when any fails.
 set -uo pipefail
@@ -45,8 +47,9 @@ trap 'rm -rf "$tmp"' EXIT
 # repo's labels), comments/<n>.json (an issue's comments, a JSON array), sub-error (a message:
 # the sub-issue POST answers it as a 422), and fail (an ERE matched against "<METHOD> <endpoint>"
 # → a 500). It logs every call to log and $ALL_LOG, every rejected one to $ALL_REJECTED, and
-# every write to writes, each field as raw:<k=v> (-f) or typed:<k=v> (-F). Like gh, it prints an
-# error's body on stdout.
+# every write to writes, each field as raw:<k=v> (-f) or typed:<k=v> (-F); a `-F k=@-` field's
+# stdin goes byte for byte to stdin.<n>, numbered by call. Like gh, it prints an error's body on
+# stdout.
 stub="$tmp/bin"
 FX="$tmp/fx"
 mkdir -p "$stub"
@@ -68,7 +71,13 @@ while [ $# -gt 0 ]; do
     -X | --method) method="$2"; shift 2 ;;
     --jq) jq="$2"; shift 2 ;;
     -f | --raw-field) fields="$fields"$'\n'"raw:$2"; shift 2 ;;
-    -F | --field) fields="$fields"$'\n'"typed:$2"; shift 2 ;;
+    -F | --field)
+      # k=@- : the value is stdin, kept byte for byte in stdin.<n>, one file per such call.
+      case "$2" in *=@-)
+        n=$(find "$FX" -maxdepth 1 -name 'stdin.*' | wc -l | tr -d ' ')
+        cat >"$FX/stdin.$((n + 1))" ;;
+      esac
+      fields="$fields"$'\n'"typed:$2"; shift 2 ;;
     --paginate) paginate=1; shift ;;
     --silent) shift ;;
     -*) echo "stub: unknown flag $1" >&2; exit 9 ;;
@@ -109,6 +118,20 @@ case "$method $ep" in
     n=${ep%/sub_issues}; n=${n##*/}
     [ ! -s "$FX/sub-error" ] || err 422 "$(cat "$FX/sub-error")"
     echo "LINK $n$(logged)" >>"$FX/writes"; jq -r "$jq" <"$FX/issues/$n.json" ;;
+  "POST repos/o/n/issues")
+    n=$(find "$FX/issues" -name '*.json' | wc -l | tr -d ' '); n=$((n + 1))
+    jq -n --argjson n "$n" --arg t "$(field title)" \
+      '{id: (1000 + $n), number: $n, state: "open", title: $t,
+        html_url: "https://github.com/o/n/issues/\($n)"}' >"$FX/issues/$n.json"
+    echo "ISSUE $n$(logged)" >>"$FX/writes"; jq -r "$jq" <"$FX/issues/$n.json" ;;
+  "POST repos/o/n/issues/"*/comments)
+    n=${ep%/comments}; n=${n##*/}
+    echo "COMMENT $n$(logged)" >>"$FX/writes"
+    jq -n --arg n "$n" '{html_url: "https://github.com/o/n/issues/\($n)#issuecomment-1"}' |
+      jq -r "$jq" ;;
+  "PATCH repos/o/n/issues/"*)
+    f="$FX/issues/${ep##*/}.json"; [ -f "$f" ] || err 404 "Not Found"
+    echo "PATCH ${ep##*/}$(logged)" >>"$FX/writes"; jq -r "$jq" <"$f" ;;
   "POST repos/o/n/labels")
     name=$(field name); key=$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')
     if [ -e "$FX/labels/$key" ]; then
@@ -310,9 +333,85 @@ fresh
 run octo-ledger-read.sh --repo o/n --issue 3
 same "an unreadable ledger: exit 1, nothing printed" "1|" "$rc|$out"
 
+echo "• bodies go on stdin, by the cookbook's heredoc recipes"
+COOKBOOK="$SCRIPTS_DIR/../skills/github-conventions/references/gh-cli-cookbook.md"
+# recipe <ERE> <body file> : the first ```bash block after the cookbook line matching <ERE>, as
+# a script: OWNER/NAME becomes o/n, and each line that is a <...> placeholder alone becomes the
+# body file's lines. The body's lines then sit in the recipe's real heredoc, run by bash.
+recipe() {
+  awk -v re="$1" -v bodyf="$2" '
+    !on && $0 ~ re { on = 1; next }
+    on && !grab && /^ *```bash$/ { grab = 1; ind = index($0, "`") - 1; next }
+    grab && /^ *```$/ { exit }
+    grab {
+      $0 = substr($0, ind + 1)
+      if ($0 ~ /^<[^>]*>$/) { while ((getline l < bodyf) > 0) print l; close(bodyf); next }
+      gsub("OWNER/NAME", "o/n"); print
+    }' "$COOKBOOK"
+}
+# A body that would run commands if bash read it: quotes, a substitution, backticks, a `;`, and
+# a line EOF (only OCTO_BODY_EOF ends the heredoc).
+cat >"$tmp/body" <<BODY
+Error: expected 'foo' to equal "bar" (it's flaky; we can't repro)
+\$(touch $tmp/ran-subst) and \`touch $tmp/ran-tick\`; touch $tmp/ran-semi
+EOF
+a backslash \\ a tab${tab}and \$HOME, ## not a heading
+BODY
+recipe '^- [*][*]Every body goes on stdin[*][*]' "$tmp/body" >"$tmp/create.sh"
+same "the cookbook's rule is one -F body=@- call and its quoted heredoc" "1|1|1" \
+  "$(grep -c -- '-F body=@-' "$tmp/create.sh")|$(grep -c "<<'OCTO_BODY_EOF'\$" "$tmp/create.sh")|$(grep -cx OCTO_BODY_EOF "$tmp/create.sh")"
+fresh
+out="$(PATH="$stub:$PATH" bounded 20 bash "$tmp/create.sh" </dev/null 2>"$tmp/stderr")"; rc=$?
+same "the documented create runs and prints <number> <url>" \
+  "0|1 https://github.com/o/n/issues/1" "$rc|$out"
+same "the title goes raw, the labels as an array, the body from stdin" \
+  "ISSUE 1 raw:title=<title> raw:labels[]=feature typed:body=@-" "$(cat "$FX/writes")"
+cmp -s "$tmp/body" "$FX/stdin.1" && ok "the body arrives byte for byte" ||
+  no "the body arrives byte for byte"
+ls "$tmp"/ran-* >/dev/null 2>&1 && no "nothing in the body ran" || ok "nothing in the body ran"
+
+fresh; issue 42 open; rm -f "$tmp"/ran-*
+recipe '^Comment, or replace the whole body' "$tmp/body" >"$tmp/comment.sh"
+out="$(PATH="$stub:$PATH" bounded 20 bash "$tmp/comment.sh" </dev/null 2>"$tmp/stderr")"; rc=$?
+same "the documented comment and PATCH run, each with its body on stdin" \
+  "0|COMMENT 42 typed:body=@-${nl}PATCH 42 typed:body=@-" "$rc|$(cat "$FX/writes")"
+cmp -s "$tmp/body" "$FX/stdin.1" && cmp -s "$tmp/body" "$FX/stdin.2" &&
+  ok "both bodies arrive byte for byte" || no "both bodies arrive byte for byte"
+ls "$tmp"/ran-* >/dev/null 2>&1 && no "nothing in either body ran" || ok "nothing in either body ran"
+
+echo "• the cookbook's label table is octo-labels.sh's"
+# label_table : "<name>|<colour>|<description>" per row of the cookbook's label table.
+label_table() {
+  sed -nE 's/^\| `([^`]+)` \| `([0-9A-Fa-f]{6})` \| (.*)\|$/\1|\2|\3/p' "$COOKBOOK" |
+    sed -E 's/ +$//'
+}
+table="$(label_table)"
+spec_names="$(sed -n '/^spec() {/,/^}/p' "$SCRIPTS_DIR/octo-labels.sh" |
+  sed -nE 's/^ +([a-z0-9| -]+)\) +echo.*/\1/p' | tr '|' '\n' | tr -d ' ' | sort)"
+same "the table lists exactly the labels spec() defines" "$spec_names" \
+  "$(cut -d'|' -f1 <<<"$table" | sort)"
+fresh
+# shellcheck disable=SC2046 # one argument per label name; none has a space
+run octo-labels.sh --repo o/n $(cut -d'|' -f1 <<<"$table")
+same "octo-labels.sh creates each with the table's colour and description" \
+  "$(sed 's/^\([^|]*\)|\([^|]*\)|\(.*\)$/LABEL raw:name=\1 raw:color=\2 raw:description=\3/' <<<"$table")" \
+  "$writes"
+# Every raw label create in the docs (continuation lines joined) uses the table's values too.
+docs_creates="$(cat "$COOKBOOK" "$SCRIPTS_DIR/../skills/research/SKILL.md" |
+  awk '/\\$/ { sub(/\\$/, ""); buf = buf $0; next } { print buf $0; buf = "" }' |
+  sed -nE "s/.*labels\"? -f name=([^ ]+) -f color=([0-9A-Fa-f]{6}) +-f description='([^']*)'.*/\1|\2|\3/p")"
+[ "$(wc -l <<<"$docs_creates")" -ge 4 ] && ok "the docs' raw label creates were found" ||
+  no "the docs' raw label creates were found"
+left=""
+while IFS= read -r c; do
+  grep -Fxq -- "$c" <<<"$table" || left="$left  $c"$'\n'
+done <<<"$docs_creates"
+if [ -z "$left" ]; then ok "each raw create in the docs matches the table"; else
+  no "each raw create in the docs matches the table; differs:"; printf '%s' "$left"; fi
+
 echo "• REST only"
 same "no helper call in this suite was rejected" "" "$(cat "$ALL_REJECTED" 2>/dev/null)"
-same "every helper call was gh api repos/o/n/..." "" "$(grep -Ev '^api repos/o/n/' "$ALL_LOG")"
+same "every helper call was gh api repos/o/n/..." "" "$(grep -Ev '^api (-X [A-Z]+ )?repos/o/n/' "$ALL_LOG")"
 [ "$(wc -l <"$ALL_LOG")" -gt 20 ] && ok "the suite made helper calls" || no "the suite made helper calls"
 
 echo
