@@ -10,7 +10,9 @@
 #
 #   - <script> <flag>      : a value flag given last, with no value, exits 2 (never hangs)
 #   - octo-exclude.sh      : run for real against a throwaway local `git init` repo
-#   - octo-worktree.sh     : add / detach / list / remove run for real in a throwaway local repo
+#   - octo-worktree.sh     : add / detach / list / remove run for real in a throwaway local repo,
+#                            and attach against a throwaway bare remote (a remote-only branch,
+#                            a crashed run's local branch that matches, is ahead, or has diverged)
 #   - octo-merge-state.sh  : the UNKNOWN re-query loop and gh-error exit, against a stub `gh`
 #   - octo-evals-guard.sh  : no guard workflow, both guard jobs passed, one missing (a
 #                            `[skip ci]` head), pending, skipped, or failed, a stale or unrecorded
@@ -127,6 +129,8 @@ expect 2 "octo-worktree.sh add --base exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-worktree.sh" add --branch b --base
 expect 2 "octo-worktree.sh detach --ref exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-worktree.sh" detach --name n --ref
+expect 2 "octo-worktree.sh attach --path exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-worktree.sh" attach --branch b --path
 expect 2 "octo-merge-state.sh --pr exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-merge-state.sh" --repo o/n --pr
 expect 2 "octo-merge-state.sh non-numeric --tries exits 2" \
@@ -207,6 +211,61 @@ expect 0 "detach checks out the commit, detached" \
 expect 0 "detach --ref of an unknown commit fails" \
   test "$(worktree detach --name review-2 --ref 0123456789abcdef0123456789abcdef01234567 >/dev/null 2>&1; echo $?)" -ne 0
 expect 0 "remove --force removes a detached tree" worktree remove --path "$dout" --force
+
+echo "• octo-worktree.sh attach (offline, bare remote)"
+# Isolated from the developer's git config; identity and signing pinned per commit.
+iso() { GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 "$@"; }
+icommit() { iso git -C "$1" -c user.name=smoke -c user.email=smoke@example.invalid \
+  -c commit.gpgsign=false commit -q --no-verify --allow-empty -m "$2"; }
+remote="$wtmp/remote.git" seed="$wtmp/seed" clone="$wtmp/clone"
+# The clone is made before the branch is pushed, so origin/3-resume exists only on the remote.
+if ! { iso git init -q --bare -b main "$remote" \
+       && iso git init -q -b main "$seed" && icommit "$seed" init \
+       && iso git -C "$seed" push -q "$remote" main \
+       && iso git clone -q "$remote" "$clone" 2>/dev/null \
+       && iso git -C "$seed" switch -q -c 3-resume && icommit "$seed" checkpoint \
+       && iso git -C "$seed" push -q "$remote" 3-resume; }; then
+  echo "smoke: could not build the attach fixture in $wtmp" >&2; exit 1
+fi
+remote_tip="$(git -C "$seed" rev-parse 3-resume)"
+attach() { (cd "$clone" && iso bash "$SCRIPTS_DIR/octo-worktree.sh" attach "$@"); }
+aout="$(attach --branch 3-resume --path "$wtmp/att-1" 2>/dev/null)"
+expect 0 "attach a remote-only branch exits 0" test $? -eq 0
+expect 0 "attach prints only the path on stdout" test "$aout" = "$wtmp/att-1"
+expect 0 "attach checks out the remote tip" \
+  test "$(git -C "$wtmp/att-1" rev-parse HEAD)" = "$remote_tip"
+expect 0 "attach's local branch tracks origin/<b>" \
+  test "$(git -C "$clone" rev-parse --abbrev-ref '3-resume@{upstream}')" = "origin/3-resume"
+expect 1 "attach refuses a branch checked out elsewhere" \
+  attach --branch 3-resume --path "$wtmp/att-2"
+expect 0 "the refused attach creates no tree" test ! -e "$wtmp/att-2"
+icommit "$wtmp/att-1" "unpushed work"
+ahead_tip="$(git -C "$wtmp/att-1" rev-parse HEAD)"
+iso git -C "$clone" worktree remove "$wtmp/att-1"
+expect 0 "attach reuses a local branch ahead of origin" attach --branch 3-resume --path "$wtmp/att-1"
+expect 0 "the reused branch keeps its unpushed commit" \
+  test "$(git -C "$wtmp/att-1" rev-parse HEAD)" = "$ahead_tip"
+iso git -C "$clone" worktree remove "$wtmp/att-1"
+icommit "$seed" "pushed elsewhere" && iso git -C "$seed" push -q "$remote" 3-resume
+expect 1 "attach refuses a local branch that has diverged" \
+  attach --branch 3-resume --path "$wtmp/att-1"
+expect 0 "the refused attach leaves the local branch alone" \
+  test "$(git -C "$clone" rev-parse 3-resume)" = "$ahead_tip" -a ! -e "$wtmp/att-1"
+iso git -C "$clone" branch -q -D 3-resume
+iso git -C "$clone" update-ref -d refs/remotes/origin/3-resume
+expect 0 "attach recreates a matching branch after the local one is gone" \
+  attach --branch 3-resume --path "$wtmp/att-1"
+expect 0 "it lands on the new remote tip" \
+  test "$(git -C "$wtmp/att-1" rev-parse HEAD)" = "$(git -C "$seed" rev-parse 3-resume)"
+iso git -C "$clone" worktree remove "$wtmp/att-1"
+expect 0 "attach reuses a local branch that matches origin" \
+  attach --branch 3-resume --path "$wtmp/att-1"
+expect 1 "attach of a branch absent on origin exits 1" \
+  attach --branch 9-missing --path "$wtmp/att-9"
+expect 0 "the failed attach creates no branch or tree" \
+  test ! -e "$wtmp/att-9" -a -z "$(git -C "$clone" branch --list 9-missing)"
+expect 2 "attach without --branch exits 2" attach --path "$wtmp/att-3"
+expect 2 "attach without --path exits 2" attach --branch 3-resume
 
 echo "• octo-setup.sh (offline, stub gh)"
 # A stub `gh` whose `auth status` always fails, as in a Claude Code cloud session whose token
