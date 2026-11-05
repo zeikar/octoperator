@@ -59,7 +59,7 @@ autonomous shipping, plus the always-on knowledge layer.
 ### Helper scripts (`scripts/`)
 
 - **`octo-setup.sh`** — read-only probe used by `/octoperator:setup`: detect repo + default branch and whether the token can access Projects v2 (lists existing boards).
-- **`octo-worktree.sh`** — manage Git worktrees (`add`, `detach`, `remove`, `list`); used by `implement` for per-issue worktrees and by `review` / `auto` for throwaway detached checkouts of a PR head.
+- **`octo-worktree.sh`** — manage Git worktrees (`add`, `attach`, `detach`, `remove`, `list`); used by `implement` for per-issue worktrees (`attach` resumes on a branch already on the remote, reusing a local branch only when it matches or is ahead) and by `review` / `auto` for throwaway detached checkouts of a PR head.
 - **`octo-exclude.sh`** — idempotently add the settings file and `.octoperator/` (worktrees) to the repo-local `.git/info/exclude` so they never dirty `git status`; used by `setup` and `implement`.
 - **`octo-doctor.sh`** — verify auth/repo/project access and print the board's Status options.
 - **`octo-subissue.sh`** — link a child issue to its epic as a native sub-issue (falls back to a task list).

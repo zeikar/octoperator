@@ -10,6 +10,14 @@
 #            print <p> (only) on stdout; git's own progress goes to stderr.
 #            Exits non-zero if <b> is already checked out in any worktree or
 #            already exists as a local branch.
+#   attach --branch <b> --path <p>
+#            Resume on <b>, a branch that already exists on origin: fetch it into
+#            origin/<b>, then create a worktree at <p> on a local <b> tracking it,
+#            and print <p> (only) on stdout. A local <b> left by an earlier run is
+#            reused when it matches origin/<b> or is ahead of it; when it is behind
+#            or has diverged, exits 1 and leaves it alone (no commit is discarded).
+#            Exits 1 if <b> is already checked out in any worktree or is absent on
+#            origin.
 #   detach --name <prefix> --ref <commit>
 #            Create a throwaway detached worktree of <commit> (already in the local
 #            object store) at <repo-root>/.octoperator/worktrees/<prefix>-<pid>, and
@@ -27,9 +35,9 @@ set -euo pipefail
 
 ACTION="${1:-}"
 case "$ACTION" in
-  add|detach|remove|list) shift ;;
+  add|attach|detach|remove|list) shift ;;
   -h|--help) sed -n '2,/^[^#]/s/^# \{0,1\}//p' "$0"; exit 0 ;;
-  "") echo "Usage: octo-worktree.sh <add|detach|remove|list> [options]" >&2; exit 2 ;;
+  "") echo "Usage: octo-worktree.sh <add|attach|detach|remove|list> [options]" >&2; exit 2 ;;
   *)  echo "Unknown action: $ACTION" >&2; exit 2 ;;
 esac
 
@@ -70,6 +78,39 @@ case "$ACTION" in
 
     # git prints "HEAD is now at …" on stdout; send it to stderr so stdout is only the path.
     git worktree add -b "${BRANCH}" "${WT_PATH}" "${BASE}" >&2
+    echo "${WT_PATH}"
+    ;;
+
+  attach)
+    [ -n "$BRANCH" ] || { echo "octo-worktree: --branch is required" >&2; exit 2; }
+    [ -n "$WT_PATH" ] || { echo "octo-worktree: --path is required" >&2; exit 2; }
+
+    if git worktree list --porcelain | grep -Fqx "branch refs/heads/${BRANCH}"; then
+      echo "octo-worktree: branch '${BRANCH}' is already checked out in a worktree" >&2
+      exit 1
+    fi
+
+    # An explicit refspec, so a single-branch clone still gets origin/<b>.
+    if ! git fetch --no-tags origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}" >&2; then
+      echo "octo-worktree: could not fetch '${BRANCH}' from origin (absent, or the fetch failed)" >&2
+      exit 1
+    fi
+
+    if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
+      # A crashed run's local branch: reuse it only when it holds every remote commit.
+      if ! git merge-base --is-ancestor "refs/remotes/origin/${BRANCH}" "refs/heads/${BRANCH}"; then
+        echo "octo-worktree: local branch '${BRANCH}' is behind or has diverged from origin/${BRANCH}; resolve it by hand" >&2
+        exit 1
+      fi
+      # Track first, so a failure here leaves no worktree behind.
+      if ! git branch --set-upstream-to="origin/${BRANCH}" "${BRANCH}" >&2; then
+        echo "octo-worktree: could not set '${BRANCH}' to track origin/${BRANCH}" >&2
+        exit 1
+      fi
+      git worktree add "${WT_PATH}" "${BRANCH}" >&2
+    else
+      git worktree add --track -b "${BRANCH}" "${WT_PATH}" "origin/${BRANCH}" >&2
+    fi
     echo "${WT_PATH}"
     ;;
 

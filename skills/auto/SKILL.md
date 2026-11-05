@@ -96,8 +96,11 @@ for the issue list (single issue → current tree; multiple → parallel worktre
 This is composition by reference, not a subagent dispatch: read that skill and execute its steps
 from step 3 on — steps 1–2 already ran in full in this skill's step 1, so reuse their values rather
 than re-resolving them. Collect each resulting PR and its implement status (`success` /
-`tests-failed` / `no-changes` / `error`). Here and in step 4's fix loop, a test that fails
-intermittently and is unrelated to the issue follows
+`tests-failed` / `no-changes` / `error`). Implement pushes its work at checkpoints, so after a
+restarted session an issue whose branch already exists on the remote, with no PR in any state on
+it, **resumes** on that branch (implement steps 3 and 5) rather than starting over; a branch that
+an open, closed, or merged PR has used is still rejected there. Here and in step 4's fix loop, a
+test that fails intermittently and is unrelated to the issue follows
 `${CLAUDE_PLUGIN_ROOT}/skills/github-conventions/references/conventions.md` → Flaky tests found
 mid-run: prove it against the base, file or update its issue, carry on, and never weaken, skip, or
 retry-loop it in the PR. A fix round has no PR body, so the fixer returns that rule's `Result:` and
