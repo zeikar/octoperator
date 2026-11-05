@@ -284,6 +284,16 @@ All notable changes to Octoperator are documented in this file. The format is ba
   unique `.octoperator/worktrees/<prefix>-<pid>` path and prints only that path. `review` and `auto`'s
   fix loop use it.
 
+### Changed
+- The conventions gain a rule for a flaky test found mid-run, unrelated to the current issue:
+  comment the new occurrence on an open issue that covers it, or file one labeled `bug` (plus
+  `flaky` where that label exists) with the test, the error, and how often it failed; then carry
+  on, never weakening, skipping, or retry-looping the test in the unrelated PR. `implement`,
+  `auto`, and `issue-implementer` point to it. Branch slugs, including `milestone-<n>-<slug>`,
+  now drop trailing stop words (`a`, `and`, `as`, `each`, …) after the 50-character truncation,
+  keeping at least one segment, so `add-seeded-hashing-as-a` becomes `add-seeded-hashing`. No
+  script computes slugs, so only the docs change (#110).
+
 ### Fixed
 - `setup` no longer stops at `gh auth status`, which checks every stored host and token and so
   can fail where the token in use works (seen in a Claude Code cloud session). `octo-setup.sh`

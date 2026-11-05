@@ -90,6 +90,10 @@ worktree path as the working context). Capture:
 No obvious test command → report `"no tests run"` in the PR body. Do NOT force draft on that basis
 alone; the draft rule below is the single source of truth.
 
+A test that fails intermittently and is unrelated to the issue follows
+`${CLAUDE_PLUGIN_ROOT}/skills/github-conventions/references/conventions.md` → Flaky tests found
+mid-run: file or update its issue, carry on, and never weaken, skip, or retry-loop it here.
+
 ## Step 4 — Commit, push, and open PR
 
 ### Execution flow (four terminal paths — follow in order)

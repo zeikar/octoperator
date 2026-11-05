@@ -135,8 +135,14 @@ branch.
 
 - Lowercase, hyphen-separated, ASCII only; strip punctuation.
 - Truncate the slug to ≤50 characters at a hyphen boundary (drop whole `-` segments; never cut mid-word).
+- Then drop trailing segments that are stop words, one at a time until the last segment is not one,
+  but always keep at least one segment. The stop words: `a`, `an`, `the`, `and`, `or`, `of`, `to`,
+  `in`, `on`, `for`, `with`, `as`, `at`, `by`, `from`, `into`, `than`, `that`, `when`, `each`.
+  Only the end is trimmed, so a stop word mid-slug stays.
 - Examples: issue #42 "Add OAuth login" → `42-add-oauth-login`; issue #7 "Fix flaky upload test" →
-  `7-fix-flaky-upload-test`.
+  `7-fix-flaky-upload-test`. A slug truncated to `add-seeded-hashing-as-a` becomes
+  `add-seeded-hashing` (drop `a`, then `as`), and `…-before-each-encounter-and` becomes
+  `…-before-each-encounter` (`each` is not at the end, so it stays).
 - The pattern is configurable via `branch_pattern` in settings using the tokens `{number}` and
   `{slug}` (default `{number}-{slug}`).
 - **Next-milestone branches** are the one exception: `genesis --next` plans a milestone, not an
@@ -144,6 +150,38 @@ branch.
   rules above), whatever `branch_pattern` says. Autopilot and genesis find an open next-milestone
   PR by that `milestone-` prefix, and `auto` checks every PR on such a branch against the
   milestone rules before merging it, so never name another branch with it.
+
+## Flaky tests found mid-run
+
+A test that fails intermittently (it fails, then passes when the same commit runs it again) and
+that has nothing to do with the current issue is not that issue's work. Record it and carry on.
+Each command below is one plain `gh` call:
+
+1. Look for an open issue that already covers it, by the test's name:
+   ```bash
+   gh issue list --repo <owner>/<name> --state open --search "<test name> in:title,body" \
+     --json number,title,url
+   ```
+2. One covers it → comment the new occurrence there (the error, how often it failed, the commit):
+   ```bash
+   gh issue comment <n> --repo <owner>/<name> --body "<occurrence>"
+   ```
+3. None does → file one. See whether the repo has a label named exactly `flaky`:
+   ```bash
+   gh label list --repo <owner>/<name> --search flaky --json name
+   ```
+   Then file the issue labeled `bug`, plus `flaky` when it exists. The body names the test, quotes
+   the error, and says how often it failed (e.g. 1 of 3 runs) and on which commit:
+   ```bash
+   gh issue create --repo <owner>/<name> --title "Flaky test: <test name>" \
+     --label bug [--label flaky] --body "<body>"
+   ```
+   If `bug` is missing, create it first with the cookbook's ensure-labels line for `bug`.
+4. Carry on with the current issue. Its PR's test status gives the last run's result plus a line
+   `Flaky: #<n> (<test name> failed <k> of <m> runs)`, with no closing keyword next to that number.
+
+Never weaken, skip, or retry-loop the test inside an unrelated PR: no skip marker, looser
+assertion, longer timeout, or retry wrapper. Fixing it is the flaky issue's work.
 
 ## Pull request linking
 

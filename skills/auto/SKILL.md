@@ -95,7 +95,10 @@ for the issue list (single issue → current tree; multiple → parallel worktre
 This is composition by reference, not a subagent dispatch: read that skill and execute its steps
 from step 3 on — steps 1–2 already ran in full in this skill's step 1, so reuse their values rather
 than re-resolving them. Collect each resulting PR and its implement status (`success` /
-`tests-failed` / `no-changes` / `error`).
+`tests-failed` / `no-changes` / `error`). Here and in step 4's fix loop, a test that fails
+intermittently and is unrelated to the issue follows
+`${CLAUDE_PLUGIN_ROOT}/skills/github-conventions/references/conventions.md` → Flaky tests found
+mid-run: file or update its issue, carry on, and never weaken, skip, or retry-loop it in the PR.
 
 **Hold (do not review or merge) any PR that is not ready:**
 - a PR opened as **draft** (implement opens drafts on test failure or no commits),
