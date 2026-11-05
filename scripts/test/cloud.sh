@@ -167,7 +167,7 @@ else no "a board that answers: exit 0 and the options (got $rc, out: $out)"; fi
 echo "• octo-bench.sh preflight (the X-OAuth-Scopes header)"
 # cleanup reads each of the run's repo names; the stub answers 404, so it ends with "no repos".
 bench_cleanup() { run octo-bench.sh cleanup --run-id c1 --live; }
-UNKNOWN="octo-bench: cannot read the token's scopes (not a classic token?); assuming it can create repos"
+UNKNOWN="octo-bench: cannot read the token's scopes (not a classic token, no scopes, or proxy-injected?); assuming it can create repos"
 for v in "" " " "  "; do
   GH_SCOPES="$v" bench_cleanup
   same "an empty header ('$v'), as in a cloud session: unknown scopes, a warning, and cleanup runs" \

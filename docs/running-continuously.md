@@ -3,8 +3,10 @@
 Autopilot is bounded, so running it continuously means re-invoking it on a schedule. Use Claude
 Code's own scheduling, on your machine. A local session uses your `gh` login, so the ledger entries
 come from you and convergence works, with no PAT or secret to store. A Claude Code cloud session,
-such as a `/schedule` cloud routine, runs the lifecycle over REST, with the limits in
-[Claude Code cloud sessions](#claude-code-cloud-sessions).
+such as a `/schedule` cloud routine, can run the lifecycle over REST, with the limits in
+[Claude Code cloud sessions](#claude-code-cloud-sessions), but a scheduled cloud run is untested:
+convergence counts only ledger entries from an owner, member, or collaborator, and which login a
+cloud session's proxy-injected credential posts as is not yet confirmed (epic #79's live run).
 
 Every run ends with one status line: `autopilot: merged N`, `autopilot: converged → observe`,
 `autopilot: nothing to do`, `autopilot: all evals pass → planning next milestone`, or
@@ -171,7 +173,8 @@ A Claude Code cloud session reaches GitHub through a proxy. A dogfood run on zei
 - **No GraphQL.** The proxy refuses it by policy, with `HTTP 403: GitHub GraphQL is not available
   from Claude Code sessions; use the REST API`, so most `gh` porcelain (`gh issue`, `gh pr`,
   `gh repo`) fails there. So Octoperator's lifecycle runs over REST (`gh api repos/...`),
-  locally too; only `genesis` still uses GraphQL (see below).
+  locally too; only `genesis` and the optional Projects board (`gh project`) still use GraphQL
+  (see below).
 - **No Projects board.** Projects v2 has no REST API. `/octoperator:setup` reports
   `projects_capable: false` with the note `Projects unavailable here`, `octo-doctor.sh` skips its
   project checks, and every board step is skipped with one warning (`octo-project-status.sh` exits
@@ -181,7 +184,9 @@ A Claude Code cloud session reaches GitHub through a proxy. A dogfood run on zei
 - **No Pages API.** A human enables GitHub Pages in the repo's settings.
 - **Only its own repo.** The session reaches only the repo it was started in, so
   `genesis --approve`, which creates a repo, runs only locally. `genesis --next` in a cloud session
-  is planned in [#127](https://github.com/zeikar/octoperator/issues/127).
+  is planned in [#127](https://github.com/zeikar/octoperator/issues/127). The benchmark harness
+  creates its own `octo-bench-*` repos, so whether it can run in a cloud session is unverified
+  (#69).
 - **An empty scopes header.** The proxy injects the credential, so `X-OAuth-Scopes` comes back
   empty. The benchmark harness's preflight reads that as unknown scopes, warns, and goes on.
 

@@ -205,7 +205,7 @@ preflight() {
   scopes="$(printf '%s\n' "$out" | sed -n 's/^[Xx]-[Oo][Aa]uth-[Ss]copes:[[:space:]]*//p' \
     | head -n 1 | sed 's/[[:space:]]*$//')"
   if [ -z "$scopes" ]; then
-    warn "cannot read the token's scopes (not a classic token?); assuming it can create repos"
+    warn "cannot read the token's scopes (not a classic token, no scopes, or proxy-injected?); assuming it can create repos"
     CAN_DELETE=unknown
     return 0
   fi

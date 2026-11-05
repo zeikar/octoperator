@@ -71,7 +71,8 @@ failure, a failure log, or user feedback). The current plan is epic
    ending its schedule once nothing is left to do (#73). This replaced a cloud or GitHub Actions
    runner because Claude Code cloud sessions refused GitHub's GraphQL API. The 2026-11-04 dogfood
    in zeikar/elsewhere confirmed the session's proxy refuses GraphQL by policy, so the lifecycle
-   moved to REST and runs in a cloud session too, without a Projects board (epic #79). A local run
+   is moving to REST to run in a cloud session too, without a Projects board (epic #79, not yet
+   proven by a live cloud run). A local run
    also posts ledger entries under the owner's own `gh` login, so it needs no stored token.
 5. **Self-improvement** — control-loop changes only on a separate branch, gated by the benchmark (#74).
 6. **Genesis** — one sentence → a new project, planned as epic

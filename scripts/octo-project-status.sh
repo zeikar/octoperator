@@ -14,7 +14,7 @@
 # it prints `skipped: projects unavailable here (...)` on stdout and exits 3, so the caller turns
 # board writes off for the run and warns once. Any other failure keeps its message on stderr.
 #
-# Exit codes: 0 status set, 1 (or gh's own code, never 3) failed, 2 bad arguments, 3 skipped
+# Exit codes: 0 status set, 1 (or gh's own code, a 3 mapped to 1) failed, 2 bad arguments, 3 skipped
 # (projects unavailable here).
 set -euo pipefail
 
@@ -55,7 +55,7 @@ PROJECT_ID=$(gh project view "$PROJECT" --owner "$POWNER" --format json --jq '.i
 
 # gh lists at most 30 fields by default; ask for more so a busy board's Status is not cut off.
 FIELD_ID=$(gh project field-list "$PROJECT" --owner "$POWNER" --limit 100 --format json \
-  --jq '.fields[] | select(.name=="Status") | .id' 2>"$ERRF") || { rc=$?; gh_failed; exit "$rc"; }
+  --jq '.fields[] | select(.name=="Status") | .id' 2>"$ERRF") || { rc=$?; gh_failed; exit $(( rc == 3 ? 1 : rc )); }
 [ -n "$FIELD_ID" ] || { echo "No single-select field named \"Status\" on project #$PROJECT." >&2; exit 1; }
 
 # gh's built-in --jq has no --arg, so the status name reaches jq through the environment ($ENV)
@@ -64,7 +64,7 @@ FIELD_ID=$(gh project field-list "$PROJECT" --owner "$POWNER" --limit 100 --form
 OPTION_ID=$(WANT="$STATUS" gh project field-list "$PROJECT" --owner "$POWNER" --limit 100 \
   --format json --jq '.fields[] | select(.name=="Status") | .options[]
     | select((.name|ascii_downcase)==($ENV.WANT|ascii_downcase)) | .id' 2>"$ERRF") \
-  || { rc=$?; gh_failed; exit "$rc"; }
+  || { rc=$?; gh_failed; exit $(( rc == 3 ? 1 : rc )); }
 if [ -z "$OPTION_ID" ]; then
   echo "Status \"$STATUS\" not found. Available options:" >&2
   gh project field-list "$PROJECT" --owner "$POWNER" --limit 100 --format json \
@@ -81,5 +81,5 @@ ITEM_ID=$(gh project item-add "$PROJECT" --owner "$POWNER" --url "$URL" --format
 
 gh project item-edit --id "$ITEM_ID" --project-id "$PROJECT_ID" \
   --field-id "$FIELD_ID" --single-select-option-id "$OPTION_ID" >/dev/null 2>"$ERRF" \
-  || { rc=$?; gh_failed; exit "$rc"; }
+  || { rc=$?; gh_failed; exit $(( rc == 3 ? 1 : rc )); }
 echo "Set Status=\"$STATUS\" for $URL on project #$PROJECT"

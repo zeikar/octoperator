@@ -86,7 +86,9 @@
 # and the REST issue, label, sub-issue, and pull request helpers (octo-subissue.sh,
 # octo-labels.sh, octo-issue-find.sh, octo-ledger-read.sh, octo-pr-closes.sh): scripts/test/rest.sh,
 # and auto's REST merge state, CI wait, and merge (octo-merge-state.sh, octo-ci-wait.sh,
-# octo-merge.sh): scripts/test/merge-gate.sh.
+# octo-merge.sh): scripts/test/merge-gate.sh,
+# and the Projects v2 cloud skip and the bench scopes preflight (octo-project-status.sh,
+# octo-setup.sh, octo-doctor.sh, octo-bench.sh): scripts/test/cloud.sh.
 # The proposal fixture the genesis tests share is in scripts/test/genesis-fixture.sh.
 #
 # It deliberately never invokes a helper in a way that reaches the real gh / the network.
