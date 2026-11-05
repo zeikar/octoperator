@@ -89,7 +89,7 @@ same() {
 # slow run reads as a timeout, not as a wrong result.
 exec 9>&2
 bounded() {
-  perl -e '$t = shift; alarm $t; exec @ARGV' "$@"; set -- "$?" "$@"
+  perl -e '$t = shift; alarm $t; exec @ARGV or exit 127' "$@" 9>&-; set -- "$?" "$@"
   [ "$1" -ne 142 ] || echo "  ! TIMEOUT: killed after $2s: ${*:3}" >&9
   return "$1"
 }

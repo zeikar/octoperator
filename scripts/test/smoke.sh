@@ -140,7 +140,7 @@ done
 # slow run reads as a timeout, not as a wrong result.
 exec 9>&2
 bounded() {
-  perl -e '$t = shift; alarm $t; exec @ARGV' "$@"; set -- "$?" "$@"
+  perl -e '$t = shift; alarm $t; exec @ARGV or exit 127' "$@" 9>&-; set -- "$?" "$@"
   [ "$1" -ne 142 ] || echo "  ! TIMEOUT: killed after $2s: ${*:3}" >&9
   return "$1"
 }
@@ -153,6 +153,11 @@ expect 0 "a killed command: exits 142, names the limit and the command on fd 9" 
 bd_out="$( { bounded 5 sh -c 'exit 3' >/dev/null 2>&1; } 9>&1 )"; bd_rc=$?
 expect 0 "a command that ends in time: keeps its exit, nothing on fd 9" \
   test "$bd_rc" -eq 3 -a -z "$bd_out"
+bounded 5 /nonexistent/octo-smoke-cmd >/dev/null 2>&1; bd_rc=$?
+expect 0 "a command that can't be found: exits 127, never a pass" test "$bd_rc" -eq 127
+bd_out="$( bounded 5 sh -c 'ls /dev/fd' 2>/dev/null )"
+expect 0 "the command runs without the suite's fd 9" \
+  test -n "$bd_out" -a -z "$(printf '%s\n' "$bd_out" | grep -x 9)"
 
 echo "• missing flag value (arg parsing)"
 # A trailing flag with no value must exit 2 — not spin on a failed `shift 2` (no `set -e`) nor
