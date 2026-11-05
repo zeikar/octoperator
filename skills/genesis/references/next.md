@@ -147,7 +147,8 @@ in literally. Stop at the first failure with the reason given; nothing is create
    milestone already has. Every requirement gets at least one scenario, at least one is
    `judge: script`, and each is something the product doesn't do yet at the tip, so its eval fails
    there. Give it a short title, and derive `<slug>` from it by conventions.md → Branch naming
-   (lowercase kebab-case, at most 50 characters, cut at a hyphen): the branch is
+   (lowercase kebab-case, at most 50 characters, cut at a hyphen, no trailing stop word such as
+   `a` or `and`): the branch is
    `milestone-<n>-<slug>`.
 7. **The files**, in these formats, written only in step 9:
    - **`docs/prd.md`**: append, never change a line above:

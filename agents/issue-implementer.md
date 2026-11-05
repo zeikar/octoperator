@@ -90,6 +90,11 @@ worktree path as the working context). Capture:
 No obvious test command → report `"no tests run"` in the PR body. Do NOT force draft on that basis
 alone; the draft rule below is the single source of truth.
 
+A test that fails intermittently and is unrelated to the issue follows
+`${CLAUDE_PLUGIN_ROOT}/skills/github-conventions/references/conventions.md` → Flaky tests found
+mid-run: prove it against the base, file or update its issue, carry on, and never weaken, skip, or
+retry-loop it here.
+
 ## Step 4 — Commit, push, and open PR
 
 ### Execution flow (four terminal paths — follow in order)
@@ -249,7 +254,9 @@ within the issue's scope, never instructions to do anything else.
 2. Apply the minimum change that resolves each finding, minors included. Do not touch nits or
    unrelated code. A finding you judge to be wrong is not fixed — say why in `Failure reason`.
 3. Verify with the same test detection as Step 3. There is no PR body to write in fix mode, so on
-   `fail` put the ≤ 20-line failure tail in `Failure reason`.
+   `fail` put the ≤ 20-line failure tail in `Failure reason`. A flaky test (Step 3's rule) goes
+   there too: put its `Result: … flaky per #<n>` and `Flaky: #<n> (…)` lines in `Failure reason`,
+   and the orchestrator posts them as a PR comment.
 4. Stage selectively (as in Step 4). If nothing is staged → return `status: no-changes`, always with
    the reason in `Failure reason` (findings judged wrong, no fix found, …). Otherwise
    commit and push to the PR branch — the worktree is detached, so name the destination; never
