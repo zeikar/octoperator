@@ -385,13 +385,15 @@ A board failure never aborts the run (report "board sync skipped" once and conti
 
 **Then close what the merge finished**, after every confirmed merge, with one helper call. It uses
 REST only (`gh api repos/...`), so it works in a Claude Code cloud session, and it never fails the
-run. On the issue path, pass the issue this PR implemented:
+run. Pass the issue the PR closes: on the issue path, the issue this PR implemented; with
+`--pr`, the subject issue from step 3 (the at-most-one issue the PR closes in `$REPO`):
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-after-merge.sh" --repo "$REPO" --pr <pr#> --issue <issue#>
 ```
 
-On the `--pr` path, leave `--issue` out:
+For a PR that closes no issue (such as a genesis milestone PR, whose subject is the PR itself),
+leave `--issue` out:
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-after-merge.sh" --repo "$REPO" --pr <pr#>
@@ -405,10 +407,11 @@ that issue (the native sub-issue parent, or an open `epic` issue whose `## Child
 item for it) once every child is closed, with a comment naming the PR. It never closes an epic
 with an open child, with no children, or with a `## Children` item that doesn't start with an
 issue as `#N`. It prints a `closed issue #N` or `closed epic #E` line per close, `warn: …` for a
-read or write that failed, or `nothing to close`, and exits 0 (2 only on bad arguments). Put those
-lines in the report's Closed column (step 6). A `warn:` line is reported, never a hold: the PR is
-already merged. Without `--issue` there is nothing to close and no epic to check, so for a `--pr`
-milestone PR the helper prints `nothing to close`.
+read or write that failed, `warn: epic #E kept open: a ## Children item does not start with #N`
+when such an item is all that keeps an epic open, or `nothing to close`, and exits 0 (2 only on
+bad arguments). Put those lines in the report's Closed column (step 6). A `warn:` line is
+reported, never a hold: the PR is already merged. Without `--issue` there is nothing to close and
+no epic to check, so for a PR that closes no issue the helper prints `nothing to close`.
 
 ### 6. Report
 

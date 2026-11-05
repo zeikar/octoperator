@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# octo-after-merge.sh — after auto merges a PR, close what it finished: the issue auto implemented,
+# octo-after-merge.sh — after auto merges a PR, close what it finished: the issue the PR closes,
 # if GitHub left it open, and each epic of that issue whose children are now all closed.
 #
 # Usage:
@@ -8,10 +8,11 @@
 # REST only (`gh api repos/...`): a Claude Code cloud session's proxy refuses GraphQL, so no
 # `gh api graphql` and no `gh issue` / `gh pr` porcelain. --issue is the one issue the PR closes,
 # which auto passes from its own state rather than this helper parsing the PR body; without it
-# (auto's `--pr` path) there is nothing to close and no epic is checked. Acts only on a PR merged
-# into the default branch, and never closes a pull request. GitHub usually closes the issue within
-# seconds, so an open one is re-read up to --tries times in all (default 3), --interval seconds
-# apart (default 5), before it is closed as completed with the comment `Closed by #<pr> (merged)`.
+# (a PR that closes no issue) there is nothing to close and no epic is checked. Acts only on a PR
+# merged into the default branch, and never closes a pull request. GitHub usually closes the issue
+# within seconds, so an open one is re-read up to --tries times in all (default 3), --interval
+# seconds apart (default 5), before it is closed as completed with the comment
+# `Closed by #<pr> (merged)`.
 #
 # The issue's epics are its native parent (`GET .../issues/N/parent`) and every open `epic` issue
 # whose `## Children` section has a list item (`-`, `*`, `+`, or `1.`, with or without a checkbox)
@@ -20,8 +21,9 @@
 # items together) is closed, and every list item starts with an issue as `#N`.
 #
 # Prints one line per action (`closed issue #N`, `closed epic #E`), a `warn: ...` line for each
-# read or write that failed, or `nothing to close`. Exits 0 even then, since the merge already
-# happened; exits 2 only on bad arguments.
+# read or write that failed, `warn: epic #E kept open: a ## Children item does not start with #N`
+# when that item is all that keeps an epic open, or `nothing to close`. Exits 0 even then, since
+# the merge already happened; exits 2 only on bad arguments.
 set -uo pipefail
 
 REPO="" PR="" ISSUE="" TRIES=3 INTERVAL=5
@@ -62,7 +64,7 @@ finish() {
   exit 0
 }
 
-# No issue (a milestone PR): nothing to close, and no issue whose epic to check.
+# No issue (a PR that closes none): nothing to close, and no issue whose epic to check.
 [ -n "$ISSUE" ] || finish
 
 ERRF=$(mktemp) || { warn "mktemp failed; nothing checked"; finish; }
@@ -161,14 +163,14 @@ for e in $CANDIDATES; do
   api "repos/$REPO/issues/$e/sub_issues?per_page=100" --paginate \
     --jq '.[] | "\(.repository_url | sub(".*/repos/"; "") | ascii_downcase)\t\(.number)\t\(.state)"' || {
     warn "could not list the sub-issues of epic #$e: $ERR"; continue; }
-  KIDS=$OUT open_kid="" total=0
+  KIDS=$OUT open_kid="" unnumbered="" total=0
   while IFS=$'\t' read -r r c s; do
     [ -n "$c" ] || continue
     total=$((total + 1)); [ "$s" = closed ] || open_kid=${open_kid:-"$r#$c"}
   done <<<"$KIDS"
   while IFS=$'\t' read -r ce c; do
     [ "$ce" = "$e" ] || continue
-    [ "$c" != "?" ] || { open_kid=${open_kid:-"an item with no issue number"}; continue; }
+    [ "$c" != "?" ] || { unnumbered=1; continue; }
     # Covered only by a sub-issue of this repo with the same number.
     case $'\n'"$KIDS" in *$'\n'"$REPO_LC"$'\t'"$c"$'\t'*) continue ;; esac
     api "repos/$REPO/issues/$c" --jq '.state' || {
@@ -176,7 +178,11 @@ for e in $CANDIDATES; do
     total=$((total + 1)); [ "$OUT" = closed ] || open_kid=${open_kid:-$c}
     KIDS="$KIDS"$'\n'"$REPO_LC"$'\t'"$c"$'\t'"$OUT"
   done <<<"$CHECKLISTS"
-  [ "$total" -ge 1 ] && [ -z "$open_kid" ] || continue
+  [ -z "$open_kid" ] || continue
+  # Every numbered child is closed, so that item alone keeps the epic open: say so.
+  [ -z "$unnumbered" ] || {
+    warn "epic #$e kept open: a ## Children item does not start with #N"; continue; }
+  [ "$total" -ge 1 ] || continue
 
   close_issue "$e" "All children of this epic are closed; closed after #$PR merged." || continue
   done_line "closed epic #$e"

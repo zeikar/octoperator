@@ -168,7 +168,7 @@ for args in "" "--repo o/n" "--pr 10" "--repo o/n --pr x" "--repo o/n --pr 0" "-
 done
 same "no gh call for bad arguments" "" "$(cat "$FX/log" 2>/dev/null)"
 
-echo "• no --issue (auto's --pr path)"
+echo "• no --issue (a PR that closes no issue)"
 fresh; pr; issue 5 open
 o="$(PATH="$stub:$PATH" bounded 20 bash "$HELPER" --repo o/n --pr 10 --interval 0 2>&1)"; r=$?
 same "nothing to close, exit 0" "0|nothing to close" "$r|$o"
@@ -290,13 +290,20 @@ same "numbered and plain items, all closed: the epic closes" "0|closed epic #3" 
 fresh; pr
 issue 3 open "$EPIC" "## Children${nl}- [x] #5${nl}- [ ] # API docs, not filed yet"; issue 5 closed
 run
-same "an item naming no issue keeps the epic open" "0|nothing to close|" "$rc|$out|$writes"
+same "an item naming no issue keeps the epic open, with a warning" \
+  "0|warn: epic #3 kept open: a ## Children item does not start with #N|" "$rc|$out|$writes"
 
 fresh; pr; issue 3 open "$EPIC" "## Children${nl}- [x] #5${nl}- API docs (#6)"; issue 5 closed
 issue 6 closed
 run
-same "an item not starting with #N is unknown: the epic is kept" "0|nothing to close|" \
-  "$rc|$out|$writes"
+same "an item not starting with #N is unknown: the epic is kept, with a warning" \
+  "0|warn: epic #3 kept open: a ## Children item does not start with #N|" "$rc|$out|$writes"
+
+fresh; pr; issue 3 open "$EPIC" "## Children${nl}- [x] #5${nl}- [ ] #6${nl}- API docs"
+issue 5 closed; issue 6 open
+run
+same "an open numbered child keeps the epic too: no unnumbered-item warning" \
+  "0|nothing to close|" "$rc|$out|$writes"
 
 fresh; pr
 issue 3 open "$EPIC" "$(printf '## children\r\n* [X] #5\r\n')"; issue 5 closed
