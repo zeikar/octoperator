@@ -19,7 +19,8 @@
 #                            base (held only when the reviewed commit changes evals/ or
 #                            .gitattributes, or its file list may be cut short at 300 files,
 #                            judged by that commit's files, not the PR's current head's), another
-#                            workflow's or PR's run, and a gh error, against a REST-only stub `gh`
+#                            workflow's or PR's run, a base branch with `#` in its name, a bad
+#                            base tip, and a gh error, against a REST-only stub `gh`
 #                            that runs the helper's --jq filters with jq
 #   - octo-approval-match.sh : pattern normalization, malformed patterns, matching (renames
 #                            included, case ignored, Unicode folding too, genesis's entries
@@ -395,8 +396,10 @@ expect 1 "octo-doctor.sh: an unreadable repo exits 1" \
 echo "• octo-evals-guard.sh (offline, stub gh)"
 # A stub `gh` first on PATH serves REST only, like a Claude Code cloud session: anything but
 # `gh api repos/...` (porcelain, `gh api graphql`) gets the cloud proxy's 403. It answers from
-# JSON files in $EG_DIR, through the helper's own --jq filter (jq -r): the PR → pr.json, git/ref →
-# the tip, contents → a file or, with $EG_NOGUARD, gh's 404, actions/runs → runs.json, a run's
+# JSON files in $EG_DIR, through the helper's own --jq filter (jq -r). Like gh, it drops a raw
+# `#…` from the endpoint as a URL fragment. The PR → pr.json, git/ref of main or of the encoded
+# release/a%23b → the tip (ref.json), of release/a → another commit, contents → a file at the tip,
+# else (or with $EG_NOGUARD) gh's 404, actions/runs → runs.json, a run's
 # jobs → jobs-<run>.json, a compare of the tip with a commit → compare-<sha>.json (another base
 # gets a 404), the PR's own files (its current head's) → files.json, annotations →
 # ann-<id>.json. $EG_RC makes the contents call fail with that code. Each endpoint is logged to
@@ -420,16 +423,20 @@ while [ $# -gt 0 ]; do
   esac
 done
 case "$ep" in repos/*) ;; *) proxy_403 ;; esac
+ep="${ep%%#*}"
 echo "$ep" >>"$EG_DIR/log"
 case "$ep" in
-  */git/ref/heads/main) f="$EG_DIR/ref.json" ;;
+  */git/ref/heads/main | */git/ref/heads/release/a%23b) f="$EG_DIR/ref.json" ;;
+  */git/ref/heads/release/a)
+    echo '{"object":{"sha":"9999999999999999999999999999999999999999"}}' | jq -r "$jq"; exit ;;
   */compare/*...*)
     b="${ep#*/compare/}"; b="${b%%...*}"; f="$EG_DIR/compare-${ep##*...}.json"
     [ "$b" = "$(jq -r .object.sha "$EG_DIR/ref.json")" ] && [ -f "$f" ] \
       || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; } ;;
   */contents/*)
     [ "${EG_RC:-0}" -eq 0 ] || { echo "gh: Server Error (HTTP 500)" >&2; exit "$EG_RC"; }
-    [ -z "${EG_NOGUARD:-}" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+    [ -z "${EG_NOGUARD:-}" ] && [ "${ep##*\?ref=}" = "$(jq -r .object.sha "$EG_DIR/ref.json")" ] \
+      || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
     echo file; exit 0 ;;
   */actions/runs/*/jobs*) f="${ep%/jobs*}"; f="$EG_DIR/jobs-${f##*/}.json" ;;
   */actions/runs\?*) f="$EG_DIR/runs.json" ;;
@@ -486,10 +493,12 @@ eg_files() {
   printf '{"files":%s}\n' "$(eg_list "$@")" >"$EG_DIR/compare-$HEAD_SHA_EG.json"
   eg_head_files "$@"
 }
-# eg_head_files <path[:old path]>... : only the PR's current head's changed files.
+# eg_head_files <path[:old path]>... : only the PR's current head's changed files; its base branch
+# is $EG_BASE, main unless set.
 eg_head_files() {
   eg_list "$@" >"$EG_DIR/files.json"
-  printf '{"base":{"ref":"main"},"changed_files":%s}\n' "$#" >"$EG_DIR/pr.json"
+  jq -n --arg b "${EG_BASE:-main}" --argjson n "$#" '{base: {ref: $b}, changed_files: $n}' \
+    >"$EG_DIR/pr.json"
 }
 # eg_base <id> <sha> : the check run's evals-guard-base notice, beside an unrelated annotation.
 eg_base() {
@@ -600,6 +609,19 @@ expect 0 "a guard run with no recorded base: holds as stale" test "$eg_rc/$eg_ou
 EG_RC=4 eg
 expect 0 "a gh error (not a 404) reading the workflow: exits 3, prints nothing" \
   test "$eg_rc/$eg_out" = "3/"
+# A raw `#` would end the ref path at gh's URL fragment, reading release/a's tip, which has no guard.
+eg_base 10 "$OLD"
+EG_BASE='release/a#b' eg_files evals/recall/check.sh
+rm -f "$EG_DIR/log"
+eg
+expect 0 "a base branch named release/a#b: its own tip, by name in the message, stale" \
+  test "$eg_rc/$eg_out" = "1/evals guard stale: $EG_A ran against $OLD, release/a#b is at $TIP"
+expect 0 "release/a#b's tip is read at the path-encoded release/a%23b" \
+  test "$(sed -n 2p "$EG_DIR/log")" = "repos/o/n/git/ref/heads/release/a%23b"
+echo '{"object":{}}' >"$EG_DIR/ref.json"
+eg
+expect 0 "a base tip that isn't a commit SHA: exits 3, prints nothing" test "$eg_rc/$eg_out" = "3/"
+printf '{"object":{"sha":"%s"}}\n' "$TIP" >"$EG_DIR/ref.json"
 
 echo "• octo-approval-match.sh (offline, stub gh)"
 # A stub `gh` first on PATH logs each call's endpoint to $STUB_LOG and serves REST only, like a

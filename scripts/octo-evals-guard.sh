@@ -13,10 +13,10 @@
 # merge state can read CLEAN all the same. A run whose PR is closed, or comes from a fork,
 # lists no pull request, so it never counts.
 #
-# When the PR changes a path the guard reads (anything under evals/, or the root .gitattributes,
-# a rename's old path included), each job must also have recorded, as its `evals-guard-base`
-# notice, the base branch's tip: a guard run against an older base judged the new evals against
-# code that is no longer there. A PR that changes neither has an empty diff for the guard on any
+# When the reviewed commit changes a path the guard reads (anything under evals/, or the root
+# .gitattributes, a rename's old path included), each job must also have recorded, as its
+# `evals-guard-base` notice, the base branch's tip: a guard run against an older base judged the
+# new evals against code that is no longer there. A PR that changes neither has an empty diff for the guard on any
 # base, so the base moving doesn't make it stale. The files are HEAD_SHA's own against the tip
 # (`GET .../compare/<tip>...HEAD_SHA`, from their merge base), not the PR's list, which describes
 # whatever its head is now; when they can't all be read (300 files or more, the most that API
@@ -24,7 +24,7 @@
 #
 # Prints one line:
 #   pass                                        both guard checks passed (against the tip, when
-#                                               the PR changes evals/)
+#                                               the reviewed commit changes evals/)
 #   none                                        the base branch has no evals guard workflow
 #   evals guard did not pass: <check> <state>   missing, pending, skipped, or failed
 #   evals guard stale: <check> ran against <sha>, <branch> is at <sha>
@@ -55,9 +55,17 @@ trap 'rm -f "$err"' EXIT
 # gh_get <args...> : gh's output, or exit 3 with gh's error.
 gh_get() { gh "$@" 2>"$err" || { cat "$err" >&2; exit 3; }; }
 
-branch="$(gh_get api "repos/$REPO/pulls/$PR" --jq .base.ref)" || exit 3
-[ -n "$branch" ] || { echo "gh printed no base branch for PR $PR" >&2; exit 3; }
-tip="$(gh_get api "repos/$REPO/git/ref/heads/$branch" --jq .object.sha)" || exit 3
+# The base branch's name for messages, and path-encoded per segment for the ref lookup: gh reads
+# a raw `#` as the start of a URL fragment, so `rel#x` would look up the tip of `rel`.
+base="$(gh_get api "repos/$REPO/pulls/$PR" \
+  --jq '[.base.ref, (.base.ref | split("/") | map(@uri) | join("/"))] | @tsv')" || exit 3
+IFS=$'\t' read -r branch branch_path <<EOF
+$base
+EOF
+[ -n "$branch" ] && [ -n "$branch_path" ] \
+  || { echo "gh printed no base branch for PR $PR" >&2; exit 3; }
+tip="$(gh_get api "repos/$REPO/git/ref/heads/$branch_path" --jq .object.sha)" || exit 3
+case "$tip" in *[!0-9a-f]* | '') echo "Unexpected base tip: '$tip'" >&2; exit 3 ;; esac
 if ! gh api "repos/$REPO/contents/.github/workflows/evals-guard.yml?ref=$tip" --jq .type \
     >/dev/null 2>"$err"; then
   grep -q 'HTTP 404' "$err" && { echo none; exit 0; }

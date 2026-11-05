@@ -329,8 +329,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-evals-guard.sh" --repo "$REPO" --pr <pr
 ```
 
 Act on its exit code:
-- **0** — `pass` (both guard checks succeeded, against the tip when the PR changes what the guard
-  reads) or `none` (the base branch has no guard workflow); continue.
+- **0** — `pass` (both guard checks succeeded, against the tip when the reviewed commit changes
+  what the guard reads) or `none` (the base branch has no guard workflow); continue.
 - **1** — it printed why. `evals guard did not pass: …` (a check missing, pending, skipped, or
   failed) → hold with the reason `evals guard did not pass`. `evals guard stale: …` (the guard
   judged the new evals against an older base, so one may already pass on today's) → hold with the

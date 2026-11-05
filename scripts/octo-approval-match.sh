@@ -26,7 +26,9 @@
 #
 # Exit codes: 0 no match (or --normalize succeeded), 1 a match was found and printed, 2 bad
 # arguments or a malformed pattern, 3 the changed files could not all be read (a gh error, 300 or
-# more files, the most the compare API lists, or a path with a tab or newline in it).
+# more files, the most the compare API lists, or a path with a tab or newline in it). Should that
+# limit bite, diffing the merge base's and HEAD_SHA's trees (`git/trees/<sha>?recursive=1`, which
+# flags a truncated tree and holds about 100k files) would raise it.
 set -euo pipefail
 
 REPO="" PR="" SHA="" NORMALIZE=0

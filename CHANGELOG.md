@@ -542,8 +542,9 @@ All notable changes to Octoperator are documented in this file. The format is ba
   `GET .../compare/<tip>...<sha>`, from their merge base, so they still work in a Claude Code
   cloud session. A renamed file's old path still counts, and a list that may be cut short still
   holds (exit 3) or is checked against the base: the compare API lists at most 300 files, so a
-  change of 300 or more now holds, where the old limit was 3000. Output and exit codes are
-  otherwise unchanged. New offline tests in `scripts/test/smoke.sh` serve a PR head whose files
+  change of 300 or more now holds, where the old limit was 3000. `octo-evals-guard.sh` now also
+  path-encodes the base branch's name, as `octo-approval-match.sh` does, so a `#` in it no longer
+  reads another branch's tip. Output and exit codes are otherwise unchanged. New offline tests in `scripts/test/smoke.sh` serve a PR head whose files
   differ from the reviewed commit's.
 - `octo-genesis-check.sh` no longer fails a valid skeleton now and then on a busy machine (#123).
   Under `pipefail`, a check that piped its text from `printf` into a reader that stops early
