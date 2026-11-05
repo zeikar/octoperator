@@ -46,7 +46,15 @@ same() {
   if [ "$2" = "$3" ]; then ok "$1"; else
     no "$1"; printf '      wanted: %s\n      got:    %s\n' "$2" "$3"; fi
 }
-bounded() { perl -e '$t = shift; alarm $t; exec @ARGV' "$@"; }
+# bounded <seconds> <command...> : SIGALRM-kill a hung command (macOS has no `timeout`). A kill
+# exits 142 and says so on fd 9, the suite's own stderr, so no caller's 2>/dev/null hides it and a
+# slow run reads as a timeout, not as a wrong result.
+exec 9>&2
+bounded() {
+  perl -e '$t = shift; alarm $t; exec @ARGV' "$@"; set -- "$?" "$@"
+  [ "$1" -ne 142 ] || echo "  ! TIMEOUT: killed after $2s: ${*:3}" >&9
+  return "$1"
+}
 
 tmp="$(mktemp -d)" && [ -n "$tmp" ] || { echo "vision: mktemp failed" >&2; exit 1; }
 trap 'rm -rf "$tmp"' EXIT

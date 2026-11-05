@@ -9,6 +9,7 @@
 #   - --help output        : only the header usage block (no later comments / directives)
 #
 #   - <script> <flag>      : a value flag given last, with no value, exits 2 (never hangs)
+#   - bounded              : the suites' hang guard exits 142 on a kill and says so on fd 9
 #   - octo-exclude.sh      : run for real against a throwaway local `git init` repo
 #   - octo-worktree.sh     : add / detach / list / remove run for real in a throwaway local repo,
 #                            and attach against a throwaway bare remote (a remote-only branch,
@@ -134,8 +135,24 @@ for s in "${scripts[@]}"; do
   expect 0 "--help shows the usage block only" help_is_header "$s"
 done
 
-# bounded <seconds> <command...> : SIGALRM-kill a hung command (macOS has no `timeout`).
-bounded() { perl -e '$t = shift; alarm $t; exec @ARGV' "$@"; }
+# bounded <seconds> <command...> : SIGALRM-kill a hung command (macOS has no `timeout`). A kill
+# exits 142 and says so on fd 9, the suite's own stderr, so no caller's 2>/dev/null hides it and a
+# slow run reads as a timeout, not as a wrong result.
+exec 9>&2
+bounded() {
+  perl -e '$t = shift; alarm $t; exec @ARGV' "$@"; set -- "$?" "$@"
+  [ "$1" -ne 142 ] || echo "  ! TIMEOUT: killed after $2s: ${*:3}" >&9
+  return "$1"
+}
+
+echo "• bounded (the suites' hang guard)"
+# Every suite has this bounded; a kill must read as a timeout even where the caller hides stderr.
+bd_out="$( { bounded 1 sleep 5 >/dev/null 2>&1; } 9>&1 )"; bd_rc=$?
+expect 0 "a killed command: exits 142, names the limit and the command on fd 9" \
+  test "$bd_rc" -eq 142 -a "$bd_out" = "  ! TIMEOUT: killed after 1s: sleep 5"
+bd_out="$( { bounded 5 sh -c 'exit 3' >/dev/null 2>&1; } 9>&1 )"; bd_rc=$?
+expect 0 "a command that ends in time: keeps its exit, nothing on fd 9" \
+  test "$bd_rc" -eq 3 -a -z "$bd_out"
 
 echo "• missing flag value (arg parsing)"
 # A trailing flag with no value must exit 2 — not spin on a failed `shift 2` (no `set -e`) nor
