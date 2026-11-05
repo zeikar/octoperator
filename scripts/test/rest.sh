@@ -17,12 +17,13 @@
 # rest, and names sent as raw strings; the open-issue text match (case ignored, plain string,
 # pull requests and closed issues left out, every page read) and a gh error; and the ledger's
 # newest allowed entries, the skipped count by author association, exact bodies, an empty
-# ledger, and a gh error; the issues a PR's body closes (every keyword form and case, another
-# repo's and a URL's, a negated keyword counted, fenced and inline code and HTML comments
-# skipped, an unclosed fence or comment, CRLF, a null body), the PR lists by state (every page,
-# oldest first) and --limit (one page, newest-updated first), and a gh error; a body sent on
-# stdin by the cookbook's own heredoc recipes (an issue, a comment, a PATCH, a pull request, a
-# review), arriving byte for byte with nothing run, and its PR read recipes; and the cookbook's
+# ledger, and a gh error; the issues a PR's body closes (every keyword form and case, GH-N,
+# another repo's and a URL's, a negated keyword counted, fenced and inline code and HTML comments
+# skipped, an unclosed fence or comment, CRLF, a null body, none off the default branch), the PR
+# lists by state (every page, oldest first) and --limit (one page, newest-updated first), and a
+# gh error; a body sent on stdin by the cookbook's own heredoc recipes (an issue, a comment, a
+# PATCH, a pull request, a review), arriving byte for byte with nothing run, its PR read recipes,
+# and sync's review-decision read (write-access reviewers only); and the cookbook's
 # label table against octo-labels.sh and every raw label create in the docs. No call is ever
 # rejected.
 #
@@ -212,15 +213,16 @@ issue() {
       html_url: "https://github.com/o/n/issues/\($n)"}
      + (if $pr == "" then {} else {pull_request: {url: "x"}} end)' >"$FX/issues/$1.json"
 }
-# pr <n> <open|closed|merged> <head> [body ("null": none) [draft [updated day [title]]]] :
-# write pulls/<n>.json.
+# pr <n> <open|closed|merged> <head> [body ("null": none) [draft [updated day [title [base]]]]] :
+# write pulls/<n>.json, its repo's default branch main, its base main unless given.
 pr() {
   jq -n --argjson n "$1" --arg s "$2" --arg h "$3" --arg b "${4-}" --arg d "${5:-false}" \
-    --arg u "${6:-$(printf %02d "$1")}" --arg t "${7:-PR $1}" \
+    --arg u "${6:-$(printf %02d "$1")}" --arg t "${7:-PR $1}" --arg base "${8:-main}" \
     '{number: $n, state: (if $s == "merged" then "closed" else $s end),
       merged: ($s == "merged"), merged_at: (if $s == "merged" then "2026-10-01T00:00:00Z" else null end),
       draft: ($d == "true"), title: $t, body: (if $b == "null" then null else $b end),
-      head: {ref: $h, sha: "sha\($n)", repo: {full_name: "o/n"}}, base: {ref: "main", repo: {full_name: "o/n"}},
+      head: {ref: $h, sha: "sha\($n)", repo: {full_name: "o/n"}},
+      base: {ref: $base, repo: {full_name: "o/n", default_branch: "main"}},
       user: {login: "dev"}, updated_at: "2026-10-\($u)T00:00:00Z",
       html_url: "https://github.com/o/n/pull/\($n)"}' >"$FX/pulls/$1.json"
 }
@@ -437,11 +439,12 @@ fixes #16
 > \`\`\`
 \`\`\`inline\`\`\` closes #23
 This does not close #17, and we won't FIX #18 here.
-enclosed #30 prefixes #31 Closes #32abc closes#33 close #0 CLOSED #025 Closes #3"
+enclosed #30 prefixes #31 Closes #32abc closes#33 close #0 CLOSED #025 Closes #3
+Closes gh-26 and fixes: GH-27, but not closes gh-28x or closes gh-0"
 fresh; pr 7 open 7-x "$B"
 run octo-pr-closes.sh --repo o/n --pr 7
 same "every keyword form and case, in body order, each once; another repo's lowercased" \
-  "0|7${tab}open${tab}false${tab}7-x${tab}3,4,other/repo#9,21,x/y#22,14,23,17,18,25${tab}PR 7" \
+  "0|7${tab}open${tab}false${tab}7-x${tab}3,4,other/repo#9,21,x/y#22,14,23,17,18,25,26,27${tab}PR 7" \
   "$rc|$out"
 same "one read of the PR" "1|1" "$(wc -l <"$FX/log" | tr -d ' ')|$(grep -c '^api repos/o/n/pulls/7 --jq ' "$FX/log")"
 
@@ -464,6 +467,10 @@ fresh; pr 9 open b null "" "" "tab${tab}in title"
 run octo-pr-closes.sh --repo o/n --pr 9
 same "a null body closes nothing, and a tab in the title becomes a space" \
   "0|9${tab}open${tab}false${tab}b${tab}-${tab}tab in title" "$rc|$out"
+fresh; pr 10 open 10-s "Closes #3" "" "" "stacked" 9-base
+run octo-pr-closes.sh --repo o/n --pr 10
+same "a PR into a branch other than the default closes nothing, as on GitHub" \
+  "0|10${tab}open${tab}false${tab}10-s${tab}-${tab}stacked" "$rc|$out"
 
 fresh
 pr 1 open 1-a "Closes #11" "" 09; pr 2 merged 2-b "Fixes #12" "" 01; pr 3 closed 3-c "" "" 05
@@ -495,9 +502,10 @@ same "a failed list: exit 1, nothing printed" "1|" "$rc|$out"
 
 echo "• bodies go on stdin, by the cookbook's heredoc recipes"
 COOKBOOK="$SCRIPTS_DIR/../skills/github-conventions/references/gh-cli-cookbook.md"
-# recipe <ERE> <body file> : the first ```bash block after the cookbook line matching <ERE>, as
-# a script: OWNER/NAME becomes o/n, and each line that is a <...> placeholder alone becomes the
-# body file's lines. The body's lines then sit in the recipe's real heredoc, run by bash.
+# recipe <ERE> <body file> [doc] : the first ```bash block after the line matching <ERE> in the
+# cookbook (or doc), as a script: OWNER/NAME becomes o/n, and each line that is a <...>
+# placeholder alone becomes the body file's lines. The body's lines then sit in the recipe's real
+# heredoc, run by bash.
 recipe() {
   awk -v re="$1" -v bodyf="$2" '
     !on && $0 ~ re { on = 1; next }
@@ -507,7 +515,7 @@ recipe() {
       $0 = substr($0, ind + 1)
       if ($0 ~ /^<[^>]*>$/) { while ((getline l < bodyf) > 0) print l; close(bodyf); next }
       gsub("OWNER/NAME", "o/n"); print
-    }' "$COOKBOOK"
+    }' "${3:-$COOKBOOK}"
 }
 # A body that would run commands if bash read it: quotes, a substitution, backticks, a `;`, and
 # a line EOF (only OCTO_BODY_EOF ends the heredoc).
@@ -601,6 +609,20 @@ same "the documented review and comment reads run" "" "$(cat "$tmp/stderr")"
 same "the documented review and comment reads: every page, each body after its header" \
   "0|--- z COMMENTED t1 r1${nl}**Verdict:** approve${nl}--- a APPROVED t2 r2${nl}${nl}--- z COMMENTED t3 r3${nl}two${nl}lines${nl}--- z a.sh:4 c1${nl}here${nl}--- h (OWNER) t4 i1${nl}hi" \
   "$rc|$out"
+
+echo "• sync's review decision counts write-access reviewers only"
+fresh; pr 43 open b
+echo '[{"user": {"login": "a"}, "author_association": "OWNER", "state": "APPROVED", "submitted_at": "t1"},
+  {"user": {"login": "x"}, "author_association": "CONTRIBUTOR", "state": "CHANGES_REQUESTED", "submitted_at": "t2"},
+  {"user": {"login": "m"}, "author_association": "MEMBER", "state": "COMMENTED", "submitted_at": "t3"},
+  {"user": {"login": "y"}, "author_association": "NONE", "state": "APPROVED", "submitted_at": "t4"},
+  {"user": {"login": "c"}, "author_association": "COLLABORATOR", "state": "CHANGES_REQUESTED", "submitted_at": "t5"}]' \
+  >"$FX/prlists/43.reviews.json"
+recipe "^   - Each open PR's review decision" /dev/null "$SCRIPTS_DIR/../skills/sync/SKILL.md" |
+  sed 's/<repo>/o\/n/; s/<pr#>/43/' >"$tmp/sync-reviews.sh"
+out="$(PATH="$stub:$PATH" bounded 20 bash "$tmp/sync-reviews.sh" </dev/null 2>"$tmp/stderr")"; rc=$?
+same "sync's review read: OWNER, MEMBER, and COLLABORATOR, every page, oldest first" \
+  "0|a APPROVED t1${nl}m COMMENTED t3${nl}c CHANGES_REQUESTED t5|" "$rc|$out|$(cat "$tmp/stderr")"
 
 echo "• the cookbook's label table is octo-labels.sh's"
 # label_table : "<name>|<colour>|<description>" per row of the cookbook's label table.

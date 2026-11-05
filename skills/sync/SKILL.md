@@ -36,11 +36,15 @@ changes.
      bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-pr-closes.sh --repo <repo> --state closed --limit 20
      ```
    - Each open PR's review decision: REST has no `reviewDecision`, so read its reviews, oldest
-     first. Take each reviewer's latest `APPROVED`, `CHANGES_REQUESTED`, or `DISMISSED` review:
-     any `CHANGES_REQUESTED` → changes requested; else any `APPROVED` → approved; else none:
+     first, from reviewers with write access only (`OWNER`, `MEMBER`, or `COLLABORATOR`, as
+     GitHub counts them). Take each reviewer's latest `APPROVED`, `CHANGES_REQUESTED`, or
+     `DISMISSED` review: any `CHANGES_REQUESTED` → changes requested; else any `APPROVED` →
+     approved; else none. REST can't tell whether branch protection requires a review, so report
+     "none" as "no review yet (one may be required)", never as approved:
      ```bash
      gh api "repos/<repo>/pulls/<pr#>/reviews?per_page=100" --paginate \
-       --jq '.[] | "\(.user.login) \(.state) \(.submitted_at)"'
+       --jq '.[] | select(.author_association == "OWNER" or .author_association == "MEMBER"
+         or .author_association == "COLLABORATOR") | "\(.user.login) \(.state) \(.submitted_at)"'
      ```
    - Board items (if configured): `gh project item-list <number> --owner <project_owner> --format json`.
    - Milestones: `gh api repos/<repo>/milestones`.

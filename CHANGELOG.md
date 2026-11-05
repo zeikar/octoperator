@@ -364,28 +364,32 @@ All notable changes to Octoperator are documented in this file. The format is ba
   `--body "$(cat <<'EOF' … EOF)"`; a double-quoted `--body` let backticks and `$( )` in the text
   run. `review` now diffs the PR from the commit it checked out,
   `git diff "origin/<base>...<head sha>"`, so the diff and the reviewed commit always match; only
-  when the checkout fails does it take GitHub's diff (`Accept: application/vnd.github.diff`) and
-  re-check the head. On a re-review, and in the fixer when a finding needs context, the PR's
-  reviews, inline comments, and conversation are read over REST, every page. The cookbook's new
+  when the checkout or the base fetch fails does it take GitHub's diff
+  (`Accept: application/vnd.github.diff`) and re-check the head, redoing the checkout once at a
+  moved head (or stopping when it moves again) so a diff never pairs with another commit's tree.
+  On a re-review, and in the fixer when a finding needs context, the PR's reviews, inline
+  comments, and conversation are read over REST, every page. The cookbook's new
   "Read a pull request" section maps each `gh pr view --json` field to REST (`headRefOid` is
   `.head.sha`, `isDraft` is `.draft`, `isCrossRepository` compares the head and base repos'
   `full_name`, true for a deleted fork). REST has no `closingIssuesReferences`, so a new
   REST-only helper, `octo-pr-closes.sh`, reads GitHub's closing keywords (`close`, `fixes`,
-  `resolved`, …, any case, an optional `:`, then `#N`, `owner/name#N`, or an issue URL) in each
-  PR's body. Fenced code, inline code, and HTML comments are skipped, as GitHub links nothing
-  there, and a negated keyword still counts, as it does on GitHub. It prints
+  `resolved`, …, any case, an optional `:`, then `#N`, `GH-N`, `owner/name#N`, or an issue URL)
+  in each PR's body, on a PR into the default branch only, as GitHub links them. Fenced code,
+  inline code, and HTML comments are skipped, as GitHub links nothing there, and a negated
+  keyword still counts, as it does on GitHub. It prints
   `<number> <state> <draft> <head> <closes> <title>` for one PR (`--pr`) or every PR in a state
   (`--state`, every page, or `--limit N` most recently updated). `auto --pr` uses it to check
   that a PR closes at most one issue, in `$REPO`; `implement`, `autopilot`, and `sync` use it in
   place of `gh pr list --json closingIssuesReferences`, so their open-PR lists are no longer cut
-  at 200. `sync` reads each open PR's review decision from its reviews. An issue linked by hand
-  in a PR's Development sidebar is no longer seen. `rest.sh` tests the helper (every keyword
-  form, code, comments, negation, unclosed fences and comments, CRLF, paging) and runs the
-  cookbook's PR create, reviewer request, review post, and PR reads through bash against the
-  stub, which now serves the pull request endpoints; the PR and review bodies arrive byte for
-  byte with nothing run. `smoke.sh` now also fails on `gh pr` in a skill or agent, outside an
-  allowlist that holds the merge gate's `gh pr checks`, `view`, and `merge` until they move to
-  REST (#113), and fails on an allowlist entry that no longer matches any line.
+  at 200. `sync` reads each open PR's review decision from its reviews by write-access
+  reviewers. An issue linked by hand in a PR's Development sidebar is no longer seen. `rest.sh`
+  tests the helper (every keyword form, code, comments, negation, unclosed fences and comments,
+  CRLF, paging, a non-default base) and runs the cookbook's PR create, reviewer request, review
+  post, and PR reads, and sync's review read, through bash against the stub, which now serves
+  the pull request endpoints; the PR and review bodies arrive byte for byte with nothing run.
+  `smoke.sh` now also fails on `gh pr` in a skill or agent, outside an allowlist that holds the
+  merge gate's `gh pr checks`, `view`, and `merge` until they move to REST (#113), and fails on
+  an allowlist entry that no longer matches any line.
 - The conventions gain a rule for a flaky test found mid-run, unrelated to the current issue.
   Re-run it at most twice more on the PR head and run it on the base (`origin/<default>`); one
   that passes on the base but fails on the head is a regression, fixed in the PR. A real flake

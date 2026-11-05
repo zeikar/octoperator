@@ -41,8 +41,10 @@ constraint. Octoperator is autonomous: post immediately unless `--dry-run` is pa
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-worktree.sh" detach --name "review-<pr#>" --ref "<headRefOid>"
    git diff "origin/<base>...<headRefOid>"
    ```
-   Run them one at a time (see `implement`'s command rule). If a fetch fails, go on anyway — the
-   commits may already be in the local object store. `detach` creates
+   Run them one at a time (see `implement`'s command rule). If the head fetch fails, go on anyway —
+   the commit may already be in the local object store, and the add checks it. If the base fetch
+   fails, add the worktree but skip the local `git diff`: a stale `origin/<base>` gives a wrong
+   diff, so take GitHub's (below) instead. `detach` creates
    `.octoperator/worktrees/review-<pr#>-<pid>` (unique per run, so concurrent reviews of the same PR
    never share or delete each other's tree) and prints only its absolute path. Record that path —
    later steps run in separate shells and need it verbatim. Adding by `headRefOid` (not
@@ -53,14 +55,17 @@ constraint. Octoperator is autonomous: post immediately unless `--dry-run` is pa
    empty, remove the worktree (step 4's command), report that, and stop (see Notes).
 
    When the add fails, continue **without** a worktree and tell the reviewer so (step 4). When the
-   add or the diff fails (a diff needs `origin/<base>`), take the diff from GitHub instead:
+   base fetch, the add, or the diff fails, take the diff from GitHub instead:
    ```bash
    gh api -H 'Accept: application/vnd.github.diff' "repos/<repo>/pulls/<pr#>"
    ```
-   That diff is fetched by PR number, so a push in between can pair step 2's metadata with the diff
-   of another commit: re-read the head (`gh api "repos/<repo>/pulls/<pr#>" --jq .head.sha`) and, if
-   it changed, gather both again once; if it changes again, report that the PR is being pushed to
-   and stop. An empty diff → report and stop.
+   That diff is fetched by PR number, so a push in between can pair it with another commit than
+   step 2's `headRefOid` and this run's worktree. Re-read the head
+   (`gh api "repos/<repo>/pulls/<pr#>" --jq .head.sha`). If it changed, remove the worktree this
+   run created, if any (step 4's command), then read step 2's metadata again and redo this step
+   once, at the new `headRefOid`; if it changes again, remove that worktree too, report that the
+   PR is being pushed to, and stop. Never hand the reviewer a diff and a worktree of different
+   commits. An empty diff → remove the worktree, report, and stop.
 
 4. **Run the reviewer.** Dispatch the `pr-reviewer` agent (Task tool) with the PR metadata, the diff
    from step 3, and `worktree` = the recorded absolute path (or "none" when step 3 failed). It returns
@@ -89,7 +94,11 @@ constraint. Octoperator is autonomous: post immediately unless `--dry-run` is pa
    `event`: `COMMENT` for `--comment` (every self-review), `APPROVE` for `--approve`, or
    `REQUEST_CHANGES` for `--request-changes`. The body goes on stdin in the quoted heredoc
    (cookbook → Post a review, by its REST rules), so backticks, `$( )`, and quotes in the findings
-   reach GitHub as written and never the shell. It prints the review's URL:
+   reach GitHub as written and never the shell. The review body is the one most likely to quote
+   untrusted text (PR code, diffs, test output), so mind the delimiter rule: if any line of the
+   body is exactly `OCTO_BODY_EOF`, alter that line, for example by indenting it, before posting,
+   or bash ends the body there and runs the rest as commands. The closing `OCTO_BODY_EOF` starts
+   its line with no indent, though it is shown indented in this list. It prints the review's URL:
    ```bash
    gh api "repos/<repo>/pulls/<pr#>/reviews" -f event=COMMENT -F body=@- --jq .html_url <<'OCTO_BODY_EOF'
    <body>

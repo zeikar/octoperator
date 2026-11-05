@@ -8,13 +8,18 @@
 # REST has no `closingIssuesReferences`: that is a GraphQL field, and a Claude Code cloud
 # session's proxy refuses GraphQL. So this reads each PR's body and finds GitHub's closing
 # keywords in it: close, closes, closed, fix, fixes, fixed, resolve, resolves, or resolved, in
-# any case, an optional `:`, then spaces and `#N`, `OWNER/NAME#N`, or
+# any case, an optional `:`, then spaces and `#N`, `GH-N`, `OWNER/NAME#N`, or
 # `https://github.com/OWNER/NAME/issues/N`. A keyword counts wherever it stands, negated too
 # ("this does not close #5" still closes #5 on GitHub). Text GitHub never links is skipped:
 # fenced code blocks (``` or ~~~, to the end of the body when left open), inline code on one
-# line, and HTML comments (`<!-- … -->`, across lines). An issue linked by hand in the PR's
-# Development sidebar, or by a commit message, is not seen, and a PR's base branch is not
-# checked (GitHub links keywords only on a PR into the default branch).
+# line, and HTML comments (`<!-- … -->`, across lines). GitHub links keywords only on a PR into
+# its repo's default branch, so a PR on any other base closes nothing here (`-`). An issue
+# linked by hand in the PR's Development sidebar, or by a commit message, is not seen.
+# Known gaps: a reference to another repo is listed even where GitHub doesn't link it (as when
+# the author can't write to that repo), an over-match, the safe direction, since every caller
+# acts only on bare numbers or holds; a fence indented 4 or more spaces still counts as a fence
+# (a list item's fence is legitimately indented); and an indented code block, or a code span
+# split across two lines, is read as text.
 #
 # Prints one tab-separated line per PR:
 #   <number> <state> <draft> <head branch> <closes> <title>
@@ -67,9 +72,10 @@ else
   esac
 fi
 
-# Per PR: a `P<TAB><number><TAB><state><TAB><draft><TAB><head><TAB><title>` line, then a
-# `B<TAB><line>` line for each line of its body. --jq runs once per page, so this streams.
-FILTER='"P\t\(.number)\t\(if .merged_at then "merged" else .state end)\t\(.draft // false)\t\(.head.ref)\t\(.title // "" | gsub("[\\r\\n\\t]"; " "))",
+# Per PR: a `P<TAB><number><TAB><state><TAB><draft><TAB><head><TAB><on default><TAB><title>`
+# line (on default: true when the base is the repo's default branch), then a `B<TAB><line>`
+# line for each line of its body. --jq runs once per page, so this streams.
+FILTER='"P\t\(.number)\t\(if .merged_at then "merged" else .state end)\t\(.draft // false)\t\(.head.ref)\t\(.base.ref == .base.repo.default_branch)\t\(.title // "" | gsub("[\\r\\n\\t]"; " "))",
   ((.body // "") | split("\n")[] | "B\t\(.)")'
 if [ -n "$PR" ]; then
   OUT=$(gh api "repos/$REPO/pulls/$PR" --jq "$FILTER") || {
@@ -117,12 +123,14 @@ printf '%s\n' "$OUT" | awk -v repo="$(printf '%s' "$REPO" | tr '[:upper:]' '[:lo
   }
   function refs(s,    t, m, after, ref, own, n) {
     t = tolower(s)
-    while (match(t, /(^|[^a-z0-9_])(close[sd]?|fix(e[sd])?|resolve[sd]?):?[ \t]+(https?:\/\/github\.com\/[a-z0-9._-]+\/[a-z0-9._-]+\/issues\/[0-9]+|([a-z0-9._-]+\/[a-z0-9._-]+)?#[0-9]+)/)) {
+    while (match(t, /(^|[^a-z0-9_])(close[sd]?|fix(e[sd])?|resolve[sd]?):?[ \t]+(https?:\/\/github\.com\/[a-z0-9._-]+\/[a-z0-9._-]+\/issues\/[0-9]+|([a-z0-9._-]+\/[a-z0-9._-]+)?#[0-9]+|gh-[0-9]+)/)) {
       m = substr(t, RSTART, RLENGTH); after = substr(t, RSTART + RLENGTH, 1)
       t = substr(t, RSTART + RLENGTH)
       if (after ~ /[a-z_]/) continue
       ref = m; sub(/^.*[ \t]/, "", ref)
-      if (ref ~ /^http/) {
+      if (ref ~ /^gh-/) {
+        n = substr(ref, 4); own = ""
+      } else if (ref ~ /^http/) {
         sub(/^https?:\/\/github\.com\//, "", ref)
         n = ref; sub(/^.*\//, "", n)
         own = ref; sub(/\/issues\/[0-9]+$/, "", own)
@@ -136,13 +144,13 @@ printf '%s\n' "$OUT" | awk -v repo="$(printf '%s' "$REPO" | tr '[:upper:]' '[:lo
     }
   }
   function flush() {
-    if (have) print meta "\t" (closes == "" ? "-" : closes) "\t" title
+    if (have) print meta "\t" (closes == "" || !ondefault ? "-" : closes) "\t" title
     closes = ""; seen = ""; incomment = 0; fence = ""
   }
   /^P\t/ {
     flush(); have = 1
-    meta = $2 "\t" $3 "\t" $4 "\t" $5
-    title = substr($0, length($1 $2 $3 $4 $5) + 6)
+    meta = $2 "\t" $3 "\t" $4 "\t" $5; ondefault = ($6 == "true")
+    title = substr($0, length($1 $2 $3 $4 $5 $6) + 7)
     next
   }
   /^B\t/ {
