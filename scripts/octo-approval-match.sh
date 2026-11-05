@@ -2,7 +2,8 @@
 # octo-approval-match.sh — match a PR's changed files against `approval_paths` patterns.
 #
 # Usage:
-#   octo-approval-match.sh --pattern GLOB [--pattern GLOB ...] --repo OWNER/NAME --pr NUMBER
+#   octo-approval-match.sh --pattern GLOB [--pattern GLOB ...] --repo OWNER/NAME --pr NUMBER \
+#     --sha HEAD_SHA
 #   octo-approval-match.sh --pattern GLOB [--pattern GLOB ...] --normalize
 #
 # Normalizes each pattern: a leading `/` or `./` is dropped (the pattern stays anchored at the
@@ -15,17 +16,22 @@
 # `?` `[` `]` `{` `}` `!`, a backslash, an empty pattern or segment, a `.` or `..` segment, and
 # a `**` that is not a whole segment are malformed.
 #
-# --normalize prints each normalized pattern, one per line, and makes no gh call. Otherwise lists
-# every path the PR touches (a renamed file's old path too) and prints each match as
-# `<path><TAB><pattern>`, one per line. REST only (`GET .../pulls/N/files`, every page, checked
-# against the PR's `changed_files` count), so it works where GraphQL is refused.
+# --normalize prints each normalized pattern, one per line, and makes no gh call (--repo, --pr,
+# and --sha are then ignored). Otherwise lists every path HEAD_SHA, the reviewed commit, changes
+# against the PR's base branch as it is now (a renamed file's old path too), and prints each match
+# as `<path><TAB><pattern>`, one per line. The PR's own file list describes whatever its head is
+# now, which may not be the commit that merges, so it is not used. REST only (the PR's base
+# branch, that branch's tip, then `GET .../compare/<tip>...HEAD_SHA`, whose three-dot form diffs
+# from their merge base), so it works where GraphQL is refused.
 #
 # Exit codes: 0 no match (or --normalize succeeded), 1 a match was found and printed, 2 bad
-# arguments or a malformed pattern, 3 the PR's changed files could not all be read (a gh error,
-# 3000 or more files, the API's limit, or a path with a tab or newline in it).
+# arguments or a malformed pattern, 3 the changed files could not all be read (a gh error, 300 or
+# more files, the most the compare API lists, or a path with a tab or newline in it). Should that
+# limit bite, diffing the merge base's and HEAD_SHA's trees (`git/trees/<sha>?recursive=1`, which
+# flags a truncated tree and holds about 100k files) would raise it.
 set -euo pipefail
 
-REPO="" PR="" NORMALIZE=0
+REPO="" PR="" SHA="" NORMALIZE=0
 PATTERNS=()
 # Under `set -e` a bare `shift 2` past the last argument would exit 1 with no message.
 need_value() { [ $# -ge 2 ] || { echo "Missing value for $1" >&2; exit 2; }; }
@@ -34,17 +40,20 @@ while [ $# -gt 0 ]; do
     --pattern)   need_value "$@"; PATTERNS+=("$2"); shift 2 ;;
     --repo)      need_value "$@"; REPO="$2"; shift 2 ;;
     --pr)        need_value "$@"; PR="$2"; shift 2 ;;
+    --sha)       need_value "$@"; SHA="$2"; shift 2 ;;
     --normalize) NORMALIZE=1; shift ;;
     -h|--help) sed -n '2,/^[^#]/s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
-usage="Usage: octo-approval-match.sh --pattern GLOB [...] (--repo R --pr N | --normalize)"
+usage="Usage: octo-approval-match.sh --pattern GLOB [...] (--repo R --pr N --sha S | --normalize)"
 [ "${#PATTERNS[@]}" -gt 0 ] || { echo "$usage" >&2; exit 2; }
 if [ "$NORMALIZE" -eq 0 ]; then
-  [ -n "$REPO" ] && [ -n "$PR" ] || { echo "$usage" >&2; exit 2; }
+  [ -n "$REPO" ] && [ -n "$PR" ] && [ -n "$SHA" ] || { echo "$usage" >&2; exit 2; }
   case "$PR" in *[!0-9]*) echo "--pr must be a number" >&2; exit 2 ;; esac
+  case "$SHA" in *[!0-9a-f]*) echo "--sha must be a full commit SHA" >&2; exit 2 ;; esac
+  [ "${#SHA}" -eq 40 ] || { echo "--sha must be a full commit SHA" >&2; exit 2; }
 fi
 
 # normalize <pattern> : prints the normalized pattern, or exits 2 when it is malformed.
@@ -123,23 +132,30 @@ fi
 tmp="$(mktemp -d)" || { echo "mktemp failed" >&2; exit 3; }
 trap 'rm -rf "$tmp"' EXIT
 
-# One line per changed file: its path, a tab, then its old path when renamed (else nothing). A
-# tab or newline inside a path would split it into pieces no pattern matches, so jq fails on one
-# and gh exits non-zero. `|| exit 3`: under `set -e` gh's own exit code would leak out, and gh's
-# 2 would look like a malformed pattern.
-gh api --paginate "repos/$REPO/pulls/$PR/files" \
-  --jq '.[] | [.filename, (.previous_filename // "")]
+# `|| exit 3` on each gh call: under `set -e` gh's own exit code would leak out, and gh's 2 would
+# look like a malformed pattern. The base branch's name is path-encoded per segment.
+BASE="$(gh api "repos/$REPO/pulls/$PR" --jq '.base.ref | split("/") | map(@uri) | join("/")')" \
+  || { echo "Could not read the PR's base branch" >&2; exit 3; }
+[ -n "$BASE" ] || { echo "gh printed no base branch for PR $PR" >&2; exit 3; }
+TIP="$(gh api "repos/$REPO/git/ref/heads/$BASE" --jq .object.sha)" \
+  || { echo "Could not read the base branch's tip" >&2; exit 3; }
+case "$TIP" in *[!0-9a-f]* | '') echo "Unexpected base tip: '$TIP'" >&2; exit 3 ;; esac
+# The file count, then one line per changed file: its path, a tab, then its old path when renamed
+# (else nothing). A tab or newline inside a path would split it into pieces no pattern matches,
+# so jq fails on one and gh exits non-zero; no `files` at all fails too. One read is all there
+# is: the compare API puts the files on its first page only, at most 300 for the whole comparison.
+gh api "repos/$REPO/compare/$TIP...$SHA" \
+  --jq '(.files | length), (.files[] | [.filename, (.previous_filename // "")]
         | if any(.[]; test("[\t\n\r]")) then error("tab or newline in a changed path")
-          else join("\t") end' >"$tmp/files" \
-  || { echo "Could not list the PR's changed files" >&2; exit 3; }
-COUNT="$(gh api "repos/$REPO/pulls/$PR" --jq .changed_files)" \
-  || { echo "Could not read the PR's changed-file count" >&2; exit 3; }
-case "$COUNT" in '' | *[!0-9]*) echo "Unexpected changed_files: '$COUNT'" >&2; exit 3 ;; esac
+          else join("\t") end)' >"$tmp/compare" \
+  || { echo "Could not list the changed files of $SHA" >&2; exit 3; }
+COUNT="$(head -n 1 "$tmp/compare")"
+case "$COUNT" in '' | *[!0-9]*) echo "Unexpected file count: '$COUNT'" >&2; exit 3 ;; esac
+tail -n +2 "$tmp/compare" >"$tmp/files"
 LISTED="$(grep -c '' "$tmp/files" || true)"
-# The files endpoint stops at 3000 files even with --paginate. More lines than files means a
-# path held a newline.
-if [ "$COUNT" -ge 3000 ] || [ "$COUNT" -ne "$LISTED" ]; then
-  echo "$LISTED lines listed for $COUNT changed files" >&2
+# 300 files may be a list cut short. More lines than files means a path held a newline.
+if [ "$COUNT" -ge 300 ] || [ "$COUNT" -ne "$LISTED" ]; then
+  echo "$LISTED lines listed for $COUNT changed files (the compare API lists at most 300)" >&2
   exit 3
 fi
 # Backstop for the jq check: every line has exactly one tab, so none came from inside a path.
