@@ -413,7 +413,8 @@ gh api repos/OWNER/NAME/pulls/43 --jq .merged
 it, and 405 when the PR isn't mergeable. Both mean not merged. With no `commit_title` or
 `commit_message`, GitHub writes its default merge commit ("Merge pull request #43 from
 OWNER/branch"), as every merge so far has. A merge can land even when the call reports an error,
-so `.merged` decides. Then the helper deletes the head branch with
+and a read-back can lag a merge that landed, so the PR counts as merged when the merge call
+answers `merged: true` or the read-back's `.merged` is true. Then the helper deletes the head branch with
 `gh api -X DELETE repos/OWNER/NAME/git/refs/heads/<branch>`, but only one in `OWNER/NAME` (never
 a fork's) that isn't the default branch. A Claude Code cloud session's proxy refuses that
 delete, so a failed delete only warns: the PR is merged either way.
