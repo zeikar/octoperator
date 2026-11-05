@@ -289,11 +289,12 @@ All notable changes to Octoperator are documented in this file. The format is ba
   change exists, then after each passing test run. Each checkpoint is an ordinary conventional
   commit that references the issue (no `wip`, since regular merges keep every commit), pushed
   without force. When an issue's `<issue#>-<slug>` branch exists on the remote and a REST check
-  (`gh api repos/<o>/<r>/pulls?head=<owner>:<b>&state=open`) finds no open PR for it, `implement`
-  resumes on it instead of rejecting it: it starts from the branch's commits and its diff against
-  the default branch. An issue with an open PR is still rejected. A local branch left by a crashed
-  run is reused when it matches the remote or is ahead of it; one that is behind or has diverged
-  stops the issue for a human, and nothing is reset, deleted, or force-pushed. New
+  (`gh api repos/<o>/<r>/pulls?head=<owner>:<b>&state=all`) finds no PR in any state for it,
+  `implement` resumes on it instead of rejecting it: it starts from the branch's commits and its
+  diff against the default branch. An issue with an open PR is still rejected, and so is a branch
+  a closed or merged PR already used, since a human closed or shipped that work. A local branch
+  left by a crashed run is reused when it matches the remote or is ahead of it; one that is behind
+  or has diverged stops the issue for a human, and nothing is reset, deleted, or force-pushed. New
   `octo-worktree.sh attach --branch <b> --path <p>` fetches `origin/<b>` and creates a worktree
   on a local branch tracking it, refusing a branch checked out elsewhere; the parallel path uses
   it, and the in-tree path switches with plain `git` calls. `issue-implementer` gains a `resume`

@@ -260,6 +260,13 @@ expect 0 "it lands on the new remote tip" \
 iso git -C "$clone" worktree remove "$wtmp/att-1"
 expect 0 "attach reuses a local branch that matches origin" \
   attach --branch 3-resume --path "$wtmp/att-1"
+iso git -C "$clone" worktree remove "$wtmp/att-1"
+# A held config lock fails --set-upstream-to, which runs before `worktree add`, so no tree is left.
+: >"$clone/.git/config.lock"
+expect 1 "attach exits 1 when it cannot set the upstream" \
+  attach --branch 3-resume --path "$wtmp/att-1"
+rm -f "$clone/.git/config.lock"
+expect 0 "the failed upstream step creates no tree" test ! -e "$wtmp/att-1"
 expect 1 "attach of a branch absent on origin exits 1" \
   attach --branch 9-missing --path "$wtmp/att-9"
 expect 0 "the failed attach creates no branch or tree" \

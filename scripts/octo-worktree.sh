@@ -102,8 +102,12 @@ case "$ACTION" in
         echo "octo-worktree: local branch '${BRANCH}' is behind or has diverged from origin/${BRANCH}; resolve it by hand" >&2
         exit 1
       fi
+      # Track first, so a failure here leaves no worktree behind.
+      if ! git branch --set-upstream-to="origin/${BRANCH}" "${BRANCH}" >&2; then
+        echo "octo-worktree: could not set '${BRANCH}' to track origin/${BRANCH}" >&2
+        exit 1
+      fi
       git worktree add "${WT_PATH}" "${BRANCH}" >&2
-      git branch --set-upstream-to="origin/${BRANCH}" "${BRANCH}" >&2
     else
       git worktree add --track -b "${BRANCH}" "${WT_PATH}" "origin/${BRANCH}" >&2
     fi

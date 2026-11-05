@@ -325,7 +325,7 @@ Return Markdown in exactly this shape so the orchestrator can parse it without r
 
 Field rules:
 
-- `files changed` — implementation mode: count and list of files changed across ALL commits from `<rev_base>` to HEAD (checkpoints, a resumed branch's earlier commits, and paths B and D included) via `git -C <worktree> diff --name-only <rev_base>..HEAD`; fix mode: this round's commit.
+- `files changed` — implementation mode: count and list of files changed across ALL commits from `<rev_base>` to HEAD (checkpoints, a resumed branch's earlier commits, and paths B and D included) via `git -C <worktree> diff --name-only <rev_base>...HEAD` (three dots, so a resumed branch with an older base does not count files that changed only on the default branch); fix mode: this round's commit.
 - `test result` — `pass` when tests ran and all passed; `fail` when any failed; `none` when no test command was found or run.
 - `PR URL` — the URL returned by `gh pr create`; `none` on `no-changes` or `error`.
 - `commit` — fix mode: `git -C <worktree> rev-parse HEAD` after a successful push, else `none`;

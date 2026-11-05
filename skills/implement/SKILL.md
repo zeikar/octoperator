@@ -127,14 +127,16 @@ itself a worktree, so that condition would block the happy path. Instead, **reco
   - `2` → no match → branch ABSENT (free to create); do NOT treat as error
   - other → network/auth/remote error → validation ERROR (reject this issue or stop); never treat
     an unknown error as "branch absent"
-- For a branch that EXISTS on the remote and passed the open-PR checks above, confirm that no open
-  PR uses it with one REST call, which the `--limit 200` list can't miss (`<owner>` is `$REPO`'s
-  owner):
+- For a branch that EXISTS on the remote and passed the open-PR checks above, confirm that no PR
+  in any state has used it, with one REST call that the `--limit 200` list can't miss (`<owner>` is
+  `$REPO`'s owner):
   ```bash
-  gh api "repos/$REPO/pulls?head=<owner>:<branch>&state=open" --jq 'length'
+  gh api "repos/$REPO/pulls?head=<owner>:<branch>&state=all" --jq 'length'
   ```
-  - `0` → no open PR → **resume** on the branch (step 5).
-  - any other number → reject it as an open-PR issue above; that handling is unchanged.
+  - `0` → no PR has ever used the branch → **resume** on it (step 5).
+  - any other number → **REJECT**. The open-PR checks above already ran and rejected an issue
+    with an open PR, so the reason here is "a closed or merged PR already used this branch;
+    resolve by hand". A human closed or shipped that work, so it is never resumed.
   - the call fails → validation ERROR, as for `ls-remote`.
 
 Report rejected issues with their reason and continue with the remaining valid set.
@@ -163,20 +165,20 @@ run would act on.
   default branch per `github-conventions`).
 - Branch checked out in a **different** worktree → **REJECT** (cannot check it out in two places).
 - Branch exists only as a local branch not checked out → `git switch <branch>` (reuse it).
-- Remote branch exists with no open PR (step 3) → **resume** on it (8b), unless it is checked out
-  in a different worktree (REJECT, above). A local branch left by a crashed run is reused only when
-  it matches the remote branch or is ahead of it; otherwise 8b stops and reports.
+- Remote branch exists and no PR has used it (step 3) → **resume** on it (8b), unless it is checked
+  out in a different worktree (REJECT, above). A local branch left by a crashed run is reused only
+  when it matches the remote branch or is ahead of it; otherwise 8b stops and reports.
 
 **Parallel worktree path:**
-- Remote branch exists with no open PR (step 3) → **resume**: P2 attaches its worktree with
+- Remote branch exists and no PR has used it (step 3) → **resume**: P2 attaches its worktree with
   `octo-worktree.sh attach`, which applies the same local-branch rule and refuses a branch checked
   out in any worktree.
 - Otherwise, any existing local branch → **REJECT** (a branch cannot be checked out in two
   worktrees).
 
 Resuming only adds commits on top of the remote branch: it is never reset, deleted, or
-force-pushed, and a local branch that is behind or has diverged is left for the user. An issue
-with an open PR stays the step-3 rejection.
+force-pushed, and a local branch that is behind or has diverged is left for the user. A branch
+that any PR has used (open, closed, or merged) stays a step-3 rejection.
 
 ### 6. Dry-run gate — BEFORE any mutation
 
@@ -482,8 +484,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-worktree.sh" attach --branch <b> --path
 ```
 
 It exits 1, creating no worktree and leaving any local `<b>` as it was, when `<b>` is checked out
-in a worktree, a local `<b>` is behind or has diverged from the remote, or the fetch fails. Reject that issue with the reason
-"resume failed: <its message>" and continue with the rest.
+in a worktree, a local `<b>` is behind or has diverged from the remote, or the fetch fails. Reject
+that issue with the reason "resume failed: <its message>" and continue with the rest.
 
 Store `$wt` (the absolute path) in the `CREATED` set and pass it as the `worktree` parameter to the
 corresponding `Task` invocation.
