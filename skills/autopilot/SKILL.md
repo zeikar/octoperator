@@ -146,7 +146,8 @@ skipped (author association X)" — so a runner posting under the wrong identity
 
 ### 1. Load settings & parse flags
 
-Read `.claude/octoperator.local.md` for `repo` (fall back to `gh repo view`), `branch_pattern`
+Read `.claude/octoperator.local.md` for `repo` (fall back to
+`gh api 'repos/{owner}/{repo}' --jq .full_name`), `branch_pattern`
 (default `{number}-{slug}`), and `convergence_runs` (default `3`; a value that is not a positive
 integer falls back to `3`, and say so). Resolve `REPO` once.
 Parse and validate flags:

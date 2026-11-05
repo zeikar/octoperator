@@ -55,7 +55,7 @@ another skill or plugin being available.
 
 Octoperator drives the `gh` CLI. Before the first write in a session, verify:
 
-- A read call such as `gh repo view` succeeds (the user is authenticated). Don't gate on
+- A read call such as `gh api user` succeeds (the user is authenticated). Don't gate on
   `gh auth status`: it checks every stored host and token, so it can fail where the token in use
   works (a Claude Code cloud session's).
 - Projects v2 board operations are **optional**. They need a **classic PAT** with the `project` scope
@@ -71,7 +71,7 @@ verify auth, repo access, project access, and to print the board's Status option
 Per-project configuration lives in `.claude/octoperator.local.md` (local-only, via `.git/info/exclude`), parsed as YAML
 frontmatter. Read it at the start of every action to resolve the target repo, project, labels,
 milestone, branch pattern, and reviewers. If it is missing, fall back to the current repo
-(`gh repo view --json nameWithOwner`) and tell the user how to create it.
+(`gh api 'repos/{owner}/{repo}' --jq .full_name`) and tell the user how to create it.
 
 The full schema, an example file, and bootstrap steps are in **`references/settings.md`**.
 

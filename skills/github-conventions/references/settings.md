@@ -87,7 +87,8 @@ any change outside its Roadmap body on every PR (`conventions.md` → Approval g
 
 Read the file directly (it is short) and use the frontmatter values. When the file is absent:
 
-- Resolve `repo` from `gh repo view --json nameWithOwner --jq '.nameWithOwner'`.
+- Resolve `repo` from `gh api 'repos/{owner}/{repo}' --jq .full_name` (REST; gh fills the
+  placeholders from the git remote).
 - Skip project/board operations and warn that no project is configured.
 - Suggest creating the file (see bootstrap below).
 

@@ -36,11 +36,12 @@
 #                            the planning-failed line (the newest run entry's planning_failed,
 #                            past observe entries; none after a reset, a newer run, with
 #                            --resume, or when malformed; its reason on one line, cut at 80),
-#                            a gh error, and bad arguments
+#                            a gh error, and bad arguments, its comments read across pages
 #   - octo-milestone-gate.sh : autopilot's P == T decision (and genesis --next's guards):
 #                            buildable work wins over everything without a gh call, then an
-#                            open next-milestone PR (the lowest of two; a fork's milestone-*
-#                            branch and other branches don't count), then P < T or no metric,
+#                            open next-milestone PR (the lowest of two, across pages; a fork's
+#                            or a deleted fork's milestone-* branch and other branches don't
+#                            count), then P < T or no metric,
 #                            then planning that failed at the tip, then the newest closed
 #                            milestone PR declined at the tip: the tip is the merge base (no
 #                            date read), or the tip's committer date is at or before closedAt
@@ -59,7 +60,11 @@
 #                            naming another tool doesn't; invalid JSON or the wrong shape allows
 #                            nothing; bad arguments exit 2
 #
-# Nothing here calls the real gh or the network. Exits 0 when every check passes, 1 when any fails.
+# The stub gh serves REST only and refuses GraphQL and porcelain with the Claude Code cloud
+# proxy's 403, and no helper call is refused. REST has no isEmpty, so an empty repo is covered
+# too: its default_branch still reads, its contents 404 (no evals workflow), and its tip 409s
+# (the gate exits 3). Nothing here calls the real gh or the network. Exits 0 when every check
+# passes, 1 when any fails.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -87,44 +92,68 @@ command -v jq >/dev/null || { echo "autopilot: jq is required for the stub gh" >
 tmp="$(mktemp -d)" && [ -n "$tmp" ] || { echo "autopilot: mktemp failed" >&2; exit 1; }
 trap 'rm -rf "$tmp"' EXIT
 
-# A stub `gh` first on PATH answers from JSON files in $ST_DIR through the helper's own --jq
-# filter (jq -r): `repo view` → repo.json, contents → a file or, with $ST_NOWF, gh's 404, a
-# workflow's runs → runs.json (or a 404 with $ST_NORUNS; it checks the branch and status
-# parameters), a run's jobs → jobs-<run>.json, annotations → ann-<id>.json (or none), and
-# `issue view` → ledger.json, `pr list` → prs.json (--state open) or prs-closed.json (--state
-# closed, `[]` when missing), a branch's ref → ref.json (it checks the branch), a compare →
+# A stub `gh` first on PATH serves REST only, like a Claude Code cloud session: anything but
+# `gh api repos/...` (porcelain, `gh api graphql`) gets the cloud proxy's 403 and is logged to
+# $ST_DIR/rejected. It answers from JSON files in $ST_DIR through the helper's own --jq filter
+# (jq -r): the repo → repo.json, contents → a file or, with $ST_NOWF, gh's 404 (with $ST_EMPTY,
+# the 404 an empty repo gives), a workflow's runs → runs.json (or a 404 with $ST_NORUNS; it
+# checks the branch and status parameters), a run's jobs → jobs-<run>.json, annotations →
+# ann-<id>.json (or none), the ledger's comments → ledger.json, the open pull requests →
+# prs.json, the newest closed ones → prs-closed.json (`[]` when missing), a branch's ref →
+# ref.json (it checks the branch; with $ST_EMPTY, the 409 an empty repo gives), a compare →
 # compare.json (or gh's 404 with $ST_CMP404), the tip's commit → commit.json (it checks the
-# commit), and the runs for one head commit → runs-tip.json (it checks the parameters).
+# commit), and the runs for one head commit → runs-tip.json (it checks the parameters). A list
+# the helper reads with --paginate (the comments, the open pull requests) is served two items a
+# page, running the filter once per page, as gh does; the closed list, read without it, is one
+# page, standing in for GitHub's 100.
 # $ST_FAIL=<endpoint word> makes that call fail with a 500 (pr-open and pr-closed for the lists).
 stub="$tmp/bin"
 ST_DIR="$tmp/st"
 mkdir -p "$stub" "$ST_DIR"
 cat >"$stub/gh" <<'STUB'
 #!/usr/bin/env bash
-cmd="$1"; shift; ep="" jq="" params="" state=""
+call=$(printf '%s' "$*" | tr '\n' ' ')
+reject() {
+  echo "$call" >>"$ST_DIR/rejected"
+  echo 'gh: GitHub GraphQL is not available from Claude Code sessions; use the REST API (gh api repos/{owner}/{repo}/...). (HTTP 403)' >&2
+  exit 1
+}
+[ "${1:-}" = api ] || reject
+shift; ep="" jq="." params="" paginate=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --paginate) shift ;; --jq) jq="$2"; shift 2 ;; --repo | --json | -X | --limit) shift 2 ;;
-    --state) state="$2"; shift 2 ;;
+    --paginate) paginate=1; shift ;; --jq) jq="$2"; shift 2 ;; -X) shift 2 ;;
     -f) params="$params $2"; shift 2 ;;
+    -*) echo "stub: unknown flag $1" >&2; exit 9 ;;
     *) ep="${ep:-$1}"; shift ;;
   esac
 done
+[ "$ep" != graphql ] || reject
 fail() { echo "gh: Server Error (HTTP 500)" >&2; exit 1; }
-case "$cmd" in
-  repo) [ "${ST_FAIL:-}" != repo ] || fail; f="$ST_DIR/repo.json" ;;
-  issue) [ "${ST_FAIL:-}" != issue ] || fail; f="$ST_DIR/ledger.json" ;;
-  pr) [ "${ST_FAIL:-}" != "pr-$state" ] || fail
-    case "$state" in
-      open) f="$ST_DIR/prs.json" ;;
-      closed) f="$ST_DIR/prs-closed.json"; [ -f "$f" ] || { echo '[]' | jq -r "$jq"; exit; } ;;
-      *) echo "stub: bad state $state" >&2; exit 9 ;;
-    esac ;;
-  api)
+# pages <file> : the JSON array in <file>, two items a page, the filter run on each.
+pages() {
+  local n i=0
+  [ "$paginate" -eq 1 ] || { echo "stub: $ep without --paginate" >&2; exit 9; }
+  n=$(jq length "$1")
+  while [ "$i" -lt "$n" ]; do jq -c ".[$i:$((i + 2))]" "$1" | jq -r "$jq" || exit 9; i=$((i + 2)); done
+  exit 0
+}
+case "$ep" in
+  repos/o/n) [ "${ST_FAIL:-}" != repo ] || fail; f="$ST_DIR/repo.json" ;;
+  "repos/o/n/issues/9/comments?per_page=100")
+    [ "${ST_FAIL:-}" != issue ] || fail; pages "$ST_DIR/ledger.json" ;;
+  "repos/o/n/pulls?state=open&per_page=100")
+    [ "${ST_FAIL:-}" != pr-open ] || fail; pages "$ST_DIR/prs.json" ;;
+  "repos/o/n/pulls?state=closed&sort=created&direction=desc&per_page=100")
+    [ "${ST_FAIL:-}" != pr-closed ] || fail
+    [ "$paginate" -eq 0 ] || { echo "stub: one page wanted" >&2; exit 9; }
+    f="$ST_DIR/prs-closed.json"; [ -f "$f" ] || { echo '[]' | jq -r "$jq"; exit; } ;;
+  repos/o/n/*)
     case "$ep" in
       */contents/.github/workflows/evals.yml)
         [ "${ST_FAIL:-}" != contents ] || fail
         [ -z "${ST_NOWF:-}" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+        [ -z "${ST_EMPTY:-}" ] || { echo "gh: This repository is empty. (HTTP 404)" >&2; exit 1; }
         case "$params" in *" ref=$ST_BRANCH"*) ;; *) echo "stub: bad ref:$params" >&2; exit 9 ;; esac
         echo file; exit 0 ;;
       */actions/workflows/evals.yml/runs)
@@ -143,6 +172,7 @@ case "$cmd" in
         f="${ep%/jobs*}"; f="$ST_DIR/jobs-${f##*/}.json" ;;
       */git/ref/heads/*) [ "${ST_FAIL:-}" != ref ] || fail
         [ "$ep" = "repos/o/n/git/ref/heads/$ST_BRANCH" ] || { echo "stub: bad ref $ep" >&2; exit 9; }
+        [ -z "${ST_EMPTY:-}" ] || { echo "gh: Git Repository is empty. (HTTP 409)" >&2; exit 1; }
         f="$ST_DIR/ref.json" ;;
       */compare/*) [ "${ST_FAIL:-}" != compare ] || fail
         [ "$ep" = "repos/o/n/compare/$ST_TIP...$ST_CMP_HEAD" ] || { echo "stub: bad compare $ep" >&2; exit 9; }
@@ -156,7 +186,7 @@ case "$cmd" in
         [ -f "$f" ] || { echo '[]' | jq -r "$jq"; exit; } ;;
       *) echo "stub: unexpected endpoint $ep" >&2; exit 9 ;;
     esac ;;
-  *) echo "stub: unexpected command $cmd" >&2; exit 9 ;;
+  *) echo "stub: unexpected endpoint $ep" >&2; exit 9 ;;
 esac
 jq -r "$jq" "$f"
 STUB
@@ -164,7 +194,8 @@ chmod +x "$stub/gh"
 export ST_DIR ST_BRANCH=trunk
 
 echo "• octo-evals-metric.sh (offline, stub gh)"
-printf '{"defaultBranchRef":{"name":"trunk"}}\n' >"$ST_DIR/repo.json"
+# REST's default_branch (GraphQL's defaultBranchRef.name).
+printf '{"full_name":"o/n","default_branch":"trunk"}\n' >"$ST_DIR/repo.json"
 URL=https://github.com/o/n/actions/runs/77
 # sha <n> : a 40-digit commit for <n>, the head of run <n>.
 sha() { printf '%040d' "$1"; }
@@ -211,6 +242,10 @@ reads() {
 
 ST_NOWF=1 metric
 reads_null "no evals.yml on the default branch: no evals workflow" "no evals workflow"
+# REST has no isEmpty, and an empty repo still has a default_branch (GraphQL's defaultBranchRef
+# was null): the workflow file's read 404s, so it reads as no workflow.
+ST_EMPTY=1 metric
+reads_null "an empty repo (its contents 404): no evals workflow" "no evals workflow"
 # notice <title> <message> : one notice annotation's JSON.
 notice() { printf '{"annotation_level":"notice","title":"%s","message":"%s"}' "$1" "$2"; }
 runs 77:failure
@@ -321,7 +356,7 @@ e() {
     "$2" "$3" "$1"
 }
 # ledger <assoc|body>... : write the ledger's comments, oldest first. Each argument is
-# "<authorAssociation>|<entry json>", posted in the recipe's shape, or "<assoc>|=<raw body>".
+# "<author_association>|<entry json>", posted in the recipe's shape, or "<assoc>|=<raw body>".
 ledger() {
   local sep="" body="" a b
   for a in "$@"; do
@@ -330,10 +365,10 @@ ledger() {
       =*) b="${b#=}" ;;
       *) b="$(printf 'Autopilot run (semi): merged nothing.\n\n```json\n%s\n```' "$b")" ;;
     esac
-    body="$body$sep$(jq -n --arg a "${a%%|*}" --arg b "$b" '{authorAssociation: $a, body: $b}')"
+    body="$body$sep$(jq -n --arg a "${a%%|*}" --arg b "$b" '{author_association: $a, body: $b}')"
     sep=","
   done
-  printf '{"comments":[%s]}\n' "$body" >"$ST_DIR/ledger.json"
+  printf '[%s]\n' "$body" >"$ST_DIR/ledger.json"
 }
 # state <args...> : run the helper on ledger #9 with --runs 3 unless given; sets out / rc.
 state() {
@@ -552,13 +587,20 @@ HW=5 AP=yes decides "a newer run entry without it: none" "0 (since the last all-
 ledger "$O|$(e reset 0 "$(m 5 5)" | jq -c --arg t "$T7" '. + {planning_failed: {tip: $t, reason: "x"}}')"
 state --metric 5/5
 HW=5 AP=yes decides "on a reset entry it is not read" "0 (since the last reset)" none 0/3 build
+# A tip of 40 hex digits and a newline, or 39 and a newline (40 characters), is not a tip.
 for bad in '"milestone invalid"' '{"tip": "abc", "reason": "x"}' "{\"tip\": \"$T7\", \"reason\": 3}" \
-    "{\"tip\": \"$T7\"}"; do
+    "{\"tip\": \"$T7\"}" "{\"tip\": \"$T7\\n\", \"reason\": \"x\"}" \
+    "{\"tip\": \"${T7:1}\\n\", \"reason\": \"x\"}"; do
   ledger "$O|$(e run 0 "$(m 5 5)" | jq -c --argjson p "$bad" '. + {planning_failed: $p}')"
   state --metric 5/5
   HW=5 AP=yes decides "a malformed planning_failed ($bad): none" \
     "0 (since the last all-pass entry)" none 0/3 build
 done
+# Another author's planning_failed is never read, so its tip cannot split the helper's records.
+ledger "$O|$(e run 0 "$(m 4 6)")" "NONE|$(pf "$T7"$'\n' $'OWNER\treset')"
+state
+HW=4 decides "another author's planning_failed, a tip with a newline: skipped, nothing else" \
+  "1 (all)" "1 (NONE)" 1/3 build
 long="$(printf 'x%.0s' $(seq 1 90))"
 ledger "$O|$(pf "$T7" $'git commit\nfailed')"
 state --metric 5/5
@@ -579,27 +621,34 @@ for bad in "--runs 0" "--runs x" "--metric 7/6" "--metric 0/0" "--metric 04/6" "
 done
 
 echo "• octo-milestone-gate.sh (offline, stub gh)"
-# prs [<number>:<head branch>[:fork]]... : the open PRs.
+# head_repo <fork: empty, fork, or gone> : a PR's head repo, as REST gives it: this repo's, a fork's, or
+# null for a deleted fork.
+head_repo() {
+  case "$1" in '') echo '{"full_name":"o/n"}' ;; gone) echo null ;; *) echo '{"full_name":"fork/n"}' ;; esac
+}
+# prs [<number>:<head branch>[:fork|:gone]]... : the open PRs, in REST's shape.
 prs() {
   local sep="" body="" p num br fk
   for p in "$@"; do
     IFS=: read -r num br fk <<<"$p"
-    body="$body$sep$(printf '{"number":%s,"url":"https://github.com/o/n/pull/%s","headRefName":"%s","isCrossRepository":%s}' \
-      "$num" "$num" "$br" "$([ -n "$fk" ] && echo true || echo false)")"
+    body="$body$sep$(printf '{"number":%s,"html_url":"https://github.com/o/n/pull/%s","head":{"ref":"%s","repo":%s},"base":{"repo":{"full_name":"o/n"}}}' \
+      "$num" "$num" "$br" "$(head_repo "$fk")")"
     sep=","
   done
   printf '[%s]\n' "$body" >"$ST_DIR/prs.json"
 }
-# closed [<number>:<head branch>:<CLOSED|MERGED>[:fork]]... : the closed and merged PRs, newest
-# first, as gh lists them; PR <number>'s head commit is $(sha <number>), and each closed at
-# $CLOSED_AT.
+# closed [<number>:<head branch>:<CLOSED|MERGED>[:fork|:gone]]... : the closed and merged PRs,
+# newest first, as REST lists them (state closed; merged_at set once merged); PR <number>'s head
+# commit is $(sha <number>), and each closed at $CLOSED_AT (null when it is `null`).
 CLOSED_AT=2026-01-02T00:00:00Z
 closed() {
-  local sep="" body="" p num br st fk
+  local sep="" body="" p num br st fk at
+  at="\"$CLOSED_AT\""; [ "$CLOSED_AT" != null ] || at=null
   for p in "$@"; do
     IFS=: read -r num br st fk <<<"$p"
-    body="$body$sep$(printf '{"number":%s,"state":"%s","headRefName":"%s","headRefOid":"%s","isCrossRepository":%s,"closedAt":"%s"}' \
-      "$num" "$st" "$br" "$(sha "$num")" "$([ -n "$fk" ] && echo true || echo false)" "$CLOSED_AT")"
+    body="$body$sep$(printf '{"number":%s,"state":"closed","merged_at":%s,"head":{"ref":"%s","sha":"%s","repo":%s},"base":{"repo":{"full_name":"o/n"}},"closed_at":%s}' \
+      "$num" "$([ "$st" = MERGED ] && echo "$at" || echo null)" "$br" "$(sha "$num")" \
+      "$(head_repo "$fk")" "$at")"
     sep=","
   done
   printf '[%s]\n' "$body" >"$ST_DIR/prs-closed.json"
@@ -744,7 +793,16 @@ closed 43:milestone-2-x:CLOSED:fork 42:44-fix:CLOSED 41:milestone-2-sync:MERGED
 ST_FAIL=compare gate 5/5 "$H78"
 same "a fork's milestone-* PR and another branch's PR don't count" \
   "0|milestone-pr: none|tip: $H78|decision: plan" "$rc|$out"
+closed 44:milestone-2-y:CLOSED:gone 41:milestone-2-sync:MERGED
+ST_FAIL=compare gate 5/5 "$H78"
+same "a deleted fork's milestone-* PR (head repo null) doesn't count" \
+  "0|milestone-pr: none|tip: $H78|decision: plan" "$rc|$out"
 closed
+prs 15:milestone-2-y:gone 12:42-fix-login
+gate 5/5 "$H78"
+same "an open PR from a deleted fork on a milestone-* branch doesn't count: plan" \
+  "0|milestone-pr: none|tip: $H78|decision: plan" "$rc|$out"
+prs
 
 for step in pr-open repo ref; do
   ST_FAIL=$step gate 5/5 "$H78"
@@ -760,6 +818,9 @@ closed
 tip 79
 ST_FAIL=tipruns gate 5/5 "$H78"
 same "a gh error listing the tip's runs exits 3" "3|" "$rc|$out"
+# REST names a default branch even for an empty repo, whose tip read then answers 409.
+ST_EMPTY=1 gate 5/5 "$H78"
+same "an empty repo (its tip read 409s) exits 3, deciding nothing" "3|" "$rc|$out"
 printf '{"object":{"sha":"abc"}}\n' >"$ST_DIR/ref.json"
 gate 5/5 "$H78"
 same "a tip that is not a commit exits 3" "3|" "$rc|$out"
@@ -829,6 +890,14 @@ for bad in "" "a b" "--bogus" "$tmp/web/missing"; do
   out="$(bash "$SCRIPTS_DIR/octo-web-allowed.sh" $bad 2>/dev/null)"; rc=$?
   same "bad arguments (${bad:-none}) exit 2" "2|" "$rc|$out"
 done
+
+echo "• the stub gh refuses GraphQL and porcelain, as a Claude Code cloud session does"
+out="$(PATH="$stub:$PATH" gh pr list --repo o/n 2>&1)"; rc=$?
+same "porcelain gets the proxy's 403" "1|GraphQL is not available" "$rc|$(printf '%s' "$out" | grep -o 'GraphQL is not available')"
+out="$(PATH="$stub:$PATH" gh api graphql -f query='{viewer{login}}' 2>&1)"; rc=$?
+same "gh api graphql gets it too" "1|GraphQL is not available" "$rc|$(printf '%s' "$out" | grep -o 'GraphQL is not available')"
+grep -v -e '^pr list --repo o/n$' -e '^api graphql' "$ST_DIR/rejected" >"$ST_DIR/rejected.helpers"
+same "no helper call was refused" "" "$(cat "$ST_DIR/rejected.helpers")"
 
 echo
 echo "autopilot: $pass passed, $fail failed"

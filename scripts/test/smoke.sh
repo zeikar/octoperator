@@ -55,16 +55,25 @@
 #                            UTF-8-safe cut, git-state failures (a rewrite only a repo's config
 #                            has included), the epic lookup, plan-epic, and handoff tail; it
 #                            writes nothing and never calls gh (stub `gh`)
+#   - octo-setup.sh / octo-doctor.sh : the repo and default branch over REST (the remote's
+#                            repo with no --repo), a failing read, and gh's message made safe,
+#                            against a stub `gh` that refuses porcelain but Projects v2's
 #   - octo-genesis-epic.sh : the open-epic lookup's match (a wrapped `> ` quote, the lowest of
-#                            two, a near miss, another case, glob characters taken literally), a
-#                            gh failure, and an invalid proposal (no gh call), against a stub
-#                            `gh` running its jq filter
+#                            two across pages, a pull request left out, a near miss, another
+#                            case, glob characters taken literally), a gh failure, and an invalid
+#                            proposal (no gh call), against a REST-only stub `gh` running its jq
+#                            filter
 #   - octo-bench.sh        : the --live gate and --dry-run make no gh / claude call; preflight,
-#                            check's metrics, run's cost cap, and cleanup, against a stub `gh`
-#                            and `claude`
-#   - skills and agents    : no skill or agent file but genesis's runs `gh issue`, `gh label`,
-#                            or `gh pr` (GraphQL-backed), outside a short allowlist of lines that
-#                            only mention them, every entry used
+#                            setup's REST calls (a user's or an organization's repo), check's
+#                            metrics (merged, held, closed, merge state still null) and its
+#                            clone with gh's credentials, run's cost cap, and cleanup (by name,
+#                            a failed read), against a REST-only stub `gh`, a stub `git` for
+#                            github.com, and a stub `claude`; no call is refused
+#   - GraphQL check        : no scripts/octo-*.sh, bench/*.sh, skill, or agent file but
+#                            genesis's runs `gh api graphql` or GraphQL-backed porcelain
+#                            (`gh issue`, `gh label`, `gh pr`, `gh repo`, `gh project`; a
+#                            script's comment lines skipped), outside a short allowlist, each
+#                            entry with its reason and every entry used
 #
 # The eval templates genesis copies (run.sh, guard.sh) have their own tests: scripts/test/evals.sh.
 # The helpers behind autopilot's run ledger, its P == T decision, and its web access
@@ -298,26 +307,31 @@ expect 2 "attach without --path exits 2" attach --branch 3-resume
 
 echo "• octo-setup.sh (offline, stub gh)"
 # A stub `gh` whose `auth status` always fails, as in a Claude Code cloud session whose token
-# still works: setup must not depend on it. $SETUP_REPO_RC makes `repo view` fail with a message.
+# still works: setup must not depend on it. It serves the repo over REST only (with no --repo,
+# the helper asks for `repos/{owner}/{repo}`, which gh fills from the git remote), and refuses
+# other porcelain and `gh api graphql` with the cloud proxy's 403; `project list` answers, as
+# Projects v2 has no REST API (#115). $SETUP_REPO_RC makes the repo read fail with a message.
 sstub="$wtmp/setup-bin"
 mkdir -p "$sstub"
 cat >"$sstub/gh" <<'STUB'
 #!/usr/bin/env bash
 case "$1 $2" in
   "auth status") echo "X github.com: authentication failed" >&2; exit 1 ;;
-  "repo view")
+  "api repos/{owner}/{repo}" | "api repos/o/n")
     case "${SETUP_REPO_RC:-0}" in
-      1) printf 'HTTP 403: "Forbidden"\\\n(graphql)\n' >&2; exit 1 ;;
+      1) printf 'HTTP 403: "Forbidden"\\\n(rest)\n' >&2; exit 1 ;;
       2) printf 'bad\377 \303 end\n' >&2; exit 1 ;;
     esac
-    case "$*" in
-      *nameWithOwner*) echo o/n ;;
-      *) echo main ;;
+    case "$3 $4" in
+      "--jq .full_name") echo o/n ;;
+      "--jq .default_branch") echo main ;;
+      *) echo "unexpected: $*" >&2; exit 9 ;;
     esac ;;
   "project list") echo '[]' ;;
   "api user") echo octo-smoke ;;
   "--version "*) echo "gh version 0.0.0 (stub)" ;;
-  *) echo "unexpected: $*" >&2; exit 9 ;;
+  *) echo 'gh: GitHub GraphQL is not available from Claude Code sessions; use the REST API (gh api repos/{owner}/{repo}/...). (HTTP 403)' >&2
+     exit 1 ;;
 esac
 STUB
 chmod +x "$sstub/gh"
@@ -327,7 +341,11 @@ expect 0 "a failing gh auth status no longer stops setup: the repo and default b
 su_out="$(SETUP_REPO_RC=1 PATH="$sstub:$PATH" bounded 10 bash "$SCRIPTS_DIR/octo-setup.sh" \
   --repo o/n 2>/dev/null)"; su_rc=$?
 expect 0 "a failing repo lookup: exit 1, valid JSON whose detail is gh's message, made safe" \
-  test "$su_rc" -eq 1 -a "$(printf '%s' "$su_out" | jq -r .detail)" = 'HTTP 403: Forbidden (graphql)'
+  test "$su_rc" -eq 1 -a "$(printf '%s' "$su_out" | jq -r .detail)" = 'HTTP 403: Forbidden (rest)'
+su_out="$(SETUP_REPO_RC=1 PATH="$sstub:$PATH" bounded 10 bash "$SCRIPTS_DIR/octo-setup.sh" \
+  2>/dev/null)"; su_rc=$?
+expect 0 "no --repo and the remote's repo unreadable: exit 1, the no-repo error" \
+  test "$su_rc" -eq 1 -a "$(printf '%s' "$su_out" | jq -r .error | cut -c1-8)" = 'no repo:'
 expect 2 "octo-setup.sh --repo 'o/n\"x' exits 2" \
   bounded 10 env PATH="$sstub:$PATH" bash "$SCRIPTS_DIR/octo-setup.sh" --repo 'o/n"x'
 expect 2 "octo-setup.sh --owner 'a\"b' exits 2" \
@@ -337,8 +355,13 @@ su_out="$(SETUP_REPO_RC=2 LC_ALL=en_US.UTF-8 PATH="$sstub:$PATH" bounded 10 \
   bash "$SCRIPTS_DIR/octo-setup.sh" --repo o/n 2>/dev/null)"
 expect 0 "invalid UTF-8 in gh's message: dropped, the rest kept, the JSON valid UTF-8" \
   test "$(printf '%s' "$su_out" | jq -r .detail)" = 'bad  end'
+dr_out="$(PATH="$sstub:$PATH" bounded 10 bash "$SCRIPTS_DIR/octo-doctor.sh" --repo o/n 2>/dev/null)"
+dr_rc=$?
 expect 0 "octo-doctor.sh: a failing gh auth status no longer stops it (gh api user is the probe)" \
-  bounded 10 env PATH="$sstub:$PATH" bash "$SCRIPTS_DIR/octo-doctor.sh" --repo o/n
+  test "$dr_rc" -eq 0 -a -n "$(printf '%s\n' "$dr_out" \
+    | grep -Fx '✓ Repo o/n reachable (default branch: main)')"
+expect 1 "octo-doctor.sh: an unreadable repo exits 1" \
+  bounded 10 env SETUP_REPO_RC=1 PATH="$sstub:$PATH" bash "$SCRIPTS_DIR/octo-doctor.sh" --repo o/n
 
 echo "• octo-evals-guard.sh (offline, stub gh)"
 # A stub `gh` first on PATH serves REST only, like a Claude Code cloud session: anything but
@@ -1586,9 +1609,10 @@ eval "$pl_saved_env"
 echo "• octo-genesis-epic.sh (offline, stub gh)"
 EPIC="$SCRIPTS_DIR/octo-genesis-epic.sh"
 # A stub gh first on PATH logs each call's first two words (the filter spans lines) to $STUB_LOG
-# and exits $STUB_GH_RC when that is non-zero.
-# `issue list` with the helper's flags applies the helper's own --jq filter to $STUB_JSON with jq
-# (gh runs it with its built-in gojq); any other call fails.
+# and exits $STUB_GH_RC when that is non-zero. It serves REST only: anything but the helper's
+# `gh api` list of open epics (porcelain, `gh api graphql`) gets the cloud proxy's 403. The list,
+# read with --paginate, applies the helper's own --jq filter to $STUB_JSON with jq (gh runs it
+# with its built-in gojq), two issues a page, as gh runs it once per page.
 estub="$wtmp/epic-bin"
 mkdir -p "$estub"
 cat >"$estub/gh" <<'STUB'
@@ -1596,16 +1620,17 @@ cat >"$estub/gh" <<'STUB'
 echo "gh $1 $2" >>"$STUB_LOG"
 [ "${STUB_GH_RC:-0}" -eq 0 ] || { echo "stub gh: failing" >&2; exit "$STUB_GH_RC"; }
 case " $* " in
-  " issue list --repo smoke/chat-pal --label epic --state open --limit 500 --json number,body \
---jq "*) ;;
-  *) echo "stub gh: unexpected: $*" >&2; exit 1 ;;
+  " api repos/smoke/chat-pal/issues?state=open&labels=epic&per_page=100 --paginate --jq "*) ;;
+  *) echo 'gh: GitHub GraphQL is not available from Claude Code sessions; use the REST API (gh api repos/{owner}/{repo}/...). (HTTP 403)' >&2
+     exit 1 ;;
 esac
-exec jq -r "${14}" "$STUB_JSON"
+n=$(jq length "$STUB_JSON") i=0
+while [ "$i" -lt "$n" ]; do jq -c ".[$i:$((i + 2))]" "$STUB_JSON" | jq -r "$5" || exit 9; i=$((i + 2)); done
 STUB
 chmod +x "$estub/gh"
 STUB_LOG="$wtmp/epic-log"
 STUB_JSON="$wtmp/epic.json"
-# genesis_epic <json> [dir] : run the helper on the fixture (default $g/valid) with gh's issue
+# genesis_epic <json> [dir] : run the helper on the fixture (default $g/valid) with the REST issue
 # list answering <json>; sets ep_out (stdout), ep_rc, and ep_calls (gh calls made).
 genesis_epic() {
   printf '%s' "$1" >"$STUB_JSON"
@@ -1628,8 +1653,12 @@ if command -v jq >/dev/null 2>&1; then
   genesis_epic '[{"number":9,"body":"'"$sent"'"},
     {"number":1,"body":"A character-chat app: it remembers you across long chats."},
     {"number":5,"body":"See:\n'"$sent"'\n"}, {"number":2,"body":null}]'
-  expect 0 "two epics quote it, one nearly: the lowest that quotes it, epic: 5" \
+  expect 0 "two epics quote it, one nearly, across two pages: the lowest that quotes it, epic: 5" \
     test "$ep_rc/$ep_out" = "0/epic: 5"
+  genesis_epic '[{"number":3,"pull_request":{"url":"x"},"body":"'"$sent"'"},
+    {"number":8,"body":"'"$sent"'"}]'
+  expect 0 "a pull request labeled epic that quotes it is left out: epic: 8" \
+    test "$ep_rc/$ep_out" = "0/epic: 8"
   genesis_epic '[{"number":3,"body":"a'"${sent#A}"'"},
     {"number":6,"body":"'"${sent%.}"'"}]'
   expect 0 "another case, or the sentence cut short: epic: none" \
@@ -1663,31 +1692,76 @@ expect 2 "no DIR exits 2"        bounded 10 bash "$EPIC"
 expect 2 "a missing DIR exits 2" bounded 10 bash "$EPIC" "$wtmp/nosuch"
 
 echo "• octo-bench.sh (offline, stub gh and claude)"
-# Stubs first on PATH log every call to $STUB_LOG. gh answers from the fixture dir $STUB_CASE:
-# `repo clone` copies $STUB_CASE/repo, `pr list` / `pr view` print list.json / view.json, and
-# `repo list --json name --jq .[].name` applies that filter to repos.json. claude sleeps
-# $STUB_CLAUDE_SLEEP seconds first, when set.
+# Stubs first on PATH log every call to $STUB_LOG. gh serves REST only, like a Claude Code cloud
+# session: anything but `gh api` (porcelain, `gh api graphql`) gets the cloud proxy's 403 and is
+# logged to $STUB_REJECTED too. It answers from the fixture dir $STUB_CASE: the newest PR from
+# pulls.json, that PR from pull.json, and its reviews from reviews.json (two a page, the --jq
+# filter run on each, as gh does), each through the helper's own --jq filter (jq -r); a repo
+# read by name answers when its name is in repos.json (else gh's 404; $STUB_READ_FAIL makes it
+# a 500); and creates, a label, an issue (number 1), and deletes succeed. git passes through to
+# the real git, except a clone or push of https://github.com/...: it logs the call, and a clone
+# copies $STUB_CASE/repo. claude sleeps $STUB_CLAUDE_SLEEP seconds first, when set.
 bstub="$wtmp/bench-bin"
 mkdir -p "$bstub"
 cat >"$bstub/gh" <<'STUB'
 #!/usr/bin/env bash
 echo "gh $*" >>"$STUB_LOG"
-case "$1 $2" in
-  "api -i") printf 'HTTP/2.0 200 OK\r\nX-Oauth-Scopes: %s\r\n\r\n{"login":"stub"}\n' \
-              "${STUB_SCOPES-repo, delete_repo}" ;;
-  "repo clone") mkdir "$4" && cp -R "$STUB_CASE/repo/." "$4/" ;;  # gh repo clone <repo> <dir>
-  "pr list") cat "$STUB_CASE/list.json" ;;
-  "pr view") cat "$STUB_CASE/view.json" ;;
-  "repo list")
-    case " $* " in
-      *" --json name --jq .[].name "*) ;;
-      *) echo "stub gh: bad: $*" >&2; exit 1 ;;
-    esac
-    python3 -c 'import json, sys
-for r in json.load(open(sys.argv[1])): print(r["name"])' "$STUB_CASE/repos.json" ;;
-  "repo create"|"repo delete"|"label create") ;;
-  "issue create") cat >/dev/null; echo "https://github.com/stub/x/issues/1" ;;
-  *) echo "stub gh: unexpected: $*" >&2; exit 1 ;;
+reject() {
+  echo "gh $*" >>"$STUB_REJECTED"
+  echo 'gh: GitHub GraphQL is not available from Claude Code sessions; use the REST API (gh api repos/{owner}/{repo}/...). (HTTP 403)' >&2
+  exit 1
+}
+[ "${1:-}" = api ] || reject "$@"
+shift
+ep="" jq="." method="" paginate=0 head=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -i) head=1; shift ;;
+    --paginate) paginate=1; shift ;;
+    --jq) jq="$2"; shift 2 ;;
+    -X) method="$2"; shift 2 ;;
+    -f | -F) [ "$2" != body=@- ] || cat >/dev/null; method="${method:-POST}"; shift 2 ;;
+    -*) echo "stub gh: unknown flag $1" >&2; exit 9 ;;
+    *) ep="$1"; shift ;;
+  esac
+done
+[ "$ep" != graphql ] || reject api graphql
+nf() { echo '{"message":"Not Found"}'; echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+case "${method:-GET} $ep" in
+  "GET user")
+    [ "$head" -eq 1 ] || { echo "stub gh: want -i" >&2; exit 9; }
+    printf 'HTTP/2.0 200 OK\r\nX-Oauth-Scopes: %s\r\n\r\n{"login":"stub"}\n' \
+      "${STUB_SCOPES-repo, delete_repo}" ;;
+  "POST user/repos" | "POST orgs/"*/repos) jq -nr "{full_name: \"x/y\"} | $jq" ;;
+  "POST repos/"*/labels) echo '{}' ;;
+  "POST repos/"*/issues) jq -nr "{number: 1} | $jq" ;;
+  "GET repos/"*"/pulls?state=all&per_page=1") jq -r "$jq" "$STUB_CASE/pulls.json" ;;
+  "GET repos/"*"/reviews?per_page=100")
+    [ "$paginate" -eq 1 ] || { echo "stub gh: want --paginate" >&2; exit 9; }
+    n=$(jq length "$STUB_CASE/reviews.json") i=0
+    while [ "$i" -lt "$n" ]; do
+      jq -c ".[$i:$((i + 2))]" "$STUB_CASE/reviews.json" | jq -r "$jq" || exit 9; i=$((i + 2))
+    done ;;
+  "GET repos/"*/pulls/*) jq -r "$jq" "$STUB_CASE/pull.json" ;;
+  "GET repos/"*/*/*) echo "stub gh: unexpected: $ep" >&2; exit 9 ;;
+  "GET repos/"*/*)
+    [ -z "${STUB_READ_FAIL:-}" ] || { echo "gh: Server Error (HTTP 500)" >&2; exit 1; }
+    jq -e --arg n "${ep##*/}" 'any(.[]; .name == $n)' "$STUB_CASE/repos.json" >/dev/null || nf
+    echo "${ep#repos/}" ;;
+  "DELETE repos/"*/*) ;;
+  *) echo "stub gh: unexpected: ${method:-GET} $ep" >&2; exit 9 ;;
+esac
+STUB
+cat >"$bstub/git" <<'STUB'
+#!/usr/bin/env bash
+url=""
+for a in "$@"; do case "$a" in https://github.com/*) url="$a" ;; esac; done
+[ -n "$url" ] || exec "$REAL_GIT" "$@"
+echo "git $*" >>"$STUB_LOG"
+case " $* " in
+  *" clone "*) for dest in "$@"; do :; done; mkdir "$dest" && cp -R "$STUB_CASE/repo/." "$dest/" ;;
+  *" push "*) ;;
+  *) echo "stub git: unexpected: $*" >&2; exit 9 ;;
 esac
 STUB
 cat >"$bstub/claude" <<'STUB'
@@ -1696,8 +1770,10 @@ echo "claude $*" >>"$STUB_LOG"
 [ -z "${STUB_CLAUDE_SLEEP:-}" ] || exec sleep "$STUB_CLAUDE_SLEEP"
 echo '{"total_cost_usd": 3, "num_turns": 5, "modelUsage": {"stub-model": {"costUSD": 3}}}'
 STUB
-chmod +x "$bstub/gh" "$bstub/claude"
-export STUB_LOG="$wtmp/bench.log" BENCH_RESULTS_DIR="$wtmp/results"
+chmod +x "$bstub/gh" "$bstub/git" "$bstub/claude"
+REAL_GIT="$(command -v git)"
+export STUB_LOG="$wtmp/bench.log" BENCH_RESULTS_DIR="$wtmp/results" REAL_GIT \
+  STUB_REJECTED="$wtmp/bench-rejected"
 BENCH="$SCRIPTS_DIR/octo-bench.sh"
 bench() { PATH="$bstub:$PATH" bounded 60 bash "$BENCH" "$@"; }
 # no_calls <label> <wanted-exit> <args...> : exits <wanted-exit> without calling gh or claude.
@@ -1737,20 +1813,33 @@ cp -R "$seed/seed/." "$cases/merged/repo/" && cp -R "$seed/seed/." "$cases/held/
   && cp -R "$seed/seed/." "$cases/nopr/repo/" \
   && (cd "$cases/merged/repo" && git apply "$seed/solution.patch") \
   || { echo "smoke: could not build the octo-bench fixtures" >&2; exit 1; }
-echo '[{"number": 7}]' >"$cases/merged/list.json"
-cat >"$cases/merged/view.json" <<'JSON'
-{"number": 7, "state": "MERGED", "isDraft": false, "mergeStateStatus": "UNKNOWN", "reviews": [
- {"body": "**Intended verdict: request_changes.** Self.\n\n### Major\n- a"},
+# REST's shapes: the PR list's first page, the PR's fields the check reads, and its reviews.
+echo '[{"number": 7}]' >"$cases/merged/pulls.json"
+echo '{"number": 7, "state": "closed", "merged": true, "draft": false, "mergeable_state": null}' \
+  >"$cases/merged/pull.json"
+cat >"$cases/merged/reviews.json" <<'JSON'
+[{"body": "**Intended verdict: request_changes.** Self.\n\n### Major\n- a"},
  {"body": "**Intended verdict: request_changes.**\n\n### Blockers\n- b\n\n### Minor\n- c"},
  {"body": "Looks good.\n\n### Minor\n- a human review, not Octoperator's"},
- {"body": "**Intended verdict: approve.** Round 2.\n\n### Minor\n- d\n\n### Nits\n- e"}]}
+ {"body": "**Intended verdict: approve.** Round 2.\n\n### Minor\n- d\n\n### Nits\n- e"}]
 JSON
-echo '[{"number": 3}]' >"$cases/held/list.json"
-cat >"$cases/held/view.json" <<'JSON'
-{"number": 3, "state": "OPEN", "isDraft": false, "mergeStateStatus": "BLOCKED", "reviews": [
- {"body": "**Verdict:** request_changes\n**Summary:** x\n\n### Major\n- a"}]}
-JSON
-echo '[]' >"$cases/nopr/list.json"
+echo '[{"number": 3}]' >"$cases/held/pulls.json"
+echo '{"number": 3, "state": "open", "merged": false, "draft": false, "mergeable_state": "blocked"}' \
+  >"$cases/held/pull.json"
+echo '[{"body": "**Verdict:** request_changes\n**Summary:** x\n\n### Major\n- a"}]' \
+  >"$cases/held/reviews.json"
+# An approved open PR whose merge state GitHub has not computed yet (null), and a closed one.
+mkdir -p "$cases/unknown" "$cases/closed"
+for c in unknown closed; do
+  cp -R "$cases/held/repo" "$cases/$c/repo" && echo '[{"number": 4}]' >"$cases/$c/pulls.json" \
+    && echo '[{"body": "**Verdict:** approve"}, {"body": null}]' >"$cases/$c/reviews.json" \
+    || { echo "smoke: could not build the octo-bench fixtures" >&2; exit 1; }
+done
+echo '{"number": 4, "state": "open", "merged": false, "draft": false, "mergeable_state": null}' \
+  >"$cases/unknown/pull.json"
+echo '{"number": 4, "state": "closed", "merged": false, "draft": false, "mergeable_state": "dirty"}' \
+  >"$cases/closed/pull.json"
+echo '[]' >"$cases/nopr/pulls.json"
 mkdir -p "$BENCH_RESULTS_DIR"
 cat >"$BENCH_RESULTS_DIR/octo-bench-vsort-numeric-merged.solve.json" <<'JSON'
 {"octoperator_sha": "abc123", "exit": 0, "duration_s": 42, "claude": {"total_cost_usd": 1.25,
@@ -1785,6 +1874,18 @@ expect 0 "check without solve's JSON: nulls, and this checkout's sha" \
 check_case nopr
 expect 0 "check, no PR" \
   test "$crc $(fields "$cline" $metrics)" = '0 null false false false 0 0 "no PR"'
+check_case unknown
+expect 0 "check, an approved open PR whose mergeable_state is still null: merge state UNKNOWN" \
+  test "$crc $(fields "$cline" $metrics)" = '0 4 false false false 0 0 "merge state UNKNOWN"'
+rm -f "$STUB_LOG"
+check_case closed
+expect 0 "check, a PR closed unmerged: closed" \
+  test "$crc $(fields "$cline" $metrics)" = '0 4 false false false 0 0 "closed"'
+clone="git -c credential.https://github.com.helper= -c credential.https://github.com.helper=!gh \
+auth git-credential clone -q https://github.com/o/octo-bench-vsort-numeric-closed.git "
+expect 0 "check clones over https with gh's credentials (gh repo clone needs GraphQL)" \
+  test "$(grep '^git ' "$STUB_LOG" | sed 's|/[^ ]*/check-|<tmp>/check-|')" \
+    = "$clone<tmp>/check-octo-bench-vsort-numeric-closed"
 expect 0 "check records every field, and no others" test "$(python3 -c 'import json, sys
 print(" ".join(sorted(json.loads(sys.argv[1]))))' "$cline")" = "$(printf '%s\n' task repo $metrics \
   $solved | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
@@ -1847,7 +1948,7 @@ nc_err="$(PATH="$nobin" bounded 60 "$(command -v bash)" "$BENCH" run --tasks vso
 nc_rc=$?
 expect 0 "run without claude exits 1 in preflight, creating no repo" \
   test "$nc_rc" -eq 1 -a -n "$(printf '%s\n' "$nc_err" | grep -F 'claude is not installed')" \
-    -a -z "$(grep -F 'repo create' "$STUB_LOG" 2>/dev/null)"
+    -a -z "$(grep -F 'user/repos' "$STUB_LOG" 2>/dev/null)"
 
 # cleanup deletes exactly this run's repos: r1, not r1-2 or r10 (whose names start the same).
 mkdir -p "$cases/repos"
@@ -1859,61 +1960,168 @@ JSON
 rm -f "$STUB_LOG"
 STUB_CASE="$cases/repos" bench cleanup --run-id r1 --live >/dev/null 2>&1
 cl_rc=$?
-expect 0 "cleanup --run-id r1 deletes only the -r1 repos" \
-  test "$cl_rc $(grep '^gh repo delete' "$STUB_LOG" | tr '\n' ' ')" = "0 gh repo delete \
-stub/octo-bench-retry-docs-r1 --yes gh repo delete stub/octo-bench-vsort-numeric-r1 --yes "
+expect 0 "cleanup --run-id r1 deletes only the -r1 repos, over REST" \
+  test "$cl_rc $(grep '^gh api -X DELETE' "$STUB_LOG" | tr '\n' ' ')" = "0 gh api -X DELETE \
+repos/stub/octo-bench-retry-docs-r1 gh api -X DELETE repos/stub/octo-bench-vsort-numeric-r1 "
 rm -f "$STUB_LOG"
 cl_err="$(STUB_SCOPES=repo STUB_CASE="$cases/repos" bench cleanup --run-id r1 --live 2>&1)"
 cl_rc=$?
 expect 0 "cleanup without delete_repo deletes nothing, lists the repos, and exits 1" \
-  test "$cl_rc" -eq 1 -a -z "$(grep '^gh repo delete' "$STUB_LOG")" \
+  test "$cl_rc" -eq 1 -a -z "$(grep '^gh api -X DELETE' "$STUB_LOG")" \
     -a -n "$(printf '%s\n' "$cl_err" | grep -Fx '  stub/octo-bench-retry-docs-r1')" \
     -a -n "$(printf '%s\n' "$cl_err" | grep -Fx '  stub/octo-bench-vsort-numeric-r1')"
+rm -f "$STUB_LOG"
+cl_err="$(STUB_READ_FAIL=1 STUB_CASE="$cases/repos" bench cleanup --run-id r1 --live 2>&1)"
+cl_rc=$?
+expect 0 "cleanup: a repo read that fails other than 404 exits 1, deleting nothing" \
+  test "$cl_rc" -eq 1 -a -z "$(grep '^gh api -X DELETE' "$STUB_LOG")" \
+    -a -n "$(printf '%s\n' "$cl_err" | grep -F 'could not read stub/octo-bench-')"
+cl_out="$(STUB_CASE="$cases/repos" bench cleanup --run-id r9 --live 2>/dev/null)"
+expect 0 "cleanup of a run with no repos (every read 404s) says so" \
+  test "$cl_out" = "no repos for run r9 under stub"
 
-echo "• skills and agents read and write issues, labels, and pull requests over REST"
-# `gh issue …`, `gh label …`, and `gh pr …` use GraphQL, which a Claude Code cloud session's proxy
-# refuses, so no skill or agent file may run them; issues, labels, pull requests, and reviews go
-# through `gh api repos/...` (the cookbook's REST rules). genesis runs only locally, where GraphQL
-# works, and is left out.
-# PORCELAIN_ALLOW lists the lines that only mention a command, one "<path>|<text on the line>" each.
-# An entry that no longer matches any line fails the check.
-PORCELAIN_ALLOW='skills/github-conventions/references/gh-cli-cookbook.md|never the porcelain
-skills/autopilot/references/milestone.md|`gh pr create failed`) may well pass then'
-# porcelain_hits <file...> : "<path>:<line>:<text>" for each line naming gh issue, gh label, or
-# gh pr, after any spaces and global flags (`gh -R o/n issue`, `gh --repo=o/n label`).
+# setup creates the repo over REST (user/repos, or orgs/<owner>/repos for another owner),
+# pushes the seed over https with gh's credentials, and files the issue over REST.
+rm -f "$STUB_LOG"
+su_out="$(STUB_CASE="$cases/nopr" bench setup vsort-numeric --run-id s1 --live 2>/dev/null)"
+su_rc=$?
+title="$(sed -n '/^---$/,$p' "$SCRIPTS_DIR/../bench/tasks/vsort-numeric/task.md" \
+  | sed -n 's/^# //p' | head -n 1)"
+expect 0 "setup prints <owner/repo> <issue#>" \
+  test "$su_rc|$su_out" = "0|stub/octo-bench-vsort-numeric-s1 1"
+expect 0 "setup's calls: the repo, the seed push, the label, the issue, in order" \
+  test "$(grep -v '^gh api -i user' "$STUB_LOG" | sed 's/ --jq .*//; s|/[^ ]*/seed-|<tmp>/seed-|')" \
+    = "gh api user/repos -f name=octo-bench-vsort-numeric-s1 -F private=true
+git -c credential.https://github.com.helper= -c credential.https://github.com.helper=!gh auth \
+git-credential -C <tmp>/seed-vsort-numeric push -q \
+https://github.com/stub/octo-bench-vsort-numeric-s1.git main
+gh api repos/stub/octo-bench-vsort-numeric-s1/labels -f name=bug -f color=d73a4a -f description=Defect
+gh api repos/stub/octo-bench-vsort-numeric-s1/issues -f title=$title -f labels[]=bug -F body=@-"
+rm -f "$STUB_LOG"
+STUB_CASE="$cases/nopr" bench setup vsort-numeric --run-id s2 --owner Some-Org --live \
+  >/dev/null 2>&1
+expect 0 "setup --owner <an org> creates the repo under orgs/<owner>/repos" \
+  test -n "$(grep -Fx 'gh api orgs/Some-Org/repos -f name=octo-bench-vsort-numeric-s2 -F private=true --jq .full_name' "$STUB_LOG")"
+rm -f "$STUB_LOG"
+STUB_CASE="$cases/nopr" bench setup vsort-numeric --run-id s3 --owner STUB --live >/dev/null 2>&1
+expect 0 "setup --owner <the gh user, any case> creates it under user/repos" \
+  test -n "$(grep -F 'gh api user/repos -f name=octo-bench-vsort-numeric-s3' "$STUB_LOG")"
+expect 0 "no octo-bench gh call was refused (no GraphQL, no porcelain)" \
+  test ! -s "$STUB_REJECTED"
+
+echo "• no script, skill, or agent outside genesis uses GraphQL"
+# A Claude Code cloud session's proxy refuses GraphQL, so nothing Octoperator runs there may use
+# it: no `gh api graphql`, and none of the porcelain that uses GraphQL under the hood: `gh issue`,
+# `gh label`, `gh pr`, `gh repo` (view, list, clone, create, and delete each read or write the
+# repo over GraphQL), and `gh project` (Projects v2 has no REST API at all). Issues, labels, pull
+# requests, reviews, and repos go through `gh api repos/...` (the cookbook's REST rules). `gh run`
+# and `gh workflow` are REST, so they pass.
+# Scope: every scripts/octo-*.sh, bench/*.sh, skill, and agent file, except genesis's:
+# skills/genesis/ and octo-genesis-plan.sh (which prints genesis --approve's own steps). genesis
+# --approve creates the repo, so it runs only locally, where GraphQL works. genesis --next (the
+# skills/genesis/references/next.md calls), which autopilot runs, does reach a cloud session: that
+# gap is tracked in #127. A script's comment line (`#` its first non-blank character) only
+# mentions a command, so it is not checked. A line ending in `\` is joined with the next.
+# PORCELAIN_ALLOW lists the lines allowed, one "<path>|<text on the line>|<why>" each. A line
+# passes when, with the text of every entry it matches taken out, nothing on it is a hit. An
+# entry that no longer matches any line fails the check.
+PORCELAIN_ALLOW='skills/github-conventions/references/gh-cli-cookbook.md|never the porcelain `gh label create --force`|a mention: the REST rule against `gh label create`
+skills/github-conventions/references/gh-cli-cookbook.md|(`gh repo view`, `list`, `clone`, `create`, and `delete` too)|a mention: the REST rule itself
+skills/autopilot/references/milestone.md|`gh pr create failed`) may well pass then|a mention: genesis --next'"'"'s stop reason
+skills/autopilot/references/milestone.md|failure (`git fetch failed`, `gh repo view failed`|a mention: genesis --next'"'"'s stop reason
+scripts/octo-project-status.sh|gh project|Projects v2 has no REST API; its cloud-session fallback is #115
+scripts/octo-setup.sh|gh project list|Projects v2 (#115): the read-only board probe
+scripts/octo-doctor.sh|gh project|Projects v2 (#115): the board checks
+skills/github-conventions/references/gh-cli-cookbook.md|gh project|Projects v2 (#115): the board recipes
+skills/github-conventions/references/settings.md|gh project|Projects v2 (#115): the board bootstrap
+skills/github-conventions/SKILL.md|When a `gh project ...` call fails|Projects v2 (#115): the board-failure rule
+skills/setup/SKILL.md|gh project create|Projects v2 (#115): setup creates a board
+skills/sync/SKILL.md|gh project item-list|Projects v2 (#115): sync reads the board'
+# porcelain_re : a gh issue, gh label, gh pr, gh repo, or gh project command, after any spaces and
+# global flags (`gh -R o/n issue`, `gh --repo=o/n label`), or gh api graphql, after any api flags
+# (`gh api -X POST graphql`), not inside a longer word.
+porcelain_flags='([[:space:]]+-[^[:space:]]*([[:space:]]+[^-[:space:]][^[:space:]]*)?)*'
+porcelain_cmd="gh${porcelain_flags}[[:space:]]+((issue|label|pr|repo|project)|api${porcelain_flags}[[:space:]]+graphql)([^[:alnum:]_-]|\$)"
+porcelain_re="(^|[^[:alnum:]_-])$porcelain_cmd"
+# porcelain_hits <file...> : "<path>:<line>:<text>" for each line matching porcelain_re, a line
+# ending in `\` joined with the next (numbered by its first line); in a .sh file, not on a comment
+# line, whose `\` continues nothing.
 porcelain_hits() {
-  grep -nE '(^|[^[:alnum:]_-])gh([[:space:]]+-[^[:space:]]*([[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+(issue|label|pr)([^[:alnum:]_-]|$)' \
-    "$@" 2>/dev/null
+  awk 'function flush() { if (open) print file ":" start ":" buf; open = 0 }
+    FNR == 1 { flush() }
+    {
+      if (!open) { open = 1; file = FILENAME; start = FNR; buf = "" }
+      line = $0
+      comment = (FILENAME ~ /\.sh$/ && start == FNR && line ~ /^[ \t]*#/)
+      if (!comment && sub(/\\$/, "", line)) { buf = buf line; next }
+      buf = buf line; flush()
+    }
+    END { flush() }' "$@" 2>/dev/null \
+    | grep -E "^[^:]*:[0-9]+:(.*[^[:alnum:]_-])?$porcelain_cmd" \
+    | grep -vE '^[^:]*\.sh:[0-9]+:[[:space:]]*#'
 }
 printf '%s\n' 'run `gh issue view 5` here' 'gh label create x' 'the gh issues page' \
   'gh -R o/n issue list' 'gh --repo o/n label create x' 'gh  issue view 5' \
   'gh --repo=o/n issue view 5' 'gh api repos/o/n/issues/5 --jq .title' 'gh -R o/n issues' \
   'gh pr view --json title' 'gh -R o/n pr create' 'gh prs and gh pr-x' \
-  'gh api repos/o/n/pulls/5' >"$tmp/porcelain-sample"
-expect 0 "the check finds gh issue, gh label, and gh pr, after flags or extra spaces, and not gh issues" \
-  test "$(porcelain_hits "$tmp/porcelain-sample" | cut -d: -f1 | tr '\n' ' ')" = "1 2 4 5 6 7 10 11 "
+  'gh api repos/o/n/pulls/5' 'gh repo view --json name' 'gh repo clone o/n d' \
+  'gh project item-list 1 --owner o' 'gh api graphql -f query=x' 'gh api -X POST graphql' \
+  'gh api repos/{owner}/{repo} --jq .default_branch' 'the gh repository and gh projects' \
+  'gh run view 5 --json conclusion' 'gh workflow run evals.yml' 'gh api repos/o/n/graphql' \
+  'gh api graphqlx' 'gh \' '  issue view 5' 'gh api user \' '  --jq .login' \
+  >"$tmp/porcelain-sample.md"
+expect 0 "the check finds gh issue, label, pr, repo, project, and api graphql, after flags, extra spaces, or a \\" \
+  test "$(porcelain_hits "$tmp/porcelain-sample.md" | cut -d: -f2 | tr '\n' ' ')" \
+    = "1 2 4 5 6 7 10 11 14 15 16 17 18 25 "
+printf '%s\n' '# gh repo view is GraphQL: a comment' '  # gh pr list, an indented one' \
+  'echo "gh pr list"  # a command in a string' 'x=1 # gh issue view 5, after code' \
+  'gh api user # fine' '# a comment ending in \' 'gh pr list' >"$tmp/porcelain-sample.sh"
+expect 0 "in a script, a comment line only mentions a command (and continues nothing); any other line counts" \
+  test "$(porcelain_hits "$tmp/porcelain-sample.sh" | cut -d: -f2 | tr '\n' ' ')" = "3 4 7 "
 ROOT="$(cd "$SCRIPTS_DIR/.." && pwd)"
-scope=()
+scope=() code=()
 for f in "$ROOT"/skills/*/SKILL.md "$ROOT"/skills/*/references/*.md "$ROOT"/agents/*.md; do
   case "$f" in "$ROOT"/skills/genesis/*) ;; *) scope+=("${f#"$ROOT"/}") ;; esac
 done
+for f in "$ROOT"/scripts/octo-*.sh "$ROOT"/bench/*.sh; do
+  case "$f" in "$ROOT"/scripts/octo-genesis-plan.sh) ;; *) code+=("${f#"$ROOT"/}") ;; esac
+done
 expect 0 "the check covers the skills and agents (${#scope[@]} files)" test "${#scope[@]}" -ge 15
+expect 0 "the check covers the scripts (${#code[@]} files), octo-bench.sh and bench/validate.sh too" \
+  test "${#code[@]}" -ge 25 -a -n "$(printf '%s\n' "${code[@]}" | grep -Fx scripts/octo-bench.sh)" \
+    -a -n "$(printf '%s\n' "${code[@]}" | grep -Fx bench/validate.sh)"
+# porcelain_allowed <allowlist> <hit> : the hit's line is allowed, each entry it matches appended to
+# $used. Every matched entry's text is taken out first, so another command on the line still counts.
+porcelain_allowed() {
+  local file=${2%%:*} text=${2#*:*:} rest matched=0 af at
+  rest=$text
+  while IFS='|' read -r af at _; do
+    if [ "$file" = "$af" ] && [[ "$text" == *"$at"* ]]; then
+      matched=1; used="$used$af|$at"$'\n'; rest=${rest//"$at"/}
+    fi
+  done <<<"$1"
+  [ "$matched" -eq 1 ] && ! grep -qE -- "$porcelain_re" <<<"$rest"
+}
+used=""
+expect 0 "an allowlist entry allows its own text on a line" \
+  porcelain_allowed 'a.md|gh project list|why' 'a.md:1:run gh project list here'
+expect 1 "a second command on an allowed line still counts" \
+  porcelain_allowed 'a.md|gh project list|why' 'a.md:1:gh project list; gh pr view 5'
+expect 0 "two entries can share a line" \
+  porcelain_allowed $'a.md|gh project list|why\na.md|gh pr view 5|why' \
+    'a.md:1:gh project list; gh pr view 5'
+expect 1 "an entry for another file allows nothing" \
+  porcelain_allowed 'b.md|gh project list|why' 'a.md:1:gh project list'
 left="" used=""
 while IFS= read -r hit; do
   [ -n "$hit" ] || continue
-  file=${hit%%:*} text=${hit#*:*:} allowed=0
-  while IFS='|' read -r af at; do
-    if [ "$file" = "$af" ] && [[ "$text" == *"$at"* ]]; then
-      allowed=1; used="$used$af|$at"$'\n'
-    fi
-  done <<<"$PORCELAIN_ALLOW"
-  [ "$allowed" -eq 1 ] || left="$left  $hit"$'\n'
-done <<<"$(cd "$ROOT" && porcelain_hits "${scope[@]}")"
-if [ -z "$left" ]; then ok "no gh issue / gh label / gh pr outside the allowlist"; else
-  no "no gh issue / gh label / gh pr outside the allowlist; found:"; printf '%s' "$left"; fi
+  porcelain_allowed "$PORCELAIN_ALLOW" "$hit" || left="$left  $hit"$'\n'
+done <<<"$(cd "$ROOT" && porcelain_hits "${scope[@]}" "${code[@]}")"
+if [ -z "$left" ]; then ok "no GraphQL or GraphQL-backed porcelain outside the allowlist"; else
+  no "no GraphQL or GraphQL-backed porcelain outside the allowlist; found:"; printf '%s' "$left"; fi
 stale=""
-while IFS= read -r entry; do
-  grep -Fxq -- "$entry" <<<"$used" || stale="$stale  $entry"$'\n'
+while IFS='|' read -r af at _; do
+  grep -Fxq -- "$af|$at" <<<"$used" || stale="$stale  $af|$at"$'\n'
 done <<<"$PORCELAIN_ALLOW"
 if [ -z "$stale" ]; then ok "every allowlist entry still matches a line"; else
   no "every allowlist entry still matches a line; unused:"; printf '%s' "$stale"; fi

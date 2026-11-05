@@ -18,8 +18,8 @@ exact commands. Octoperator is autonomous: execute the creation immediately unle
 
 1. **Load settings.** Read `.claude/octoperator.local.md` for `repo`, `project_owner`,
    `project_number`, `milestone`, `reviewers`, and `statuses.todo` (default `Todo`). If absent, resolve the repo
-   from `gh repo view --json nameWithOwner` and warn that no project board is configured (skip board
-   steps in that case). See `github-conventions/references/settings.md`. When a milestone is set
+   from `gh api 'repos/{owner}/{repo}' --jq .full_name` and warn that no project board is configured
+   (skip board steps in that case). See `github-conventions/references/settings.md`. When a milestone is set
    (or the request names one), resolve its number once, as the REST API takes (cookbook → Resolve
    a milestone's number); no number printed → stop and report the milestone as not found.
 

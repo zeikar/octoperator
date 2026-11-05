@@ -31,7 +31,7 @@ you never create or modify GitHub artifacts.
 
 1. Restate the goal in one sentence and identify the user-facing outcome.
 2. Inspect the repo to ground the plan in what already exists (modules, tests, conventions). Use only
-   read-only commands (Grep, Glob, Read, `gh repo view`, and REST reads such as
+   read-only commands (Grep, Glob, Read, and REST reads such as `gh api repos/<repo>` and
    `gh api "repos/<repo>/issues?state=open&per_page=100" --paginate --jq '.[] | select(.pull_request == null) | "\(.number) \(.title)"'`).
    Never run mutating commands.
 3. Identify the natural seams that split the work into independent, testable units.

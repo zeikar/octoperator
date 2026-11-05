@@ -7,7 +7,8 @@
 #
 # DIR is the genesis folder. The helper reads GENESIS.md's repo and sentence
 # (`octo-genesis-check.sh --values DIR`, which checks the proposal first), lists the repo's open
-# issues labeled `epic` (`gh issue list`, at most 500), and looks for the sentence in each body.
+# issues labeled `epic` (REST, every page, pull requests left out), and looks for the sentence in
+# each body.
 # The match is exact, case included, except that runs of whitespace and line breaks count as one
 # space and a Markdown `>` quote marker at the start of a line is ignored: a body that quotes the
 # sentence in a `> ` block, wrapped or not, matches.
@@ -15,7 +16,7 @@
 # It prints one line: `epic: <N>`, the lowest-numbered open epic that quotes the sentence, or
 # `epic: none`.
 #
-# Read-only: its one gh call is that list; it writes nothing.
+# Read-only: its gh calls are that list's pages (`gh api`, no GraphQL); it writes nothing.
 #
 # Exit codes: 0 the line printed, 1 the proposal check's `FAIL: <problem>` lines, 2 bad arguments
 # or DIR is not a directory, 3 gh failed (gh's output on stderr).
@@ -34,8 +35,6 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$DIR" ] || { echo "Usage: octo-genesis-epic.sh DIR" >&2; exit 2; }
 
-LIMIT=500
-
 rc=0
 values="$(bash "$HERE/octo-genesis-check.sh" --values "$DIR")" || rc=$?
 case "$rc" in
@@ -53,10 +52,10 @@ WANT="${WANT# }" WANT="${WANT% }"
 # markers after it become one space, then every whitespace run one space. The escapes are jq's
 # string escapes, so each regex holds the characters themselves: gh's gojq (Go regexp) and jq
 # (Oniguruma, which reads `\v` as `v`) then agree.
-FILTER='.[] | "\(.number) " + ("\n" + (.body // "") | gsub("\r"; "")
-  | gsub("\n[ \t]*(>[ \t]*)*"; " ") | gsub("[ \t\n\r\f\u000b]+"; " "))'
-out="$(gh issue list --repo "$REPO" --label epic --state open --limit "$LIMIT" \
-  --json number,body --jq "$FILTER")" || { echo "gh issue list failed" >&2; exit 3; }
+FILTER='.[] | select(.pull_request == null) | "\(.number) " + ("\n" + (.body // "")
+  | gsub("\r"; "") | gsub("\n[ \t]*(>[ \t]*)*"; " ") | gsub("[ \t\n\r\f\u000b]+"; " "))'
+out="$(gh api "repos/$REPO/issues?state=open&labels=epic&per_page=100" --paginate \
+  --jq "$FILTER")" || { echo "listing the open epics failed" >&2; exit 3; }
 
 found=""
 while IFS= read -r line; do

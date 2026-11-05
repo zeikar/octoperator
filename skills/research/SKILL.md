@@ -27,8 +27,8 @@ the repo's content out. Its evidence comes only from the repo and GitHub.
 
 ### 1. Load settings & parse flags
 
-Read `.claude/octoperator.local.md` for `repo` (fall back to `gh repo view --json nameWithOwner --jq
-'.nameWithOwner'`). Parse flags:
+Read `.claude/octoperator.local.md` for `repo` (fall back to
+`gh api 'repos/{owner}/{repo}' --jq .full_name`, the current clone's repo). Parse flags:
 - `--create` — file the top proposals as issues (default: propose-only, no writes).
 - `--count N` — how many top proposals to create with `--create` (default 3).
 - `--focus <feature|refactor|debt|tests|docs|dx|all>` — bias the ranking toward one category (default
@@ -72,7 +72,7 @@ Build an evidence base before proposing — read, do not write:
   - **eval** — the latest completed run of a workflow on the default branch, when it failed. Older or
     other-branch failures don't count: a later push may already have fixed them.
     ```bash
-    gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBranchRef.name'
+    gh api "repos/$REPO" --jq .default_branch
     gh workflow list --repo "$REPO" --json name --jq '.[].name'
     # per workflow; keep it only if conclusion is "failure":
     gh run list --repo "$REPO" --branch <default> --workflow "<name>" --status completed --limit 1 \
