@@ -18,7 +18,7 @@ unless your own permission settings allow WebSearch and WebFetch
 
 > **Autopilot is bounded, never literally infinite.** A session has hard agent/token limits, and
 > unattended merging to `main` compounds risk. `--cycles` is a hard cap; "keep going" means re-invoking
-> autopilot, not an endless run — by hand or on a schedule (README → Running continuously). A run
+> autopilot, not an endless run — by hand or on a schedule (docs/running-continuously.md). A run
 > that a schedule started ends that schedule once nothing is left to do (step 5).
 
 ## Modes
@@ -428,8 +428,7 @@ drop an issue; every issue touched appears in the summary.
 **Final status line.** Every run ends with exactly one status line, printed last: nothing else in
 autopilot's report follows it. A self-paced `/loop`'s own `ScheduleWakeup` call (and its delay
 note) may still come after. This includes a dry run and a run that stops early (a rejected flag, a
-ledger it can't use). A `/goal` condition or a log reader matches on it (README → Running
-continuously):
+ledger it can't use). A `/goal` condition or a log reader matches on it (docs/running-continuously.md):
 
 ```text
 autopilot: merged <N>
