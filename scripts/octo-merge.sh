@@ -12,9 +12,10 @@
 # message are kept ("Merge pull request #N from OWNER/branch"). Run it only after auto's gate
 # passed.
 #
-# Then reads the PR back (`GET .../pulls/N`), and `.merged` decides, whatever the merge call
-# returned: a merge can land even when the call reports an error. Only when that read fails does
-# the merge call's own answer count. Once merged, deletes the head branch
+# Then reads the PR back (`GET .../pulls/N`). The PR counts as merged when the merge call answered
+# `merged: true` or the read-back says `.merged`: a merge can land even when the call reports an
+# error, and a read-back can lag a merge that just landed. When the merge call failed and the
+# read-back fails too, whether it merged is unknown. Once merged, deletes the head branch
 # (`DELETE .../git/refs/heads/<branch>`) only when it is in OWNER/NAME (not a fork's, or a deleted
 # fork's) and is not the default branch. A failed delete (a Claude Code cloud session's proxy
 # refuses it with a 403) only warns.
@@ -71,17 +72,18 @@ IFS=$'\t' read -r branch branch_path head_repo default <"$tmp/pr"
 merge_rc=0
 gh api -X PUT "repos/$REPO/pulls/$PR/merge" -f merge_method=merge -f sha="$SHA" \
   --jq '[(.merged // false), (.sha // "")] | @tsv' >"$tmp/merge" 2>"$tmp/merge-err" || merge_rc=$?
-merged="" merge_sha=""
+put_merged="" put_sha="" merged="" merge_sha=""
+[ "$merge_rc" -ne 0 ] || IFS=$'\t' read -r put_merged put_sha <"$tmp/merge"
 if gh api "repos/$REPO/pulls/$PR" --jq '[.merged, (.merge_commit_sha // "")] | @tsv' \
     >"$tmp/after" 2>"$tmp/err"; then
   IFS=$'\t' read -r merged merge_sha <"$tmp/after"
-elif [ "$merge_rc" -eq 0 ]; then
-  IFS=$'\t' read -r merged merge_sha <"$tmp/merge"
-else
+elif [ "$merge_rc" -ne 0 ]; then
   cat "$tmp/merge-err" "$tmp/err" >&2
   echo "Merge call failed and PR #$PR could not be read back: whether it merged is unknown" >&2
   exit 3
 fi
+# The merge call's own merged:true stands even when the read-back lags behind it.
+if [ "$merged" != true ] && [ "$put_merged" = true ]; then merged=true merge_sha="$put_sha"; fi
 
 if [ "$merged" != true ]; then
   cp "$tmp/merge-err" "$tmp/err"

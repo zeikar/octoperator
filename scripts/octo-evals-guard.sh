@@ -10,7 +10,7 @@
 # `path` and `pull_requests`, so no other workflow's job of the same name counts) must hold the
 # jobs `evals-guard append-only` and `evals-guard verdict`, both completed with success: a head
 # commit whose message holds `[skip ci]` runs no workflow, so it has none, and GitHub's
-# mergeStateStatus can read CLEAN all the same. A run whose PR is closed, or comes from a fork,
+# merge state can read CLEAN all the same. A run whose PR is closed, or comes from a fork,
 # lists no pull request, so it never counts.
 #
 # When the PR changes a path the guard reads (anything under evals/, or the root .gitattributes,

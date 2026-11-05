@@ -404,12 +404,15 @@ All notable changes to Octoperator are documented in this file. The format is ba
   regular merge commit, only at merge state `CLEAN`, and the approval-path, vision, evals-guard,
   and milestone checks still apply. A new helper, `octo-ci-wait.sh`, replaces
   `gh pr checks --watch --fail-fast`. It polls the reviewed commit's check runs
-  (`filter=latest`, and the newest of each name, so a re-run replaces the run it repeats) and
-  its commit statuses, every page, required and optional, every 30 seconds for at most 9
-  minutes. It buckets each as `gh pr checks` does: `success`, `neutral`, and `skipped` pass;
-  `failure`, `cancelled`, `timed_out`, and `action_required` fail, as do a status's `failure` and
-  `error`; anything else, `stale` included, is pending. It prints `green`, `none`, `failed <names>`
-  as soon as one fails, or `pending <names>` at the timeout. A failed read is retried, at most
+  (`filter=latest`, and the newest of each name within its check suite, so a re-run replaces the
+  run it repeats while a same-named run in another suite, such as a workflow's `push` and
+  `pull_request` runs, still counts), its check suites, and its commit statuses, every page,
+  required and optional, every 30 seconds for at most 9 minutes. It buckets each as
+  `gh pr checks` does: `success`, `neutral`, and `skipped` pass; `failure`, `cancelled`,
+  `timed_out`, and `action_required` fail, as do a status's `failure` and `error`; anything else,
+  `stale` included, is pending, as is a check suite with runs that hasn't completed (a suite with
+  no runs is ignored). It prints `green`, `none` (nothing found, on a second read one interval
+  later), `failed <names>` as soon as one fails, or `pending <names>` at the timeout. A failed read is retried, at most
   twice in a row. The gate now also holds on `failed`, `pending`, or a wait that couldn't read the
   checks, where it used to wait and let the merge state alone decide. `octo-merge-state.sh` reads
   REST's `mergeable_state` and prints it uppercased, so its callers see the same names. GitHub
@@ -419,8 +422,9 @@ All notable changes to Octoperator are documented in this file. The format is ba
   `gh pr merge --merge --delete-branch --match-head-commit`. It sends
   `PUT .../pulls/<n>/merge` with `merge_method=merge` and the reviewed `sha`, keeping GitHub's
   default merge commit message. A 409 (the head moved) holds as `new commits since the last
-  review`, and a 405 (not mergeable) holds with GitHub's message. Then it reads the PR back, and
-  `merged` decides, since a merge can land though the call failed. It deletes the head branch
+  review`, and a 405 (not mergeable) holds with GitHub's message. Then it reads the PR back. The PR
+  counts as merged when the merge call or the read-back says so, since a merge can land though
+  the call failed and a read-back can lag a merge that landed. It deletes the head branch
   only when it is in the repo (never a fork's) and isn't the default branch. A failed delete,
   such as the cloud proxy's 403, only warns. The readiness read is `GET .../pulls/<n>`, and
   `octo-approval-match.sh` and `octo-evals-guard.sh` read the PR's `changed_files` and base

@@ -295,13 +295,16 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-ci-wait.sh" --repo "$REPO" --sha "<revi
 ```
 
 Run it with a 10-minute Bash timeout (600000 ms): it polls every 30 seconds and stops on its own
-after 9 minutes. It reads every check run on the commit (the newest of each name, so a re-run
-replaces the run it repeats) and every commit status, required or not, from any workflow or app,
-and buckets each as gh's own PR checks command does: `success`, `neutral`, and `skipped` pass;
-`failure`, `cancelled`, `timed_out`, and `action_required` fail, as does a status in `failure` or
-`error`; anything else (queued, in progress, waiting, `stale`, a pending status) is still
-pending. It returns once every check finishes, as soon as one fails, or at once when the commit
-has no checks. Act on what it prints:
+after 9 minutes. It reads every check run on the commit (within each check suite the newest of each name, so a
+re-run replaces the run it repeats, while a same-named run in another suite, such as a workflow's
+`push` and `pull_request` runs, still counts), every check suite, and every commit status,
+required or not, from any workflow or app, and buckets each check run and status as gh's own PR
+checks command does: `success`, `neutral`, and `skipped` pass; `failure`, `cancelled`,
+`timed_out`, and `action_required` fail, as does a status in `failure` or `error`; anything else
+(queued, in progress, waiting, `stale`, a pending status) is still pending, and so is a check
+suite with runs that hasn't completed (a suite with no runs is ignored). It returns once every
+check finishes, as soon as one fails, or, when the commit has no checks, after reading again one
+interval later. Act on what it prints:
 - `green` (every check passed) or `none` (the commit has no checks) → continue; the merge state
   below still decides.
 - `failed <names>` → hold (reason: checks failed: <names>).
@@ -396,8 +399,9 @@ request #N from …"). **Never squash or rebase** — a regular merge preserves 
 history (e.g. the per-task commits from the implement phase). The PR's `Closes #N` normally
 auto-closes the linked issue; the after-merge step below closes it when GitHub doesn't.
 
-A merge can land even when the merge call reports an error, so the helper then reads the PR back,
-and its `merged` decides. Then it deletes the head branch, best effort: only a branch in `$REPO`
+A merge can land even when the merge call reports an error, so the helper then reads the PR back;
+the PR counts as merged when either the merge call or the read-back says `merged` (a read-back can
+lag a merge that landed). Then it deletes the head branch, best effort: only a branch in `$REPO`
 (never a fork's) that is not the default branch; a failed delete (a Claude Code cloud session's
 proxy refuses it) only warns. Act on its exit code:
 - **0** — it printed `merged <merge commit>`: continue to the `Done` write and the after-merge

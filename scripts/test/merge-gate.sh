@@ -7,19 +7,22 @@
 #
 # Runs each helper against a stub `gh` that plays a small GitHub over REST only: it serves
 # `gh api repos/...` from fixture files (pull requests, their merge state read by read, a
-# commit's check runs and statuses poll by poll), applies the merge and the branch delete, and
+# commit's check runs, check suites, and statuses poll by poll), applies the merge and the branch delete, and
 # rejects `gh api graphql` and every porcelain command (`gh pr`, ...) with the Claude Code cloud
 # proxy's 403, as a cloud session does. A list endpoint is served two items a page, running the
 # --jq filter once per page as gh does. Covers: bad arguments (exit 2, no gh call); every
 # `mergeable_state` (clean, dirty, blocked, behind, unstable, has_hooks, draft, an unknown word),
 # null and `unknown` then clean, a state that never settles, a malformed value, and a gh error;
-# CI green (success, neutral, skipped, a status), no checks, each failing conclusion and status
-# (fail-fast), a pending timeout, pending then green, a re-run (the newest check run of a name
-# wins, either way), stale, every page, a failed read retried, and a statuses API that keeps
+# CI green (success, neutral, skipped, a status), no checks (none only after a re-read), checks
+# that register by the re-read, each failing conclusion and status (fail-fast), a pending timeout,
+# pending then green, a re-run (the newest check run of a name in its suite wins, either way),
+# same-named runs in two suites (both count), a check suite with runs still pending, a 0-run
+# queued suite (ignored), stale, every page, a failed read retried, and a statuses API that keeps
 # failing; the merge 200 (a regular merge pinned to the reviewed head, then the branch deleted),
 # 405, 409 (the head moved: GitHub compares the sha), a merge that lands though the call failed,
-# a call and read-back that both fail, the branch delete's 204, 403, and 422 (already gone), and
-# a fork's, a deleted fork's, or the default branch kept. No call is ever rejected.
+# a merge whose read-back lags, a call and read-back that both fail, the branch delete's 204,
+# 403, and 422 (already gone), and a fork's, a deleted fork's, or the default branch kept. No
+# call is ever rejected.
 #
 # Nothing here calls the real gh or the network. Exits 0 when every check passes, 1 when any fails.
 set -uo pipefail
@@ -47,10 +50,11 @@ trap 'rm -rf "$tmp"' EXIT
 # The stub's state lives in $FX: pulls/<n>.json (a pull request), ms/<n> (its mergeable_state,
 # one per read, the last line repeating; "null" is null), merge/<n> (how the merge call answers:
 # 405, or 500 or 500-merged, a 500 after which the PR is or isn't merged; otherwise GitHub's
-# rules: 409 unless sha is the head's, then merged), branches (the repo's branch names, one per
-# line), delete-403 (the branch delete is refused, as the cloud proxy does), checks/<sha>.json and
-# statuses/<sha>.json (a commit's check runs and statuses, JSON arrays; <sha>.<k>.json answers the
-# k-th read instead), fail (an ERE matched against "<METHOD> <endpoint>" → a 500), fail-once (the
+# rules: 409 unless sha is the head's, then merged), lag (the PR reads back unmerged after the
+# merge, a lagging replica), branches (the repo's branch names, one per
+# line), delete-403 (the branch delete is refused, as the cloud proxy does), checks/<sha>.json,
+# suites/<sha>.json, and statuses/<sha>.json (a commit's check runs, check suites, and statuses,
+# JSON arrays; <sha>.<k>.json answers the k-th read instead), fail (an ERE matched against "<METHOD> <endpoint>" → a 500), fail-once (the
 # same, once), and fail-after-merge (every read after a merge call → a 500). It logs every call to
 # log and $ALL_LOG, every rejected one to $ALL_REJECTED, and every write to writes, each field as
 # raw:<k=v> (-f) or typed:<k=v> (-F). Like gh, it prints an error's body on stdout.
@@ -125,6 +129,8 @@ case "$method $ep" in
     fi
     if [ -n "$ms" ]; then
       jq --arg ms "$ms" '.mergeable_state = (if $ms == "null" then null else $ms end)' "$f" | jq -r "$jq"
+    elif [ -e "$FX/lag" ] && [ -e "$FX/merge-called" ]; then
+      jq '.merged = false | .state = "open" | .merge_commit_sha = "test-merge"' "$f" | jq -r "$jq"
     else jq -r "$jq" "$f"; fi ;;
   "PUT repos/o/n/pulls/"*/merge)
     n=${ep%/merge}; n=${n##*/}; f="$FX/pulls/$n.json"; [ -f "$f" ] || err 404 "Not Found"
@@ -149,6 +155,8 @@ case "$method $ep" in
     grep -Fxv -- "$b" "$FX/branches" >"$FX/branches.new"; mv "$FX/branches.new" "$FX/branches" ;;
   "GET repos/o/n/commits/"*"/check-runs?filter=latest&per_page=100")
     s=${ep#repos/o/n/commits/}; s=${s%%/*}; seq_file checks "$s" | pages check_runs ;;
+  "GET repos/o/n/commits/"*"/check-suites?per_page=100")
+    s=${ep#repos/o/n/commits/}; s=${s%%/*}; seq_file suites "$s" | pages check_suites ;;
   "GET repos/o/n/commits/"*"/status?per_page=100")
     s=${ep#repos/o/n/commits/}; s=${s%%/*}; seq_file statuses "$s" | pages statuses ;;
   *) echo "stub: unexpected $method $ep" >&2; exit 9 ;;
@@ -159,7 +167,7 @@ ALL_LOG="$tmp/all-log" ALL_REJECTED="$tmp/all-rejected"
 export FX ALL_LOG ALL_REJECTED
 
 # fresh : an empty GitHub.
-fresh() { rm -rf "$FX"; mkdir -p "$FX/pulls" "$FX/ms" "$FX/merge" "$FX/checks" "$FX/statuses"; }
+fresh() { rm -rf "$FX"; mkdir -p "$FX/pulls" "$FX/ms" "$FX/merge" "$FX/checks" "$FX/suites" "$FX/statuses"; }
 SHA=1111111111111111111111111111111111111111
 OTHER=2222222222222222222222222222222222222222
 # pr <n> [head [head repo ("null": a deleted fork) [head sha]]] : write pulls/<n>.json, open, into
@@ -264,17 +272,29 @@ run octo-merge-state.sh --repo o/n --pr 7 --interval 0
 same "a gh error (404): exit 1, not gh's code, nothing printed" "1|" "$rc|$out"
 
 echo "• octo-ci-wait.sh"
-# run_obj <id> <name> <status> [conclusion] : one check run.
+# run_obj <id> <suite id> <name> <status> [conclusion] : one check run.
 run_obj() {
-  jq -nc --argjson id "$1" --arg n "$2" --arg s "$3" --arg c "${4:-}" \
-    '{id: $id, name: $n, status: $s, conclusion: (if $c == "" then null else $c end)}'
+  jq -nc --argjson id "$1" --argjson su "$2" --arg n "$3" --arg s "$4" --arg c "${5:-}" \
+    '{id: $id, check_suite: {id: $su}, name: $n, status: $s,
+      conclusion: (if $c == "" then null else $c end)}'
 }
-# checks <file> <id name status conclusion>... : write a check-runs fixture ("-" for no conclusion).
+# checks <file> <id[/suite id] name status conclusion>... : write a check-runs fixture ("-" for no
+# conclusion; suite 1 unless named).
 checks() {
+  local f="$1" id su; shift
+  { while [ $# -ge 4 ]; do
+      id=${1%%/*}; su=1; [ "$id" = "$1" ] || su=${1#*/}
+      run_obj "$id" "$su" "$2" "$3" "$( [ "$4" = - ] || echo "$4")"; shift 4
+    done; } | jq -s . >"$FX/checks/$f.json"
+}
+# suites <file> <id app runs status>... : write a check-suites fixture (runs: its
+# latest_check_runs_count).
+suites() {
   local f="$1"; shift
   { while [ $# -ge 4 ]; do
-      run_obj "$1" "$2" "$3" "$( [ "$4" = - ] || echo "$4")"; shift 4
-    done; } | jq -s . >"$FX/checks/$f.json"
+      jq -nc --argjson id "$1" --arg a "$2" --argjson r "$3" --arg s "$4" \
+        '{id: $id, app: {slug: $a}, latest_check_runs_count: $r, status: $s}'; shift 4
+    done; } | jq -s . >"$FX/suites/$f.json"
 }
 # statuses <file> <context state>... : write a commit-statuses fixture.
 statuses() {
@@ -290,8 +310,8 @@ checks "$SHA" 1 build completed success 2 docs completed skipped 3 lint complete
 statuses "$SHA" ci/circle success
 ci --timeout 0
 same "success, skipped, and neutral check runs and a success status: green" "0|green" "$rc|$out"
-same "one read each: the newest check runs (filter=latest) and the statuses, every page" "1|1" \
-  "$(calls "^api --paginate repos/o/n/commits/$SHA/check-runs\?filter=latest&per_page=100 ")|$(calls "^api --paginate repos/o/n/commits/$SHA/status\?per_page=100 ")"
+same "one read each: the newest check runs (filter=latest), the check suites, and the statuses, every page" "1|1|1" \
+  "$(calls "^api --paginate repos/o/n/commits/$SHA/check-runs\?filter=latest&per_page=100 ")|$(calls "^api --paginate repos/o/n/commits/$SHA/check-suites\?per_page=100 ")|$(calls "^api --paginate repos/o/n/commits/$SHA/status\?per_page=100 ")"
 fresh
 checks "$SHA" 1 a completed success 2 b completed success 3 c completed success 4 d completed success \
   5 e completed failure
@@ -299,8 +319,37 @@ ci --timeout 0
 same "a failure on the third page is seen" "1|failed e" "$rc|$out"
 
 fresh
+ci --timeout 0 --interval 1
+same "no check runs and no statuses: none only after a re-read one interval later, even at the timeout" \
+  "0|none|2" "$rc|$out|$(calls check-runs)"
+fresh; checks "$SHA.1"; checks "$SHA" 1 build completed success
+ci --timeout 0 --interval 1
+same "nothing on the first read, a check run by the re-read: green, not none" "0|green|2" \
+  "$rc|$out|$(calls check-runs)"
+fresh; checks "$SHA.1"; checks "$SHA" 1 build completed failure
+ci --timeout 0 --interval 1
+same "nothing on the first read, a failure by the re-read: failed" "1|failed build" "$rc|$out"
+fresh; suites "$SHA" 5 vercel 0 queued 6 claude 0 queued
+ci --timeout 0 --interval 1
+same "only check suites with no runs, queued for good: ignored, none" "0|none|2" "$rc|$out|$(calls check-suites)"
+fresh; checks "$SHA" 1 build completed success; suites "$SHA" 5 vercel 0 queued 7 github-actions 1 completed
 ci --timeout 0
-same "no check runs and no statuses: none, at once" "0|none|1" "$rc|$out|$(calls check-runs)"
+same "a 0-run queued suite beside a completed one: ignored, green" "0|green" "$rc|$out"
+fresh; checks "$SHA" 1/7 build completed success; suites "$SHA" 7 github-actions 3 in_progress
+ci --timeout 0
+same "a suite with runs still in progress, its listed runs all passed: pending, the suite named" \
+  "1|pending github-actions check suite 7" "$rc|$out"
+fresh; suites "$SHA" 7 github-actions 2 queued
+ci --timeout 0
+same "a suite registered with runs not listed yet: pending, not none" \
+  "1|pending github-actions check suite 7|1" "$rc|$out|$(calls check-runs)"
+fresh; checks "$SHA" 1/7 build completed failure; suites "$SHA" 7 github-actions 2 in_progress
+ci --timeout 0
+same "a failure in a suite still running: failed, at once" "1|failed build" "$rc|$out"
+fresh; suites "$SHA.1" 7 github-actions 2 in_progress; checks "$SHA" 1/7 build completed success
+suites "$SHA" 7 github-actions 2 completed
+ci --interval 1
+same "a suite pending, then completed: green" "0|green|2" "$rc|$out|$(calls check-suites)"
 
 for c in failure cancelled timed_out action_required; do
   fresh; checks "$SHA" 1 build completed "$c" 2 test in_progress - 3 lint completed success
@@ -345,6 +394,16 @@ same "a re-run: the newest check run of a name wins (passed, then failed)" "1|fa
 fresh; checks "$SHA" 1 test completed success 9 test in_progress -
 ci --timeout 0
 same "a re-run still running is pending, whatever the older run said" "1|pending test" "$rc|$out"
+fresh; checks "$SHA" 1/10 "smoke (ubuntu)" in_progress - 2/20 "smoke (ubuntu)" completed success
+ci --timeout 0
+same "the same name in two suites (push and pull_request), the older-id one pending: pending" \
+  "1|pending smoke (ubuntu)" "$rc|$out"
+fresh; checks "$SHA" 1/10 "smoke (ubuntu)" completed failure 2/20 "smoke (ubuntu)" completed success
+ci --timeout 0
+same "the same name in two suites, the older-id one failed: failed" "1|failed smoke (ubuntu)" "$rc|$out"
+fresh; checks "$SHA" 1/10 smoke completed failure 2/20 smoke completed success 3/10 smoke completed success
+ci --timeout 0
+same "two suites, each with a re-run: the newest of each suite counts, green" "0|green" "$rc|$out"
 
 fresh; checks "$SHA" 1 build completed success; echo '/status\?' >"$FX/fail"
 ci --interval 1
@@ -406,6 +465,11 @@ same "the call and the read-back both fail: exit 3, merge state unknown" "3|" "$
 fresh; pr 7; touch "$FX/fail-after-merge"
 merge
 same "a 200 and a failed read-back: merged, by the merge call's own answer" \
+  "0|merged m7${nl}deleted branch 7-x" "$rc|$out"
+
+fresh; pr 7; touch "$FX/lag"
+merge
+same "a 200 with merged:true and a read-back that lags: merged, by the merge call, branch deleted" \
   "0|merged m7${nl}deleted branch 7-x" "$rc|$out"
 
 fresh; pr 7; touch "$FX/delete-403"
