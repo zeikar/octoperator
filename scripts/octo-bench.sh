@@ -130,7 +130,7 @@ case "$SUB" in
     for t in $TASK_LIST; do valid_task "$t"; done
     [ -n "${TASK_LIST// /}" ] || usage_err "no tasks to run"
     if [ -n "$MAX_COST" ]; then
-      printf '%s' "$MAX_COST" | grep -Eq '^[0-9]+(\.[0-9]+)?$' \
+      grep -Eq '^[0-9]+(\.[0-9]+)?$' <<<"$MAX_COST" \
         || usage_err "bad --max-cost-usd: $MAX_COST"
     fi ;;
   '') usage_err "missing subcommand (setup, solve, check, cleanup, or run)" ;;

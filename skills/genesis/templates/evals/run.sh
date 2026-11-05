@@ -167,7 +167,7 @@ if [ "${GITHUB_ACTIONS:-}" = true ]; then
     || { echo "run: git status failed in $REPO" >&2; exit 2; }
   if [ -n "$dirty" ]; then
     echo "evals: aborted: evals/ differs from the commit before any check ran (git status)"
-    printf '%s\n' "$dirty" | head -n 20 | sed 's/^/    /'
+    head -n 20 <<<"$dirty" | sed 's/^/    /'
     exit 1
   fi
 fi

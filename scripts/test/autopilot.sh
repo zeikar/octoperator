@@ -58,7 +58,8 @@
 #                            allows across files pass; none, one, or only a scoped allow fail; a
 #                            deny or ask naming a tool, bare or scoped, in any file wins; one
 #                            naming another tool doesn't; invalid JSON or the wrong shape allows
-#                            nothing; bad arguments exit 2
+#                            nothing; 400 KB of rules with the deciding one first still decide;
+#                            bad arguments exit 2
 #
 # The stub gh serves REST only and refuses GraphQL and porcelain with the Claude Code cloud
 # proxy's 403, and no helper call is refused. REST has no isEmpty, so an empty repo is covered
@@ -884,6 +885,16 @@ web "a deny in the same file wins over the allow" \
   "not allowed (.claude/settings.local.json's permissions.deny names WebFetch)"
 settings local '{"permissions": {"allow": ["WebSearch", "WebFetch"], "ask": ["WebFetchX"]}}'
 web "an ask naming another tool doesn't count: allowed" allowed
+# 400 KB of rules, more than a pipe holds, the deciding one first: a reader that stopped there
+# would leave the writer to die of SIGPIPE, and pipefail would hide the match (#133).
+settings local "$(jq -nc '{permissions: {allow: ([range(25000) | "WebSearch"] + ["WebFetch"])}}')"
+web "a long allow list, WebSearch first: allowed" allowed
+settings local \
+  "$(jq -nc '{permissions: {deny: (["WebSearch"] + [range(12000) | "WebFetch(domain:x.example)"])}}')"
+settings home "$BOTH"
+web "a long deny list, WebSearch first, the allows in ~/.claude: the deny still wins" \
+  "not allowed (.claude/settings.local.json's permissions.deny names WebSearch)"
+rm "$WH/.claude/settings.json"
 settings repo '{"permissions": {"allow": ["WebSearch", "WebFetch"]},'
 web "a file that isn't JSON allows nothing" \
   "not allowed (.claude/settings.json is not valid settings JSON)"

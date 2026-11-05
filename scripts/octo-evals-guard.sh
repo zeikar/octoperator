@@ -90,20 +90,23 @@ fi
 # page only, at most 300 for the whole comparison, so one read is all there is.
 files="$(gh_get api "repos/$REPO/compare/$tip...$SHA" \
   --jq '(.files | length), (.files[] | [.filename, (.previous_filename // "")] | @tsv)')" || exit 3
-count="$(printf '%s\n' "$files" | head -n 1)"
+count="$(head -n 1 <<<"$files")"
 files="$(printf '%s\n' "$files" | tail -n +2)"
 listed="$(printf '%s\n' "$files" | grep -c . || true)"
 touches=1
+# grep -c, not -q: it reads to the end, so tr can't die of SIGPIPE on a long list and pipefail
+# can't read that as no eval changed (#133).
 case "$count" in
   '' | *[!0-9]*) ;;
   *) if [ "$count" -lt 300 ] && [ "$count" -eq "$listed" ] \
-       && ! printf '%s\n' "$files" | tr '\t' '\n' | grep -Eq '^(evals(/|$)|\.gitattributes$)'; then
+       && ! printf '%s\n' "$files" | tr '\t' '\n' \
+         | grep -Ec '^(evals(/|$)|\.gitattributes$)' >/dev/null; then
        touches=0
      fi ;;
 esac
 
 for check in "evals-guard append-only" "evals-guard verdict"; do
-  row="$(printf '%s\n' "$jobs" | awk -F '\t' -v n="$check" '$2 == n { print; exit }')"
+  row="$(awk -F '\t' -v n="$check" '$2 == n { print; exit }' <<<"$jobs")"
   if [ -z "$row" ]; then echo "evals guard did not pass: $check missing"; exit 1; fi
   IFS=$'\t' read -r id _ status conclusion <<EOF
 $row

@@ -64,8 +64,9 @@ case "$ACTION" in
     [ -n "$WT_PATH" ] || { echo "octo-worktree: --path is required" >&2; exit 2; }
     [ -n "$BASE" ]   || { echo "octo-worktree: --base is required" >&2; exit 2; }
 
-    # Check if the branch is already checked out in any existing worktree.
-    if git worktree list --porcelain | grep -Fqx "branch refs/heads/${BRANCH}"; then
+    # Check if the branch is already checked out in any existing worktree. grep -c, not -q: it
+    # reads to the end, so git can't die of SIGPIPE, which pipefail would read as no match (#133).
+    if git worktree list --porcelain | grep -Fxc "branch refs/heads/${BRANCH}" >/dev/null; then
       echo "octo-worktree: branch '${BRANCH}' is already checked out in a worktree" >&2
       exit 1
     fi
@@ -85,7 +86,7 @@ case "$ACTION" in
     [ -n "$BRANCH" ] || { echo "octo-worktree: --branch is required" >&2; exit 2; }
     [ -n "$WT_PATH" ] || { echo "octo-worktree: --path is required" >&2; exit 2; }
 
-    if git worktree list --porcelain | grep -Fqx "branch refs/heads/${BRANCH}"; then
+    if git worktree list --porcelain | grep -Fxc "branch refs/heads/${BRANCH}" >/dev/null; then
       echo "octo-worktree: branch '${BRANCH}' is already checked out in a worktree" >&2
       exit 1
     fi

@@ -54,6 +54,9 @@
 # directory, 3 git failed unexpectedly (its output on stderr).
 set -uo pipefail
 export LC_ALL=C
+# A reader that can stop early (grep -q) takes a here-string, or, behind a command, is a grep -c
+# that reads to the end: under pipefail, a writer that dies of SIGPIPE would make the check read
+# as passed (#133).
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 MODE=rev DIR="" REV="" TIP="" BASE="" BRANCH="" HEADSHA=""
@@ -259,18 +262,18 @@ if [ "$prd" -eq 1 ]; then
         for (id in want) if (!(id in seen)) bad("evals/" id "/ has no #### " id " scenario") }
       ' "$tmp/added")"
     printf '%s\n' "$out" | grep '^FAIL: ' && FAILS=$((FAILS + $(printf '%s\n' "$out" | grep -c '^FAIL: ')))
-    grep -m 1 '^## ' "$tmp/added" | grep -Eiq "$SKIP_RE" \
+    title="$(grep -m 1 '^## ' "$tmp/added" | sed 's/[[:space:]]*$//')"
+    grep -Eiq "$SKIP_RE" <<<"$title" \
       && fail "docs/prd.md: the ## Milestone $N title holds a CI skip token: the PR title carries" \
            "it into the merge commit, so the evals run on the default branch would not start"
-    title="$(grep -m 1 '^## ' "$tmp/added" | sed 's/[[:space:]]*$//')"
     case "$title" in
       "## Milestone $N: "*)
-        printf '%s\n' "${title#"## Milestone $N: "}" | grep -q '[^A-Za-z0-9 ,.:()-]' \
+        grep -q '[^A-Za-z0-9 ,.:()-]' <<<"${title#"## Milestone $N: "}" \
           && fail "docs/prd.md: the ## Milestone $N title holds a character other than letters," \
                "digits, spaces, and -,.:(): the commit message and the PR title quote it in a shell" \
                "command" ;;
     esac
-    printf '%s\n' "$out" | grep -qx UNGROUNDED && ungrounded=1
+    grep -qx UNGROUNDED <<<"$out" && ungrounded=1
     urls="$(printf '%s\n' "$out" | grep -cx URL)"
     # Each new eval's scenario.md front matter agrees with its scenario.
     while read -r _ id judge req; do
@@ -302,7 +305,8 @@ if [ "$vision" -eq 1 ]; then
     *) echo "octo-vision-guard.sh exited $vrc" >&2; exit 3 ;;
   esac
   [ "$ungrounded" -eq 0 ] \
-    || { g diff --no-color --no-ext-diff --no-textconv --text "$mb" HEAD -- VISION.md | grep -E '^\+[^+]' | grep -Eq 'https?://' \
+    || { g diff --no-color --no-ext-diff --no-textconv --text "$mb" HEAD -- VISION.md \
+           | grep -E '^\+[^+]' | grep -Ec 'https?://' >/dev/null \
          && fail "VISION.md: an ungrounded milestone read no source, so it cites no URL"; }
 fi
 

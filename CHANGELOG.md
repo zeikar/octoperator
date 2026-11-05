@@ -556,6 +556,26 @@ All notable changes to Octoperator are documented in this file. The format is ba
   guard now also prints `  ! TIMEOUT: killed after <n>s: <command>` on the suite's stderr when it
   kills a command, even where the case hides the command's stderr, so a timeout no longer reads
   as a wrong result.
+- The rest of the helper scripts no longer let SIGPIPE flip a check (#133). Under `pipefail`, a
+  reader that stops at a match (`grep -q`, `grep -m 1`) on multi-line input can leave its writer
+  to die of SIGPIPE, and the pipeline then reads as no match. With a long enough input that
+  happens every time, not just on a busy machine:
+  - `octo-web-allowed.sh` missed a deny rule listed before about 64 KB of others, and printed
+    `web: allowed`.
+  - `octo-evals-guard.sh` read a PR whose file list put an `evals/` path before a long tail as
+    changing no eval, and so skipped the stale-base hold.
+  - `octo-genesis-next.sh --check` could miss the `UNGROUNDED` marker, or a URL an ungrounded
+    milestone added to `VISION.md`.
+  - `octo-worktree.sh` could miss that a branch was already checked out.
+
+  A reader fed from a variable now reads a here-string. One fed by a command is now
+  `grep -c … >/dev/null`, which reads to the end and keeps the command's own failure. The
+  single-line checks (the milestone title's, `--max-cost-usd`, and the eval guard template's id
+  and requirement) were safe, since a reader must read a line to its end, but take a here-string
+  too. No check decides differently. A new smoke check flags any `| grep -q`, `-m`, `-l`,
+  `| head`, sed `q`, or one-line awk `exit` in a script that sets `pipefail`, outside an
+  allowlist of pipes whose status is unused, each with its reason. New tests in `smoke.sh` and
+  `autopilot.sh` give 400 KB inputs that failed every time before.
 - `setup` no longer stops at `gh auth status`, which checks every stored host and token and so
   can fail where the token in use works (seen in a Claude Code cloud session). `octo-setup.sh`
   probes with the repo lookups it needs instead, and an `error` now carries gh's own message as
