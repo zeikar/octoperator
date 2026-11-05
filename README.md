@@ -30,7 +30,7 @@ echoes the issue/PR numbers and URLs it created so the trail stays auditable.
 
 ## Quick start
 
-Inside Claude Code:
+Inside Claude Code, in your repo's directory:
 
 ```text
 /plugin marketplace add zeikar/octoperator
@@ -38,7 +38,7 @@ Inside Claude Code:
 /octoperator:setup
 ```
 
-Then, in a repo with an open issue:
+Then, with an open issue:
 
 ```text
 /octoperator:auto 42
