@@ -26,7 +26,7 @@
 #   none                                        the base branch has no evals guard workflow
 #   evals guard did not pass: <check> <state>   missing, pending, skipped, or failed
 #   evals guard stale: <check> ran against <sha>, <branch> is at <sha>
-# Read-only: `gh pr view` and `gh api` GETs.
+# Read-only, REST only: `gh api` GETs, so it works where GraphQL is refused.
 #
 # Exit codes: 0 pass or none, 1 hold (the line says why), 2 bad arguments, 3 a gh error.
 set -uo pipefail
@@ -54,8 +54,7 @@ trap 'rm -f "$err"' EXIT
 gh_get() { gh "$@" 2>"$err" || { cat "$err" >&2; exit 3; }; }
 
 IFS=$'\t' read -r branch count <<EOF || exit 3
-$(gh_get pr view "$PR" --repo "$REPO" --json baseRefName,changedFiles \
-  --jq '[.baseRefName, .changedFiles] | @tsv')
+$(gh_get api "repos/$REPO/pulls/$PR" --jq '[.base.ref, .changed_files] | @tsv')
 EOF
 [ -n "$branch" ] || { echo "gh printed no base branch for PR $PR" >&2; exit 3; }
 tip="$(gh_get api "repos/$REPO/git/ref/heads/$branch" --jq .object.sha)" || exit 3

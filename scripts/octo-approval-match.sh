@@ -17,7 +17,8 @@
 #
 # --normalize prints each normalized pattern, one per line, and makes no gh call. Otherwise lists
 # every path the PR touches (a renamed file's old path too) and prints each match as
-# `<path><TAB><pattern>`, one per line.
+# `<path><TAB><pattern>`, one per line. REST only (`GET .../pulls/N/files`, every page, checked
+# against the PR's `changed_files` count), so it works where GraphQL is refused.
 #
 # Exit codes: 0 no match (or --normalize succeeded), 1 a match was found and printed, 2 bad
 # arguments or a malformed pattern, 3 the PR's changed files could not all be read (a gh error,
@@ -131,9 +132,9 @@ gh api --paginate "repos/$REPO/pulls/$PR/files" \
         | if any(.[]; test("[\t\n\r]")) then error("tab or newline in a changed path")
           else join("\t") end' >"$tmp/files" \
   || { echo "Could not list the PR's changed files" >&2; exit 3; }
-COUNT="$(gh pr view "$PR" --repo "$REPO" --json changedFiles --jq .changedFiles)" \
+COUNT="$(gh api "repos/$REPO/pulls/$PR" --jq .changed_files)" \
   || { echo "Could not read the PR's changed-file count" >&2; exit 3; }
-case "$COUNT" in '' | *[!0-9]*) echo "Unexpected changedFiles: '$COUNT'" >&2; exit 3 ;; esac
+case "$COUNT" in '' | *[!0-9]*) echo "Unexpected changed_files: '$COUNT'" >&2; exit 3 ;; esac
 LISTED="$(grep -c '' "$tmp/files" || true)"
 # The files endpoint stops at 3000 files even with --paginate. More lines than files means a
 # path held a newline.
