@@ -71,8 +71,9 @@ the setup code that runs before it.
 
 Autopilot keeps its state between runs in GitHub, on one open issue labeled `octoperator-ledger`
 (the **ledger**). Every run except a dry run appends one entry (a `--resume` run appends a `reset`
-entry first). An entry is one comment: a one-line summary naming the issues merged and held (with
-hold reasons), then a fenced `json` block in this fixed shape:
+entry first). An entry is one comment: a one-line summary naming the issues merged (with what
+`auto`'s after-merge step closed) and held (with hold reasons), then a fenced `json` block in this
+fixed shape:
 
 ```json
 {"time": "2026-11-01T09:30:00Z", "mode": "semi", "cycles_used": 2, "merged": 1, "held": 1,
@@ -351,7 +352,7 @@ literal; keep apostrophes out of the summary line:
 
 ````bash
 gh api rate_limit --jq 'now | todate'
-gh issue comment <ledger#> --repo "$REPO" --body 'Autopilot run (semi): merged #12; held #14 (CI red).
+gh issue comment <ledger#> --repo "$REPO" --body 'Autopilot run (semi): merged #12 (closed epic #9); held #14 (CI red).
 
 ```json
 {"time": "2026-11-01T09:30:00Z", "mode": "semi", "cycles_used": 2, "merged": 1, "held": 1,
@@ -402,8 +403,10 @@ loop's pending wakeup is stopped with `ScheduleWakeup`, never `CronDelete`. An O
 job is outside the session, so autopilot can't remove it.
 
 Then print a per-cycle summary and an overall result:
-- per cycle: issues attempted, `merged` vs `held: <reason>`, issues skipped because an open PR already
-  holds them (closes them or uses their branch; `#<issue> → PR #<pr>`), issues excluded by the
+- per cycle: issues attempted, `merged` vs `held: <reason>`, with what `auto`'s after-merge
+  step closed beside each merge, from its report's Closed column (`merged #12 (closed epic #9)`,
+  or `merged #12 (closed issue #12)` when GitHub left the issue open), issues skipped because an
+  open PR already holds them (closes them or uses their branch; `#<issue> → PR #<pr>`), issues excluded by the
   approval gate (`#<issue> gated: needs-approval`, with step 3a's reason when `approved` was
   rejected), any `research` proposals filed (URLs), and research's **Unevidenced (not filed)** and
   **Evidence not found** lists — a defect found only by reading code is never filed, so this is the

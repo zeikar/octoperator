@@ -241,11 +241,12 @@ Either way, every child issue body opens with `Part of #<epic#>` for a textual b
 regardless of the linking mechanism.
 
 Closing: an epic is closed once its last child closes. After each merge, `auto` runs
-`octo-after-merge.sh` (REST only), which closes the merged PR's issue if GitHub left it open and
-then each epic of that issue (its native parent, or an open `epic` issue whose `## Children`
-checklist lists it) whose children are all closed. Its children are its sub-issues and its
-checklist items together. An epic with an open child, with no children, or with a checklist item
-that names no issue (`- [ ] #<child#>` is the form to use) stays open for a human.
+`octo-after-merge.sh` (REST only), which closes the issue `auto` implemented if GitHub left it
+open and then each epic of that issue (its native parent, or an open `epic` issue whose
+`## Children` list has an item for it) whose children are all closed. Its children are its
+sub-issues and every list item under `## Children` together. An epic with an open child, with no
+children, or with an item that doesn't start with an issue (`- [ ] #<child#>` is the form to
+use) stays open for a human.
 
 ## Milestones
 

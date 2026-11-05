@@ -7,21 +7,23 @@ All notable changes to Octoperator are documented in this file. The format is ba
 ## [Unreleased]
 
 ### Added
-- `auto` now tidies up after each merge (#108). New helper `scripts/octo-after-merge.sh` reads
-  the merged PR's body for this repo's issues after a closing keyword, as GitHub links them,
-  waits about 10 seconds for GitHub to close them, and then closes any still open, as completed,
-  with the comment `Closed by #<pr> (merged)`. An issue once stayed open after its PR merged.
-  Then it closes each epic of those issues, either the native sub-issue parent or an open `epic`
-  issue whose `## Children` checklist lists one, once every child (sub-issues and checklist
-  items together) is closed, with a comment naming the PR. An epic with an open child, with no
-  children, or with a checklist item naming no issue stays open. It never closes a pull request
-  or an issue the PR doesn't close, and acts only on a PR merged into the default branch. It
-  uses REST only (`gh api repos/...`), so it works in a Claude Code cloud session, which
-  refuses GraphQL. It prints `closed issue #N`, `closed epic #E`, `warn: …`, or
-  `nothing to close`, and exits 0 even when a call fails, since the merge already happened. Its
-  lines fill a new Closed column in `auto`'s report; a milestone PR (`--pr`) closes no issue.
-  New offline tests in `scripts/test/after-merge.sh`, which CI runs, use a stub `gh` that serves
-  REST and refuses GraphQL and porcelain with the cloud proxy's 403.
+- `auto` now tidies up after each merge (#108). New helper `scripts/octo-after-merge.sh` takes
+  the issue `auto` implemented as `--issue N`, rather than parsing the PR body, and acts only on
+  a PR merged into the default branch. It waits about 10 seconds for GitHub to close the issue,
+  and then closes it if still open, as completed, with the comment `Closed by #<pr> (merged)`.
+  An issue once stayed open after its PR merged. Then it closes each epic of that issue, either
+  the native sub-issue parent or an open `epic` issue whose `## Children` list has an item for
+  it, once every child is closed, with a comment naming the PR. The children are the sub-issues,
+  from any repo, and every list item there (`-`, `*`, `+`, or numbered, with or without a
+  checkbox) together. An epic with an open child, with no children, or with an item that doesn't
+  start with `#N` stays open. It never closes a pull request or any issue but `--issue`. It uses
+  REST only (`gh api repos/...`), so it works in a Claude Code cloud session, which refuses
+  GraphQL. It prints `closed issue #N`, `closed epic #E`, `warn: …`, or `nothing to close`, and
+  exits 0 even when a call fails, since the merge already happened. Its lines fill a new Closed
+  column in `auto`'s report, and `autopilot`'s per-cycle report and ledger summary name them
+  (`merged #12 (closed epic #9)`). A milestone PR (`auto --pr`) passes no `--issue`, so nothing
+  is closed for it. New offline tests in `scripts/test/after-merge.sh`, which CI runs, use a
+  stub `gh` that serves REST and refuses GraphQL and porcelain with the cloud proxy's 403.
 - `/octoperator:genesis "<sentence>"`, stage 1 of
   [epic #85](https://github.com/zeikar/octoperator/issues/85): run in an empty directory outside
   git, it researches existing services and similar open-source projects with WebSearch and
