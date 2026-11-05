@@ -67,8 +67,8 @@ Build an evidence base before proposing — read, do not write:
   - **benchmark** — a failed or held task in `bench/results/<runid>.jsonl` (Read): a line with
     `"success": false` or a non-null `held_reason`. Cite the file (its name is the run ID; the lines
     carry no run-ID field) and the line's `task`. `bench/results/` is gitignored, so the file exists
-    only on the machine that ran the benchmark and no one triaging the issue can open it — once #69's
-    committed baseline report lands, cite that instead.
+    only on the machine that ran the benchmark and no one triaging the issue can open it (no
+    committed baseline report is planned: #69 was closed).
   - **eval** — the latest completed run of a workflow on the default branch, when it failed. Older or
     other-branch failures don't count: a later push may already have fixed them.
     ```bash

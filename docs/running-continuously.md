@@ -186,7 +186,7 @@ A Claude Code cloud session reaches GitHub through a proxy. A dogfood run on zei
   `genesis --approve`, which creates a repo, runs only locally. `genesis --next` runs over REST, so
   it works in a cloud session ([#127](https://github.com/zeikar/octoperator/issues/127)). The
   benchmark harness creates its own `octo-bench-*` repos, so whether it can run in a cloud session
-  is unverified (#69).
+  is unverified, and no live benchmark run is planned (#69).
 - **An empty scopes header.** The proxy injects the credential, so `X-OAuth-Scopes` comes back
   empty. The benchmark harness's preflight reads that as unknown scopes, warns, and goes on.
 
