@@ -105,7 +105,13 @@ test that fails intermittently and is unrelated to the issue follows
 mid-run: prove it against the base, file or update its issue, carry on, and never weaken, skip, or
 retry-loop it in the PR. A fix round has no PR body, so the fixer returns that rule's `Result:` and
 `Flaky: #<n> (…)` lines in its `Failure reason`; post them on the PR, whatever the fixer's status,
-with `gh pr comment <pr#> --repo "$REPO" --body "<those lines>"`.
+as a PR comment over REST, the lines on stdin (cookbook → REST rules):
+
+```bash
+gh api "repos/$REPO/issues/<pr#>/comments" -F body=@- --jq .html_url <<'OCTO_BODY_EOF'
+<those lines>
+OCTO_BODY_EOF
+```
 
 **Hold (do not review or merge) any PR that is not ready:**
 - a PR opened as **draft** (implement opens drafts on test failure or no commits),
@@ -115,16 +121,24 @@ Carry only the **non-draft, successfully-opened PRs** forward to review. Report 
 reason; they are left for the human.
 
 **With `--pr`**, skip the implement procedure: the PR already exists (genesis --next opens one for
-its milestone, `skills/genesis/references/next.md`). Read it:
+its milestone, `skills/genesis/references/next.md`). Read it over REST, then the issues it closes,
+one call each:
 
 ```bash
-gh pr view <pr#> --repo "$REPO" \
-  --json number,url,state,isDraft,isCrossRepository,baseRefName,headRefName,closingIssuesReferences
+gh api "repos/$REPO/pulls/<pr#>" --jq '{number, url: .html_url, state, merged, draft,
+  base: .base.ref, head: .head.ref, cross_repository: (.head.repo.full_name != .base.repo.full_name)}'
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-pr-closes.sh" --repo "$REPO" --pr <pr#>
 ```
 
-Carry it forward to review only when it is `OPEN`, not a draft, not from a fork
-(`isCrossRepository` false: the fixer pushes to its branch), based on `$DEFAULT`, and closes at
-most one issue, and that issue is in `$REPO`. Otherwise hold it (reason: `not shippable: <which condition failed>`).
+REST has no `closingIssuesReferences`, so the helper reads the PR body's closing keywords
+(`Closes #N` and its forms), skipping code and HTML comments, as GitHub does. Its `closes` column
+(the fifth) is `-` for none, a bare `N` for an issue in `$REPO`, and `owner/name#N` for one
+elsewhere. Carry the PR forward to review only when its `state` is `open`, it is not a draft, not
+from a fork (`cross_repository` false: the fixer pushes to its branch; a deleted fork reads true),
+based on `$DEFAULT`, and its `closes` is `-` or one bare `N`. Otherwise, or when either call
+fails, hold it (reason: `not shippable: <which condition failed>`). Here and below, `headRefName`
+and `headRefOid` name the PR's head branch and commit, REST's `.head.ref` and `.head.sha`
+(cookbook → Read a pull request).
 That issue, or the PR itself when it closes none, is its **subject**: the fixer's `issue_number`
 in step 4 (the REST issue read, `GET .../issues/<n>`, answers for a PR as well, so its body is
 then the scope) and the report's
@@ -165,9 +179,10 @@ blocker/major/minor findings:
    holds a fix that breaks them.
 3. **Act on its status** — and only on `error` keep the worktree (print the path; it may hold
    unpushed commits); otherwise remove it with `git worktree remove --force "<recorded FIX_WT path>"`:
-   - `fixed` → **before** re-reviewing, confirm GitHub sees the push: `gh pr view <pr#> --repo
-     "$REPO" --json headRefOid` must equal the fixer's `Commit`. GitHub can lag briefly, so re-query
-     once on a mismatch, and hold (reason: PR head does not match the fix push) if it still differs.
+   - `fixed` → **before** re-reviewing, confirm GitHub sees the push: the head,
+     `gh api "repos/$REPO/pulls/<pr#>" --jq .head.sha`, must equal the fixer's `Commit`. GitHub can
+     lag briefly, so re-query once on a mismatch, and hold (reason: PR head does not match the fix
+     push) if it still differs.
      Then re-run the review flow (a fresh review checkout, a new posted review) — its recorded
      `headRefOid` is that `Commit` — and loop.
    - `no-changes` → if the latest verdict is `request_changes`, hold (reason: fixer made no changes:

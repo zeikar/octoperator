@@ -74,8 +74,8 @@ bash scripts/test/vision.sh
 #     (offline; CI runs this).
 bash scripts/test/after-merge.sh
 
-# 1g. Test the REST issue, label, and sub-issue helpers, against a REST-only stub gh
-#     (offline; CI runs this).
+# 1g. Test the REST issue, label, sub-issue, and pull request helpers, and the cookbook's REST
+#     recipes, against a REST-only stub gh (offline; CI runs this).
 bash scripts/test/rest.sh
 
 # 2. Validate the benchmark tasks (offline; CI runs these too). See bench/README.md.

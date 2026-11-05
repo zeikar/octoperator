@@ -241,19 +241,13 @@ For each cycle `c` from 1 to `--cycles`:
 # Open issues as "<issue#><TAB><title><TAB><label,…>" lines (the issues API lists PRs too):
 gh api "repos/$REPO/issues?state=open&per_page=100" --paginate \
   --jq '.[] | select(.pull_request == null) | "\(.number)\t\(.title)\t\([.labels[].name] | join(","))"'
-# Open PRs as "<pr#> <headRefName> <closed issue#,…>" lines — closing references from this repo
-# only, compared case-insensitively since GitHub names are case-insensitive:
-gh pr list --repo "$REPO" --state open --limit 200 \
-  --json number,headRefName,closingIssuesReferences \
-  --jq '.[] | "\(.number) \(.headRefName) " + ([.closingIssuesReferences[]
-        | select((.repository.owner.login + "/" + .repository.name | ascii_downcase)
-                 == "<owner/name, lowercased>")
-        | .number | tostring] | join(","))'
+# Open PRs as tab-separated "<pr#> <state> <draft> <head branch> <closed issue#,…> <title>" lines:
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-pr-closes.sh" --repo "$REPO" --state open
 ```
 
-gh's `--jq` has no `--arg`, so write `REPO` into the filter as a lowercased string literal (owner and
-repo names never contain quotes). A `REPO=… gh …` prefix would fall outside the pre-allowed
-`Bash(gh:*)` (see `implement`'s command rule).
+REST has no `closingIssuesReferences`, so the helper reads each PR body's closing keywords (cookbook
+→ Read a pull request). Its closed-issue column lists this repo's issues as bare numbers
+(comma-separated, `-` for none; another repo's are `owner/name#N`, and never match).
 
 From the open issues, always exclude any labeled `status:blocked` (the project's blocked-status
 convention — also exclude a plain `blocked` label if a repo uses one), `epic` (not directly
@@ -293,7 +287,7 @@ This attempt-once rule guarantees forward progress: every cycle either merges ne
 proposals, or hits a stop condition — the loop cannot spin on the same issue.
 
 Finally, of the issues still kept, skip any an open PR already holds — the PR closes it, or its
-`headRefName` equals the branch `implement` would compute for it (its step 4, honoring
+head branch equals the branch `implement` would compute for it (its step 4, honoring
 `branch_pattern`). These are `implement`'s own rejection rules, so picking one would only burn a
 `--max` slot. Record each as `#<issue> → PR #<pr>` for the report; only issues that passed the filters
 above are recorded, so semi mode never lists a non-`ready` issue it would not have picked anyway

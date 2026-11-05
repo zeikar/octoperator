@@ -27,8 +27,21 @@ changes.
        | {number, title, url: .html_url, labels: [.labels[].name], milestone: .milestone.title,
           assignees: [.assignees[].login]}'
      ```
-   - Open PRs: `gh pr list --repo <repo> --state open --json number,title,headRefName,isDraft,reviewDecision,mergeable`.
-   - Recently merged PRs: `gh pr list --repo <repo> --state merged --limit 20 --json number,title,closingIssuesReferences,mergedAt`.
+   - Open PRs, then the 20 most recently updated closed ones (the `merged` rows are the recently
+     merged PRs), each as a tab-separated `<pr#> <state> <draft> <head branch> <closes> <title>`
+     line. REST has no `closingIssuesReferences`, so the helper reads the closing keywords in each
+     PR's body; `closes` lists this repo's issues as bare numbers, `-` for none:
+     ```bash
+     bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-pr-closes.sh --repo <repo> --state open
+     bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-pr-closes.sh --repo <repo> --state closed --limit 20
+     ```
+   - Each open PR's review decision: REST has no `reviewDecision`, so read its reviews, oldest
+     first. Take each reviewer's latest `APPROVED`, `CHANGES_REQUESTED`, or `DISMISSED` review:
+     any `CHANGES_REQUESTED` → changes requested; else any `APPROVED` → approved; else none:
+     ```bash
+     gh api "repos/<repo>/pulls/<pr#>/reviews?per_page=100" --paginate \
+       --jq '.[] | "\(.user.login) \(.state) \(.submitted_at)"'
+     ```
    - Board items (if configured): `gh project item-list <number> --owner <project_owner> --format json`.
    - Milestones: `gh api repos/<repo>/milestones`.
 
@@ -37,7 +50,7 @@ changes.
    (open/closed counts, due date), and call out anything `Blocked` or stale.
 
 4. **Detect drift.** Compare reality to the board:
-   - merged PR whose closing issue is not `Done` → should be `Done`;
+   - merged PR whose closed issue (its `closes`) is not `Done` → should be `Done`;
    - open non-draft PR whose issue is not `In Review` → should be `In Review`;
    - issue with an open branch/PR still in `Todo` → should be `In Progress`.
 

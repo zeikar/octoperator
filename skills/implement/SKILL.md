@@ -96,18 +96,22 @@ gh api "repos/$REPO/issues/<n>" --jq '{number, title, body, state, url: .html_ur
 
 **Compute each issue's branch name** (step 4 below) so PR matching can use it.
 
-**List open PRs once** with an explicit high limit:
+**List open PRs once**, every page, with the issues each one closes (REST has no
+`closingIssuesReferences`, so the helper reads the closing keywords in each PR's body; see the
+cookbook → Read a pull request):
 
 ```bash
-# --limit 200: may truncate on repos with >200 open PRs — warn the user in that case (see Notes)
-gh pr list --repo "$REPO" --state open --limit 200 \
-  --json number,headRefName,closingIssuesReferences
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-pr-closes.sh" --repo "$REPO" --state open
 ```
+
+It prints `<pr#> <state> <draft> <head branch> <closes> <title>` per open PR, tab-separated, where
+`closes` lists the issues in `$REPO` as bare numbers (comma-separated, `-` for none). A non-zero
+exit is a validation ERROR: stop rather than guess.
 
 **Reject** an issue when:
 - Its state is `closed`, OR
-- An open PR's `headRefName` equals its computed branch name, OR
-- An open PR's `closingIssuesReferences` contains the issue number.
+- An open PR's head branch equals its computed branch name, OR
+- An open PR's `closes` contains the issue number.
 
 Do NOT reject solely because the branch is checked out in a worktree — the current checkout is
 itself a worktree, so that condition would block the happy path. Instead, **record** per issue:
@@ -129,8 +133,7 @@ itself a worktree, so that condition would block the happy path. Instead, **reco
   - other → network/auth/remote error → validation ERROR (reject this issue or stop); never treat
     an unknown error as "branch absent"
 - For a branch that EXISTS on the remote and passed the open-PR checks above, confirm that no PR
-  in any state has used it, with one REST call that the `--limit 200` list can't miss (`<owner>` is
-  `$REPO`'s owner):
+  in any state has used it, with one REST call (`<owner>` is `$REPO`'s owner):
   ```bash
   gh api "repos/$REPO/pulls?head=<owner>:<branch>&state=all" --jq 'length'
   ```
@@ -366,22 +369,27 @@ Use a conventional commit message referencing `#<issue_number>`.
 #### (f) Open the PR
 
 The single-issue path uses the standard PR-creation rules from `github-conventions` (see
-`references/gh-cli-cookbook.md`): `Closes #<issue>`, `## Summary` body, test-status line, reviewers,
-self-skip — plus one additional draft trigger. Net draft rule — open as
-`--draft` when ANY of the following hold:
+`references/gh-cli-cookbook.md` → Open a pull request): `Closes #<issue>`, `## Summary` body,
+test-status line, reviewers, self-skip — plus one additional draft trigger. Net draft rule — open
+as a draft (`-F draft=true`) when ANY of the following hold:
 - No commits beyond base (`git rev-list --count "origin/$DEFAULT"..HEAD` equals `"0"`) — re-run
   fresh immediately before PR creation.
 - `--draft` flag was passed.
 - Tests failed.
 
+Push, then create the PR over REST, one call each. The title goes single-quoted in `-f` (write
+each `'` in it as `'\''`), and the body on stdin in the quoted heredoc, so nothing in it reaches
+the shell. The closing `OCTO_BODY_EOF` starts its line, with no indent:
+
 ```bash
 git push -u origin <branch>
-gh pr create \
-  --repo "$REPO" \
-  --base "$DEFAULT" \
-  --head <branch> \
-  --title "<type>: <issue_title>" \
-  --body "$(cat <<'EOF'
+gh api "repos/$REPO/pulls" \
+  -f title='<type>: <issue_title>' \
+  -f head=<branch> \
+  -f base="$DEFAULT" \
+  [-F draft=true] \
+  -F body=@- \
+  --jq '"\(.number) \(.html_url)"' <<'OCTO_BODY_EOF'
 Closes #<issue_number>
 
 ## Summary
@@ -390,13 +398,18 @@ Closes #<issue_number>
 ## Test status
 Command: <test command or "none">
 Result: <pass | fail | none>
-EOF
-)" \
-  [--draft] \
-  [--reviewer <user>] ...
+OCTO_BODY_EOF
 ```
 
-Skip any reviewer entry that is the authenticated user's own login (`gh api user --jq '.login'`).
+It prints `<pr#> <pr_url>`. Then request the reviewers in one call, one `reviewers[]` per login,
+skipping the authenticated user's own login (`gh api user --jq '.login'`); with none left, skip
+the call:
+
+```bash
+gh api "repos/$REPO/pulls/<pr#>/requested_reviewers" -f 'reviewers[]=<user1>' -f 'reviewers[]=<user2>'
+```
+
+A failed reviewer request leaves the PR open: report it, and carry on.
 
 #### (g) Set board to In Review
 
@@ -427,8 +440,6 @@ Print a scannable summary:
 
 - Never force-push or rewrite history.
 - If `repo` in settings differs from the local clone, STOP and tell the user — see step 2.
-- The `gh pr list --limit 200` in step 3 caps at 200; on very active repos with more than 200 open
-  PRs, a collision could be missed. Report this to the user if the repo seems unusually large.
 
 ## Parallel execution (multiple issues)
 
@@ -531,7 +542,7 @@ Pass exactly these parameters to each subagent (names and semantics match `agent
 | `issue_number` | GitHub issue number |
 | `issue_title` | Issue title string |
 | `repo` | Resolved `owner/name` string (e.g. `acme/myapp`) |
-| `default_branch` | Resolved default-branch name (e.g. `main`), used for `gh pr create --base` |
+| `default_branch` | Resolved default-branch name (e.g. `main`), the new PR's `base` |
 | `rev_base` | Resolved rev expression string (e.g. `origin/main`), used for `rev-list` counts |
 | `branch` | Feature branch name computed in step 4 |
 | `worktree` | Absolute path to the pre-created worktree (from P2) |
