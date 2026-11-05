@@ -44,6 +44,8 @@ immediately unless `--dry-run` is passed, then echo the issue URL.
 
 6. **Add to the board.** If a project is configured, run
    `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh --owner <project_owner> --project <number> --url <url> --status "<statuses.todo>"`.
+   A board failure, exit 3 included (`skipped: projects unavailable here`, where GraphQL is
+   refused, as in a Claude Code cloud session), skips this step with one warning; the issue stands.
 
 7. **Report.** Print the created issue number and URL.
 

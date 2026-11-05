@@ -479,6 +479,25 @@ All notable changes to Octoperator are documented in this file. The format is ba
   New tests cover an empty repo, a deleted fork's PR, the ledger and PR lists across pages, a PR
   labeled `epic`, setup's REST calls under a user or an organization, check's held and closed
   PRs, and cleanup's read failures.
+- The Projects v2 board is skipped, not failed, where GraphQL is refused, so a Claude Code cloud
+  session runs without one (part of epic #79, #115). Projects v2 has no REST API, so the board
+  steps stay on `gh project`. When a call gets the cloud proxy's 403
+  (`GitHub GraphQL is not available from Claude Code sessions`), `octo-project-status.sh` prints
+  `skipped: projects unavailable here (...)` and exits 3; `implement`, `auto`, `issue`,
+  `plan-epic`, and `sync` then make no more board calls and warn once. `octo-setup.sh` reports
+  `projects_capable: false` with a `Projects unavailable here` note, and `setup` skips the PAT
+  advice, since no token fixes it. `octo-doctor.sh` skips its project checks and passes. `sync`
+  skips the board and its drift fixes when its board read gets the 403. Any other board failure
+  is handled as before, and the conventions' rule that a board failure never aborts a run now
+  names this case. `octo-bench.sh`'s preflight now treats an empty `X-OAuth-Scopes` header,
+  which a cloud session sends because its proxy injects the credential, as unknown scopes (a
+  warning), as it did a missing header, not as a missing `repo` scope. The README's
+  Troubleshooting links to a new "Claude Code cloud sessions" section in
+  `docs/running-continuously.md`: no GraphQL, so the lifecycle runs over REST; no board, branch
+  delete, or Pages API; only the session's own repo, so `genesis --approve` stays local; and the
+  proxy's `ccr` routes for review threads, auto-merge, and draft state. New offline tests in
+  `scripts/test/cloud.sh`, which CI runs, use a stub `gh` that answers `gh project` and
+  `gh api graphql` with the proxy's 403.
 - `genesis --next` now calls GitHub only over REST, so autopilot can plan the next milestone in a
   Claude Code cloud session, whose proxy refuses GraphQL (#127, part of #79). In
   `skills/genesis/references/next.md`, step 1 reads the repo and its default branch with

@@ -51,7 +51,8 @@ Every local step runs before anything goes outward: a failing test stops the run
 `git init`. The repo is `--private` unless `GENESIS.md` says `visibility: public`. Pushing the CI
 workflow needs the token's `workflow` scope (`gh auth refresh -s workflow`). A re-run resumes from
 what exists (the git repo, the `origin` remote, the push), so nothing is created twice. Run it on
-your machine: Claude Code cloud sessions block GitHub's GraphQL API (#79).
+your machine: a Claude Code cloud session reaches only its own repo and refuses GraphQL (see
+[Claude Code cloud sessions](running-continuously.md#claude-code-cloud-sessions)).
 
 The handoff is printed, never run. Building the MVP takes the usual semi-mode gesture: review the
 children, add `ready` to the ones to build (the handoff gives the `gh label create ready` and

@@ -428,7 +428,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh" \
   --url "$issue_url" --status "$STATUS_DONE"
 ```
 
-A board failure never aborts the run (report "board sync skipped" once and continue).
+A board failure never aborts the run (report "board sync skipped" once and continue), including
+exit 3, `skipped: projects unavailable here`, where the session refuses GraphQL (a Claude Code
+cloud session).
 
 **Then close what the merge finished**, after every confirmed merge, with one helper call. It uses
 REST only (`gh api repos/...`), so it works in a Claude Code cloud session, and it never fails the

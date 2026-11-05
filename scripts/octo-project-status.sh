@@ -8,6 +8,14 @@
 # (case-insensitive) automatically — no field/option IDs need to be configured. Adds the item to the
 # board if it is not already present, then sets the Status. Uses only gh's built-in jq (no external
 # jq dependency).
+#
+# Projects v2 has no REST API, so every call here is GraphQL. Where GraphQL is refused (a Claude
+# Code cloud session's proxy answers `GitHub GraphQL is not available from Claude Code sessions`),
+# it prints `skipped: projects unavailable here (...)` on stdout and exits 3, so the caller turns
+# board writes off for the run and warns once. Any other failure keeps its message on stderr.
+#
+# Exit codes: 0 status set, 1 (or gh's own code, a 3 mapped to 1) failed, 2 bad arguments, 3 skipped
+# (projects unavailable here).
 set -euo pipefail
 
 POWNER="" PROJECT="" URL="" STATUS=""
@@ -28,12 +36,26 @@ done
   echo "Usage: octo-project-status.sh --owner OWNER --project NUMBER --url CONTENT_URL --status NAME" >&2
   exit 2; }
 
-PROJECT_ID=$(gh project view "$PROJECT" --owner "$POWNER" --format json --jq '.id') \
-  || { echo "Cannot access project #$PROJECT (owner $POWNER). Try: gh auth refresh -s project" >&2; exit 1; }
+ERRF=$(mktemp)
+trap 'rm -f "$ERRF"' EXIT
+# gh_failed : after a failed gh call whose stderr went to $ERRF, exit 3 when it is the cloud
+# proxy's GraphQL refusal; otherwise pass gh's message on to stderr and return.
+gh_failed() {
+  if grep -Fq 'GitHub GraphQL is not available from Claude Code sessions' "$ERRF"; then
+    echo "skipped: projects unavailable here (Projects v2 needs GraphQL, which this session refuses)"
+    exit 3
+  fi
+  cat "$ERRF" >&2
+}
+
+PROJECT_ID=$(gh project view "$PROJECT" --owner "$POWNER" --format json --jq '.id' 2>"$ERRF") \
+  || { gh_failed
+       echo "Cannot access project #$PROJECT (owner $POWNER). Try: gh auth refresh -s project" >&2
+       exit 1; }
 
 # gh lists at most 30 fields by default; ask for more so a busy board's Status is not cut off.
 FIELD_ID=$(gh project field-list "$PROJECT" --owner "$POWNER" --limit 100 --format json \
-  --jq '.fields[] | select(.name=="Status") | .id')
+  --jq '.fields[] | select(.name=="Status") | .id' 2>"$ERRF") || { rc=$?; gh_failed; exit $(( rc == 3 ? 1 : rc )); }
 [ -n "$FIELD_ID" ] || { echo "No single-select field named \"Status\" on project #$PROJECT." >&2; exit 1; }
 
 # gh's built-in --jq has no --arg, so the status name reaches jq through the environment ($ENV)
@@ -41,7 +63,8 @@ FIELD_ID=$(gh project field-list "$PROJECT" --owner "$POWNER" --limit 100 --form
 # shellcheck disable=SC2016  # $ENV is a jq variable — must stay literal, not shell-expanded
 OPTION_ID=$(WANT="$STATUS" gh project field-list "$PROJECT" --owner "$POWNER" --limit 100 \
   --format json --jq '.fields[] | select(.name=="Status") | .options[]
-    | select((.name|ascii_downcase)==($ENV.WANT|ascii_downcase)) | .id')
+    | select((.name|ascii_downcase)==($ENV.WANT|ascii_downcase)) | .id' 2>"$ERRF") \
+  || { rc=$?; gh_failed; exit $(( rc == 3 ? 1 : rc )); }
 if [ -z "$OPTION_ID" ]; then
   echo "Status \"$STATUS\" not found. Available options:" >&2
   gh project field-list "$PROJECT" --owner "$POWNER" --limit 100 --format json \
@@ -51,10 +74,12 @@ fi
 
 # item-add is idempotent: for content already on the board it returns the existing item, so no
 # item-list scan is needed (that scan was capped at 2000 items and cost a full read per call).
-ITEM_ID=$(gh project item-add "$PROJECT" --owner "$POWNER" --url "$URL" --format json --jq '.id') \
-  || { echo "Failed to add $URL to project #$PROJECT." >&2; exit 1; }
+ITEM_ID=$(gh project item-add "$PROJECT" --owner "$POWNER" --url "$URL" --format json --jq '.id' \
+  2>"$ERRF") \
+  || { gh_failed; echo "Failed to add $URL to project #$PROJECT." >&2; exit 1; }
 [ -n "$ITEM_ID" ] || { echo "item-add returned no item id for $URL on project #$PROJECT." >&2; exit 1; }
 
 gh project item-edit --id "$ITEM_ID" --project-id "$PROJECT_ID" \
-  --field-id "$FIELD_ID" --single-select-option-id "$OPTION_ID" >/dev/null
+  --field-id "$FIELD_ID" --single-select-option-id "$OPTION_ID" >/dev/null 2>"$ERRF" \
+  || { rc=$?; gh_failed; exit $(( rc == 3 ? 1 : rc )); }
 echo "Set Status=\"$STATUS\" for $URL on project #$PROJECT"

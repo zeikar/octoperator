@@ -6,6 +6,8 @@
 #
 # Checks: gh installed, gh authenticated, repo readable, (optionally) project readable,
 # and prints the project's Status single-select options so settings can be confirmed.
+# Projects v2 has no REST API: where GraphQL is refused (a Claude Code cloud session's proxy), the
+# project checks are skipped with one `• Projects unavailable here ...` line, not a failure.
 # Exit code is non-zero if any required check fails.
 set -euo pipefail
 
@@ -41,13 +43,21 @@ DEFAULT=$(gh api "repos/$REPO" --jq '.default_branch' 2>/dev/null) \
   || fail "Cannot access repo: $REPO"
 ok "Repo $REPO reachable (default branch: $DEFAULT)"
 
-if [ -n "$PROJECT" ]; then
-  [ -n "$POWNER" ] || POWNER="${REPO%%/*}"
-  if ! gh project view "$PROJECT" --owner "$POWNER" --format json >/dev/null 2>&1; then
+ERRF=$(mktemp)
+trap 'rm -f "$ERRF"' EXIT
+[ -n "$POWNER" ] || POWNER="${REPO%%/*}"
+if [ -z "$PROJECT" ]; then
+  echo "• No --project given; skipped project checks."
+elif ! gh project view "$PROJECT" --owner "$POWNER" --format json >/dev/null 2>"$ERRF"; then
+  # The cloud proxy's refusal is no failure: no token or scope fixes it. Anything else is.
+  if ! grep -Fq 'GitHub GraphQL is not available from Claude Code sessions' "$ERRF"; then
     echo "✗ Cannot access project #$PROJECT (owner: $POWNER)." >&2
     echo "  If this is a scope error, run: gh auth refresh -s project" >&2
     exit 1
   fi
+  echo "• Projects unavailable here (Projects v2 needs GraphQL, which this session refuses);" \
+    "skipped project checks."
+else
   TITLE=$(gh project view "$PROJECT" --owner "$POWNER" --format json --jq '.title')
   ok "Project #$PROJECT \"$TITLE\" reachable (owner: $POWNER)"
   echo "  Status options:"
@@ -61,8 +71,6 @@ if [ -n "$PROJECT" ]; then
   else
     printf '%s\n' "$OPTIONS" | sed 's/^/    - /'
   fi
-else
-  echo "• No --project given; skipped project checks."
 fi
 
 echo "Doctor checks passed."

@@ -117,6 +117,11 @@ bash scripts/test/rest.sh
 #     a REST-only stub gh (offline; CI runs this).
 bash scripts/test/merge-gate.sh
 
+# 1i. Test what a Claude Code cloud session can't reach: the board steps skip on the proxy's
+#     GraphQL 403, and the bench preflight reads an empty scopes header as unknown, against a
+#     stub gh (offline; CI runs this).
+bash scripts/test/cloud.sh
+
 # 2. Validate the benchmark tasks (offline; CI runs these too). See bench/README.md.
 bash bench/validate.sh && bash bench/test/selftest.sh
 
@@ -142,15 +147,17 @@ than Octoperator's own reviewer. Every result is one JSON line in `bench/results
 > `--max-cost-usd`, and check the plan with `--dry-run` first. With the cap set, `run` also stops
 > after a solve that reports no cost (a timeout, say), since that spend is unknown. **Never run
 > it in CI.** CI runs only the offline parts (`smoke.sh`'s stub tests, `evals.sh`, `autopilot.sh`,
-> `genesis-next.sh`, `vision.sh`, `after-merge.sh`, `rest.sh`, `merge-gate.sh`, and
-> `bench/validate.sh`).
+> `genesis-next.sh`, `vision.sh`, `after-merge.sh`, `rest.sh`, `merge-gate.sh`, `cloud.sh`,
+> and `bench/validate.sh`).
 > Every network step exits 2 unless you pass `--live`.
 
 Run it in a **Claude Code remote (cloud) session on Linux**, not on your machine. Prerequisites:
 
 - `gh` signed in with a classic token that has the `repo` scope, plus `delete_repo` so `cleanup`
   can delete the repos (without it, `cleanup` lists them): `gh auth refresh -s repo,delete_repo`.
-  The preflight fails without `repo` and only warns without `delete_repo`.
+  The preflight fails without `repo` and only warns without `delete_repo`. A token with no
+  scopes header, or an empty one (a Claude Code cloud session's proxy injects the credential,
+  so its header is empty), has unknown scopes: the preflight warns and goes on.
 - `git` and `python3`, plus this checkout with the plugin loaded. `solve` passes
   `--plugin-dir <this checkout>` to the nested `claude` (override with `--plugin-dir`). For the
   agent-driven mode, start the session with the plugin loaded (`claude --plugin-dir <checkout>`).
