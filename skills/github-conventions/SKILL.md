@@ -62,6 +62,11 @@ Octoperator drives the `gh` CLI. Before the first write in a session, verify:
   (user-owned Projects v2 are not supported by fine-grained PATs; org-owned projects work via a
   fine-grained token's Projects permission). When a `gh project ...` call fails with a permission
   error, **skip the board step and continue** — report it and suggest `/octoperator:setup`.
+  Projects v2 has no REST API, so where GraphQL is refused (a Claude Code cloud session's proxy:
+  `GitHub GraphQL is not available from Claude Code sessions`) there is no board at all:
+  `octo-project-status.sh` exits 3 with `skipped: projects unavailable here`. Skip that step and
+  every later board call in the run, warn once, and give no setup hint, since no token fixes it.
+  A board failure never aborts a run, this one included.
 
 Run `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-doctor.sh --repo <owner>/<name> --project <number>` to
 verify auth, repo access, project access, and to print the board's Status options.

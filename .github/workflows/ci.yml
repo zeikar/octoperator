@@ -56,6 +56,11 @@ jobs:
         # Offline: auto's merge state, checks wait, and merge with its branch delete, against a
         # stub gh that serves REST and refuses GraphQL and porcelain.
         run: bash scripts/test/merge-gate.sh
+      - name: Cloud session tests
+        # Offline: the Projects v2 board steps skip on the cloud proxy's GraphQL 403 (and fail as
+        # before on any other error), and the bench preflight reads an empty scopes header as
+        # unknown, against a stub gh.
+        run: bash scripts/test/cloud.sh
       - name: Benchmark task validation
         # Offline: each task's hidden check must fail on its seed and pass with its reference patch.
         run: bash bench/validate.sh

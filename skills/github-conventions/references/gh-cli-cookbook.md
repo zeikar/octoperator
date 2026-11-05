@@ -15,9 +15,11 @@ uses GraphQL under the hood, including every issue, label, pull request, and rep
 pull requests, reviews, and the repo itself go through `gh api repos/OWNER/NAME/...` (REST),
 never the porcelain. REST works locally too, so one path serves both. That includes the merge
 gate's checks wait, merge state, and merge. `gh run` and `gh workflow` are REST already. Only
-Projects v2 has no REST API at all. `scripts/test/smoke.sh` fails on any GraphQL call or
-GraphQL-backed porcelain in a script, skill, or agent outside genesis (which runs only locally),
-except the few lines its allowlist names, such as the Projects v2 commands.
+Projects v2 has no REST API at all, so its board steps stay on `gh project` and are skipped where
+GraphQL is refused (`octo-project-status.sh` exits 3 with `skipped: projects unavailable here`).
+`scripts/test/smoke.sh` fails on any GraphQL call or GraphQL-backed porcelain in a script,
+skill, or agent outside genesis (which runs only locally), except the few lines its allowlist
+names, such as the Projects v2 commands.
 
 The rules every REST step follows:
 

@@ -205,10 +205,13 @@ wrapping the call in a shell `if` (see the command rule). If it exits non-zero (
 the `project` scope):
 
 1. Set `BOARD_DISABLED_RUNTIME=true` — no more board writes this run.
-2. Report "board sync skipped (access error)" once.
+2. Report "board sync skipped (access error)" once. On exit 3 (it printed
+   `skipped: projects unavailable here`: the session refuses GraphQL, as a Claude Code cloud
+   session does, and Projects v2 has no REST API), report "board sync skipped (projects
+   unavailable here)" once instead.
 3. Continue the implement flow without interruption.
 
-Never abort an implement run because of a board error.
+Never abort an implement run because of a board error, the exit 3 skip included.
 
 Pattern for every board call:
 

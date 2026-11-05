@@ -274,8 +274,9 @@ use) stays open for a human.
 ## Projects v2 status flow
 
 The board is an **optional enhancement**. When no project is configured (or the token cannot access
-Projects v2), skip every board step — the rest of the chain (issues, sub-issues, branches, PRs,
-reviews) is unaffected. When a board *is* configured, mirror status through this flow:
+Projects v2, or the session refuses GraphQL, as a Claude Code cloud session does), skip every board
+step — the rest of the chain (issues, sub-issues, branches, PRs, reviews) is unaffected. When a
+board *is* configured, mirror status through this flow:
 
 ```
 Todo → In Progress → In Review → Done
