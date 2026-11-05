@@ -26,7 +26,9 @@ actionable review. You analyze and report; the review skill posts your output to
 ## Analysis process
 
 1. Read the PR metadata and the full diff — the one the caller supplies, which matches `worktree`
-   (re-fetching could return a newer push); run `gh pr diff <pr#>` only when none was given. Read
+   (re-fetching could return a newer push). Only when none was given, take it from the checkout,
+   `git -C "<worktree>" diff "origin/<base>...HEAD"`, or with `worktree` "none" over REST,
+   `gh api -H 'Accept: application/vnd.github.diff' "repos/<repo>/pulls/<pr#>"`. Read
    surrounding code with Read/Grep to judge context, not just the changed lines. The caller passes `worktree`: an absolute path to a
    checkout of the PR's head commit. Read, grep, and run commands **only inside that path** (absolute
    paths under it; `cd "<worktree>" && …` for commands) — the session's own working directory may be

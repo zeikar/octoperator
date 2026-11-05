@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# rest.sh — offline tests for the REST-only issue, label, and sub-issue helpers.
+# rest.sh — offline tests for the REST-only issue, label, sub-issue, and pull request helpers.
 #
 # Usage:
 #   bash scripts/test/rest.sh
 #
-# Runs octo-subissue.sh, octo-labels.sh, octo-issue-find.sh, and octo-ledger-read.sh against a
-# stub `gh` that plays a small GitHub over REST only: it serves `gh api repos/...` from fixture
-# files (issues, labels, comments), applies the writes, and rejects `gh api graphql` and every
-# porcelain command (`gh issue`, `gh label`, ...) with the Claude Code cloud proxy's 403, as a
-# cloud session does. A list endpoint is served two items a page, and only its first page
+# Runs octo-subissue.sh, octo-labels.sh, octo-issue-find.sh, octo-ledger-read.sh, and
+# octo-pr-closes.sh against a stub `gh` that plays a small GitHub over REST only: it serves
+# `gh api repos/...` from fixture files (issues, labels, comments, pull requests with their
+# files, reviews, review comments, and diff), applies the writes, and rejects `gh api graphql` and
+# every porcelain command (`gh issue`, `gh label`, `gh pr`, ...) with the Claude Code cloud
+# proxy's 403, as a cloud session does. A list endpoint is served two items a page, and only its first page
 # without --paginate, running the --jq filter once per page as gh does. Covers: bad arguments
 # (exit 2, no gh call); the sub-issue link by the child's numeric id sent typed, an unreadable
 # epic or child, and a refused link (gh's error kept); labels created with their colors and
@@ -16,9 +17,15 @@
 # rest, and names sent as raw strings; the open-issue text match (case ignored, plain string,
 # pull requests and closed issues left out, every page read) and a gh error; and the ledger's
 # newest allowed entries, the skipped count by author association, exact bodies, an empty
-# ledger, and a gh error; a body sent on stdin by the cookbook's own heredoc recipes, arriving
-# byte for byte with nothing run; and the cookbook's label table against octo-labels.sh and every
-# raw label create in the docs. No call is ever rejected.
+# ledger, and a gh error; the issues a PR's body closes (every keyword form and case, GH-N,
+# another repo's and a URL's, a negated keyword counted, fenced and inline code and HTML comments
+# skipped, an unclosed fence or comment, CRLF, a null body, none off the default branch), the PR
+# lists by state (every page, oldest first) and --limit (one page, newest-updated first), and a
+# gh error; a body sent on stdin by the cookbook's own heredoc recipes (an issue, a comment, a
+# PATCH, a pull request, a review), arriving byte for byte with nothing run, its PR read recipes,
+# and sync's review-decision read (write-access reviewers only); and the cookbook's
+# label table against octo-labels.sh and every raw label create in the docs. No call is ever
+# rejected.
 #
 # Nothing here calls the real gh or the network. Exits 0 when every check passes, 1 when any fails.
 set -uo pipefail
@@ -44,7 +51,9 @@ tmp="$(mktemp -d)" && [ -n "$tmp" ] || { echo "rest: mktemp failed" >&2; exit 1;
 trap 'rm -rf "$tmp"' EXIT
 
 # The stub's state lives in $FX: issues/<n>.json (served as is), labels/<lowercased name> (the
-# repo's labels), comments/<n>.json (an issue's comments, a JSON array), sub-error (a message:
+# repo's labels), comments/<n>.json (an issue's comments, a JSON array), pulls/<n>.json (a pull
+# request), prlists/<n>.<files|reviews|comments>.json (its lists, JSON arrays), prlists/<n>.diff
+# (its diff, for `Accept: application/vnd.github.diff`), sub-error (a message:
 # the sub-issue POST answers it as a 422), and fail (an ERE matched against "<METHOD> <endpoint>"
 # → a 500). It logs every call to log and $ALL_LOG, every rejected one to $ALL_REJECTED, and
 # every write to writes, each field as raw:<k=v> (-f) or typed:<k=v> (-F); a `-F k=@-` field's
@@ -65,10 +74,13 @@ reject() {
 }
 [ "${1:-}" = api ] || reject "$@"
 shift
-method="" ep="" jq="." paginate=0 fields=""
+method="" ep="" jq="." paginate=0 fields="" accept=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -X | --method) method="$2"; shift 2 ;;
+    -H | --header)
+      case "$2" in "Accept: "*) accept="${2#Accept: }" ;; *) echo "stub: header $2" >&2; exit 9 ;; esac
+      shift 2 ;;
     --jq) jq="$2"; shift 2 ;;
     -f | --raw-field) fields="$fields"$'\n'"raw:$2"; shift 2 ;;
     -F | --field)
@@ -94,17 +106,26 @@ fi
 field() { printf '%s\n' "$fields" | sed -n "s/^[a-z]*:$1=//p"; }
 # logged : the fields on one line, as " raw:k=v typed:k=v".
 logged() { printf '%s' "$fields" | tr '\n' ' '; }
-# pages : serve the JSON array on stdin two items a page (one page without --paginate), running
-# the --jq filter on each page, as gh does.
+# pages : serve the JSON array on stdin two items a page, or per_page items when the endpoint
+# asks for fewer than 100 (one page without --paginate), running the --jq filter on each page,
+# as gh does.
 pages() {
-  local all n i=0
+  local all n i=0 size=2 pp
+  pp=$(printf '%s' "$ep" | sed -n 's/.*[?&]per_page=\([0-9]*\).*/\1/p')
+  [ -z "$pp" ] || [ "$pp" -ge 100 ] || size=$pp
   all=$(cat); n=$(jq length <<<"$all")
   while :; do
-    jq -c ".[$i:$((i + 2))]" <<<"$all" | jq -r "$jq" || exit 9
-    i=$((i + 2))
+    jq -c ".[$i:$((i + size))]" <<<"$all" | jq -r "$jq" || exit 9
+    i=$((i + size))
     [ "$paginate" -eq 1 ] && [ "$i" -lt "$n" ] || break
   done
 }
+# query <key> : the value of <key> in the endpoint's query string.
+query() { printf '%s' "$ep" | sed -n "s/.*[?&]$1=\([^&]*\).*/\1/p"; }
+# next_number : issues and pull requests share one sequence of numbers, as on GitHub.
+next_number() { echo $(($(find "$FX/issues" "$FX/pulls" -name '*.json' | wc -l | tr -d ' ') + 1)); }
+# pr_list : every pull request in $FX/pulls, as one JSON array.
+pr_list() { cat "$FX"/pulls/*.json 2>/dev/null | jq -s .; }
 case "$method $ep" in
   "GET repos/o/n/issues?state=open&sort=created&direction=asc&per_page=100")
     cat "$FX"/issues/*.json 2>/dev/null |
@@ -119,7 +140,7 @@ case "$method $ep" in
     [ ! -s "$FX/sub-error" ] || err 422 "$(cat "$FX/sub-error")"
     echo "LINK $n$(logged)" >>"$FX/writes"; jq -r "$jq" <"$FX/issues/$n.json" ;;
   "POST repos/o/n/issues")
-    n=$(find "$FX/issues" -name '*.json' | wc -l | tr -d ' '); n=$((n + 1))
+    n=$(next_number)
     jq -n --argjson n "$n" --arg t "$(field title)" \
       '{id: (1000 + $n), number: $n, state: "open", title: $t,
         html_url: "https://github.com/o/n/issues/\($n)"}' >"$FX/issues/$n.json"
@@ -140,6 +161,42 @@ case "$method $ep" in
     fi
     touch "$FX/labels/$key"; echo "LABEL$(logged)" >>"$FX/writes"
     jq -n --arg n "$name" '{name: $n}' | jq -r "$jq" ;;
+  "GET repos/o/n/pulls?"*)
+    # state open | closed (merged included) | all; sort=created asc or sort=updated desc.
+    st=$(query state) sort=$(query sort) dir=$(query direction) hd=$(query head)
+    pr_list | jq --arg st "$st" --arg sort "$sort" --arg dir "$dir" --arg hd "${hd#*:}" '
+      map(select($st == "all" or .state == $st) | select($hd == "" or .head.ref == $hd))
+      | if $sort == "updated" then sort_by(.updated_at) else sort_by(.number) end
+      | if $dir == "desc" then reverse else . end' | pages ;;
+  "GET repos/o/n/pulls/"*"/files?per_page=100" | "GET repos/o/n/pulls/"*"/reviews?per_page=100" | \
+  "GET repos/o/n/pulls/"*"/comments?per_page=100")
+    rest=${ep#repos/o/n/pulls/}; n=${rest%%/*}; kind=${rest#*/}; kind=${kind%%\?*}
+    f="$FX/prlists/$n.$kind.json"; [ -f "$FX/pulls/$n.json" ] || err 404 "Not Found"
+    [ -f "$f" ] || f=/dev/null
+    { cat "$f"; echo; } | jq -s 'add // []' | pages ;;
+  "GET repos/o/n/pulls/"*)
+    n=${ep##*/}; f="$FX/pulls/$n.json"; [ -f "$f" ] || err 404 "Not Found"
+    case "$accept" in
+      application/vnd.github.diff) cat "$FX/prlists/$n.diff" ;;
+      "") jq -r "$jq" <"$f" ;;
+      *) echo "stub: accept $accept" >&2; exit 9 ;;
+    esac ;;
+  "POST repos/o/n/pulls")
+    n=$(next_number)
+    jq -n --argjson n "$n" --arg t "$(field title)" --arg h "$(field head)" --arg b "$(field base)" \
+      --arg d "$(field draft)" \
+      '{number: $n, state: "open", merged_at: null, draft: ($d == "true"), title: $t,
+        head: {ref: $h}, base: {ref: $b}, html_url: "https://github.com/o/n/pull/\($n)"}' \
+      >"$FX/pulls/$n.json"
+    echo "PULL $n$(logged)" >>"$FX/writes"; jq -r "$jq" <"$FX/pulls/$n.json" ;;
+  "POST repos/o/n/pulls/"*/reviews)
+    n=${ep%/reviews}; n=${n##*/}; [ -f "$FX/pulls/$n.json" ] || err 404 "Not Found"
+    echo "REVIEW $n$(logged)" >>"$FX/writes"
+    jq -n --arg n "$n" '{html_url: "https://github.com/o/n/pull/\($n)#pullrequestreview-1"}' |
+      jq -r "$jq" ;;
+  "POST repos/o/n/pulls/"*/requested_reviewers)
+    n=${ep%/requested_reviewers}; n=${n##*/}; [ -f "$FX/pulls/$n.json" ] || err 404 "Not Found"
+    echo "REVIEWERS $n$(logged)" >>"$FX/writes"; jq -r "$jq" <"$FX/pulls/$n.json" ;;
   *) echo "stub: unexpected $method $ep" >&2; exit 9 ;;
 esac
 STUB
@@ -148,13 +205,26 @@ ALL_LOG="$tmp/all-log" ALL_REJECTED="$tmp/all-rejected"
 export FX ALL_LOG ALL_REJECTED
 
 # fresh : an empty GitHub.
-fresh() { rm -rf "$FX"; mkdir -p "$FX/issues" "$FX/labels" "$FX/comments"; }
+fresh() { rm -rf "$FX"; mkdir -p "$FX/issues" "$FX/labels" "$FX/comments" "$FX/pulls" "$FX/prlists"; }
 # issue <n> <state> [title [body [is-pr]]] : write issues/<n>.json, its id 1000 + n.
 issue() {
   jq -n --argjson n "$1" --arg s "$2" --arg t "${3:-Issue $1}" --arg b "${4:-}" --arg pr "${5:-}" \
     '{id: (1000 + $n), number: $n, state: $s, title: $t, body: $b,
       html_url: "https://github.com/o/n/issues/\($n)"}
      + (if $pr == "" then {} else {pull_request: {url: "x"}} end)' >"$FX/issues/$1.json"
+}
+# pr <n> <open|closed|merged> <head> [body ("null": none) [draft [updated day [title [base]]]]] :
+# write pulls/<n>.json, its repo's default branch main, its base main unless given.
+pr() {
+  jq -n --argjson n "$1" --arg s "$2" --arg h "$3" --arg b "${4-}" --arg d "${5:-false}" \
+    --arg u "${6:-$(printf %02d "$1")}" --arg t "${7:-PR $1}" --arg base "${8:-main}" \
+    '{number: $n, state: (if $s == "merged" then "closed" else $s end),
+      merged: ($s == "merged"), merged_at: (if $s == "merged" then "2026-10-01T00:00:00Z" else null end),
+      draft: ($d == "true"), title: $t, body: (if $b == "null" then null else $b end),
+      head: {ref: $h, sha: "sha\($n)", repo: {full_name: "o/n"}},
+      base: {ref: $base, repo: {full_name: "o/n", default_branch: "main"}},
+      user: {login: "dev"}, updated_at: "2026-10-\($u)T00:00:00Z",
+      html_url: "https://github.com/o/n/pull/\($n)"}' >"$FX/pulls/$1.json"
 }
 # run <helper> [args...] : the helper against the stub; sets out (stdout), errout, rc, writes.
 run() {
@@ -176,6 +246,8 @@ PATH="$stub:$PATH" gh label create epic --repo o/n >/dev/null 2>&1
 same "gh label is refused too" 1 "$?"
 PATH="$stub:$PATH" gh issue list --repo o/n >/dev/null 2>&1
 same "gh issue is refused too" 1 "$?"
+PATH="$stub:$PATH" gh pr view 1 --repo o/n >/dev/null 2>&1
+same "gh pr is refused too" 1 "$?"
 rm -f "$ALL_LOG" "$ALL_REJECTED"
 
 echo "• bad arguments (exit 2, no gh call)"
@@ -204,6 +276,19 @@ octo-ledger-read.sh|--repo o/n
 octo-ledger-read.sh|--repo o/n --issue 0
 octo-ledger-read.sh|--repo o/n --issue 3 --last 0
 octo-ledger-read.sh|--repo o/n --issue 3 --last x
+octo-pr-closes.sh|
+octo-pr-closes.sh|--repo o/n
+octo-pr-closes.sh|--pr 5
+octo-pr-closes.sh|--repo on --pr 5
+octo-pr-closes.sh|--repo o/n --pr 0
+octo-pr-closes.sh|--repo o/n --pr 05
+octo-pr-closes.sh|--repo o/n --pr 5x
+octo-pr-closes.sh|--repo o/n --pr 5 --state open
+octo-pr-closes.sh|--repo o/n --pr 5 --limit 3
+octo-pr-closes.sh|--repo o/n --state merged
+octo-pr-closes.sh|--repo o/n --state open --limit 0
+octo-pr-closes.sh|--repo o/n --state open --limit 101
+octo-pr-closes.sh|--repo o/n --state open --limit 1x
 CASES
 run octo-issue-find.sh --repo o/n --text "two${nl}lines"
 same "octo-issue-find.sh: a --text with a line break exits 2" 2 "$rc"
@@ -333,11 +418,94 @@ fresh
 run octo-ledger-read.sh --repo o/n --issue 3
 same "an unreadable ledger: exit 1, nothing printed" "1|" "$rc|$out"
 
+echo "• octo-pr-closes.sh"
+B="Closes #3
+fixes: O/N#4, resolves other/Repo#9
+Resolves https://github.com/o/n/issues/21 and fixed https://github.com/X/y/issues/22
+see \`closes #10\` and \`\`fix #11 \` \`\` here
+<!-- fixes #12 -->
+<!--
+fixes #13
+-->after: closes #14
+\`\`\`sh
+fixes #15
+\`\`\`
+~~~~
+\`\`\`
+fixes #16
+~~~~
+> \`\`\`
+> fixes #24
+> \`\`\`
+\`\`\`inline\`\`\` closes #23
+This does not close #17, and we won't FIX #18 here.
+enclosed #30 prefixes #31 Closes #32abc closes#33 close #0 CLOSED #025 Closes #3
+Closes gh-26 and fixes: GH-27, but not closes gh-28x or closes gh-0"
+fresh; pr 7 open 7-x "$B"
+run octo-pr-closes.sh --repo o/n --pr 7
+same "every keyword form and case, in body order, each once; another repo's lowercased" \
+  "0|7${tab}open${tab}false${tab}7-x${tab}3,4,other/repo#9,21,x/y#22,14,23,17,18,25,26,27${tab}PR 7" \
+  "$rc|$out"
+same "one read of the PR" "1|1" "$(wc -l <"$FX/log" | tr -d ' ')|$(grep -c '^api repos/o/n/pulls/7 --jq ' "$FX/log")"
+
+while IFS='|' read -r label body want; do
+  fresh; pr 8 open b "$(printf '%b' "$body")"
+  run octo-pr-closes.sh --repo o/n --pr 8
+  same "$label" "0|$want" "$rc|$(cut -f5 <<<"$out")"
+done <<'CASES'
+an unclosed fence hides the rest|Fixes #1\n```\nFixes #2|1
+a longer fence closes only with as many|````\n```\nFixes #1\n````\nFixes #2|2
+a ~~~ fence is not closed by ```|~~~\n```\nFixes #1\n~~~\nFixes #2|2
+an unclosed comment hides the rest|Fixes #1 <!-- Fixes #2\nFixes #3|1
+a comment and code on one line|`x` <!-- a --> Fixes #4 `Fixes #5`|4
+an unmatched backtick is plain text|it`s fixed: Fixes #6|6
+CRLF line ends|Closes #7\r\nFixes #8\r\n|7,8
+no keyword|Part of #79, see #12|-
+an empty body|\c|-
+CASES
+fresh; pr 9 open b null "" "" "tab${tab}in title"
+run octo-pr-closes.sh --repo o/n --pr 9
+same "a null body closes nothing, and a tab in the title becomes a space" \
+  "0|9${tab}open${tab}false${tab}b${tab}-${tab}tab in title" "$rc|$out"
+fresh; pr 10 open 10-s "Closes #3" "" "" "stacked" 9-base
+run octo-pr-closes.sh --repo o/n --pr 10
+same "a PR into a branch other than the default closes nothing, as on GitHub" \
+  "0|10${tab}open${tab}false${tab}10-s${tab}-${tab}stacked" "$rc|$out"
+
+fresh
+pr 1 open 1-a "Closes #11" "" 09; pr 2 merged 2-b "Fixes #12" "" 01; pr 3 closed 3-c "" "" 05
+pr 4 open 4-d "Closes #14" true 07; pr 5 open feature/x "" "" 02; pr 6 open 6-f "fixes #1" "" 03
+run octo-pr-closes.sh --repo o/n --state open
+same "--state open: every open PR, oldest first, every page" \
+  "0|1${tab}open${tab}false${tab}1-a${tab}11${tab}PR 1${nl}4${tab}open${tab}true${tab}4-d${tab}14${tab}PR 4${nl}5${tab}open${tab}false${tab}feature/x${tab}-${tab}PR 5${nl}6${tab}open${tab}false${tab}6-f${tab}1${tab}PR 6" \
+  "$rc|$out"
+same "it asked for every page, oldest first" 1 \
+  "$(grep -c 'pulls?state=open&sort=created&direction=asc&per_page=100 --paginate' "$FX/log")"
+run octo-pr-closes.sh --repo o/n --state closed
+same "--state closed: merged and closed, told apart" \
+  "0|2 merged 12|3 closed -" "$rc|$(cut -f1,2,5 <<<"$out" | tr '\t\n' ' |' | sed 's/|$//')"
+: >"$FX/log"
+run octo-pr-closes.sh --repo o/n --state all --limit 3
+same "--limit: the most recently updated, newest first" "0|1 4 3" "$rc|$(cut -f1 <<<"$out" | tr '\n' ' ' | sed 's/ $//')"
+same "--limit reads one page of that size" "1|0" \
+  "$(grep -c 'pulls?state=all&sort=updated&direction=desc&per_page=3 ' "$FX/log")|$(grep -c -- '--paginate' "$FX/log")"
+
+fresh
+run octo-pr-closes.sh --repo o/n --state open
+same "no PR: nothing printed, exit 0" "0|" "$rc|$out"
+run octo-pr-closes.sh --repo o/n --pr 4
+same "an unreadable PR: exit 1, gh's error, nothing printed" \
+  "1||gh: Not Found (HTTP 404)${nl}octo-pr-closes: could not read PR #4 in o/n" "$rc|$out|$errout"
+pr 1 open a; echo 'pulls\?state=' >"$FX/fail"
+run octo-pr-closes.sh --repo o/n --state all
+same "a failed list: exit 1, nothing printed" "1|" "$rc|$out"
+
 echo "• bodies go on stdin, by the cookbook's heredoc recipes"
 COOKBOOK="$SCRIPTS_DIR/../skills/github-conventions/references/gh-cli-cookbook.md"
-# recipe <ERE> <body file> : the first ```bash block after the cookbook line matching <ERE>, as
-# a script: OWNER/NAME becomes o/n, and each line that is a <...> placeholder alone becomes the
-# body file's lines. The body's lines then sit in the recipe's real heredoc, run by bash.
+# recipe <ERE> <body file> [doc] : the first ```bash block after the line matching <ERE> in the
+# cookbook (or doc), as a script: OWNER/NAME becomes o/n, and each line that is a <...>
+# placeholder alone becomes the body file's lines. The body's lines then sit in the recipe's real
+# heredoc, run by bash.
 recipe() {
   awk -v re="$1" -v bodyf="$2" '
     !on && $0 ~ re { on = 1; next }
@@ -347,7 +515,7 @@ recipe() {
       $0 = substr($0, ind + 1)
       if ($0 ~ /^<[^>]*>$/) { while ((getline l < bodyf) > 0) print l; close(bodyf); next }
       gsub("OWNER/NAME", "o/n"); print
-    }' "$COOKBOOK"
+    }' "${3:-$COOKBOOK}"
 }
 # A body that would run commands if bash read it: quotes, a substitution, backticks, a `;`, and
 # a line EOF (only OCTO_BODY_EOF ends the heredoc).
@@ -378,6 +546,83 @@ same "the documented comment and PATCH run, each with its body on stdin" \
 cmp -s "$tmp/body" "$FX/stdin.1" && cmp -s "$tmp/body" "$FX/stdin.2" &&
   ok "both bodies arrive byte for byte" || no "both bodies arrive byte for byte"
 ls "$tmp"/ran-* >/dev/null 2>&1 && no "nothing in either body ran" || ok "nothing in either body ran"
+
+fresh; rm -f "$tmp"/ran-*
+recipe '^## Open a pull request' "$tmp/body" >"$tmp/pr.sh"
+same "the cookbook's PR create is one -F body=@- call and its quoted heredoc" "1|1|1" \
+  "$(grep -c -- '-F body=@-' "$tmp/pr.sh")|$(grep -c "<<'OCTO_BODY_EOF'\$" "$tmp/pr.sh")|$(grep -cx OCTO_BODY_EOF "$tmp/pr.sh")"
+out="$(PATH="$stub:$PATH" bounded 20 bash "$tmp/pr.sh" </dev/null 2>"$tmp/stderr")"; rc=$?
+same "the documented PR create runs and prints <number> <url>" \
+  "0|1 https://github.com/o/n/pull/1" "$rc|$out"
+same "title, head, and base go raw, the body from stdin" \
+  "PULL 1 raw:title=feat: add OAuth login raw:head=42-add-oauth-login raw:base=main typed:body=@-" \
+  "$(cat "$FX/writes")"
+{ printf 'Closes #42\n\n## Summary\n'; cat "$tmp/body"; } >"$tmp/pr-body"
+cmp -s "$tmp/pr-body" "$FX/stdin.1" && ok "the PR body arrives byte for byte" ||
+  no "the PR body arrives byte for byte"
+ls "$tmp"/ran-* >/dev/null 2>&1 && no "nothing in the PR body ran" || ok "nothing in the PR body ran"
+
+fresh; pr 43 open 42-add-oauth-login "Closes #42"
+recipe '^It prints `<number> <url>`. Add `-F draft=true`' "$tmp/body" >"$tmp/reviewers.sh"
+out="$(PATH="$stub:$PATH" bounded 20 bash "$tmp/reviewers.sh" </dev/null 2>"$tmp/stderr")"; rc=$?
+same "the documented reviewer request sends each login raw, as an array" \
+  "0|REVIEWERS 43 raw:reviewers[]=alice raw:reviewers[]=bob" "$rc|$(cat "$FX/writes")"
+
+fresh; pr 43 open 42-add-oauth-login "Closes #42"; rm -f "$tmp"/ran-*
+recipe '^## Post a review' "$tmp/body" >"$tmp/review.sh"
+out="$(PATH="$stub:$PATH" bounded 20 bash "$tmp/review.sh" </dev/null 2>"$tmp/stderr")"; rc=$?
+same "the documented review posts as a COMMENT, its body from stdin, and prints its URL" \
+  "0|https://github.com/o/n/pull/43#pullrequestreview-1|REVIEW 43 raw:event=COMMENT typed:body=@-" \
+  "$rc|$out|$(cat "$FX/writes")"
+cmp -s "$tmp/body" "$FX/stdin.1" && ok "the review body arrives byte for byte" ||
+  no "the review body arrives byte for byte"
+ls "$tmp"/ran-* >/dev/null 2>&1 && no "nothing in the review body ran" || ok "nothing in the review body ran"
+
+echo "• the cookbook's pull request reads"
+fresh; pr 43 open 42-add-oauth-login "Closes #42"; pr 44 closed other
+echo '[{"status": "modified", "filename": "src/a.sh"}, {"status": "added", "filename": "b c.md"},
+  {"status": "renamed", "filename": "d", "previous_filename": "e"}]' >"$FX/prlists/43.files.json"
+printf 'diff --git a/src/a.sh b/src/a.sh\n' >"$FX/prlists/43.diff"
+recipe '^`GET repos/OWNER/NAME/pulls/N` names' /dev/null >"$tmp/read.sh"
+out="$(PATH="$stub:$PATH" bounded 20 bash "$tmp/read.sh" </dev/null 2>"$tmp/stderr")"; rc=$?
+same "the documented reads run" "0|" "$rc|$(cat "$tmp/stderr")"
+same "one PR's fields, by their REST names" \
+  '{"number":43,"title":"PR 43","state":"open","merged":false,"draft":false,"author":"dev","head":"42-add-oauth-login","head_sha":"sha43","base":"main","url":"https://github.com/o/n/pull/43"}' \
+  "$(PATH="$stub:$PATH" bash -c "$(sed -n '/^gh api repos\/o\/n\/pulls\/43 --jq/,/}'"'"'$/p' "$tmp/read.sh")" | jq -c .)"
+same "the PRs on a branch, in any state" "43 open" "$(grep -x '43 open' <<<"$out")"
+same "every changed file, every page" "modified${tab}src/a.sh${nl}added${tab}b c.md${nl}renamed${tab}d" \
+  "$(grep -E "^(modified|added|renamed)${tab}" <<<"$out")"
+same "the diff, by its Accept header" "diff --git a/src/a.sh b/src/a.sh" "$(tail -n 1 <<<"$out")"
+
+fresh; pr 43 open b
+echo '[{"user": {"login": "z"}, "state": "COMMENTED", "submitted_at": "t1", "html_url": "r1", "body": "**Verdict:** approve"},
+  {"user": {"login": "a"}, "state": "APPROVED", "submitted_at": "t2", "html_url": "r2", "body": ""},
+  {"user": {"login": "z"}, "state": "COMMENTED", "submitted_at": "t3", "html_url": "r3", "body": "two\nlines"}]' \
+  >"$FX/prlists/43.reviews.json"
+echo '[{"user": {"login": "z"}, "path": "a.sh", "line": null, "original_line": 4, "html_url": "c1", "body": "here"}]' \
+  >"$FX/prlists/43.comments.json"
+echo '[{"user": {"login": "h"}, "author_association": "OWNER", "created_at": "t4", "html_url": "i1", "body": "hi"}]' \
+  >"$FX/comments/43.json"
+recipe '^Reviews and comments, oldest first' /dev/null >"$tmp/reviews.sh"
+out="$(PATH="$stub:$PATH" bounded 20 bash "$tmp/reviews.sh" </dev/null 2>"$tmp/stderr")"; rc=$?
+same "the documented review and comment reads run" "" "$(cat "$tmp/stderr")"
+same "the documented review and comment reads: every page, each body after its header" \
+  "0|--- z COMMENTED t1 r1${nl}**Verdict:** approve${nl}--- a APPROVED t2 r2${nl}${nl}--- z COMMENTED t3 r3${nl}two${nl}lines${nl}--- z a.sh:4 c1${nl}here${nl}--- h (OWNER) t4 i1${nl}hi" \
+  "$rc|$out"
+
+echo "• sync's review decision counts write-access reviewers only"
+fresh; pr 43 open b
+echo '[{"user": {"login": "a"}, "author_association": "OWNER", "state": "APPROVED", "submitted_at": "t1"},
+  {"user": {"login": "x"}, "author_association": "CONTRIBUTOR", "state": "CHANGES_REQUESTED", "submitted_at": "t2"},
+  {"user": {"login": "m"}, "author_association": "MEMBER", "state": "COMMENTED", "submitted_at": "t3"},
+  {"user": {"login": "y"}, "author_association": "NONE", "state": "APPROVED", "submitted_at": "t4"},
+  {"user": {"login": "c"}, "author_association": "COLLABORATOR", "state": "CHANGES_REQUESTED", "submitted_at": "t5"}]' \
+  >"$FX/prlists/43.reviews.json"
+recipe "^   - Each open PR's review decision" /dev/null "$SCRIPTS_DIR/../skills/sync/SKILL.md" |
+  sed 's/<repo>/o\/n/; s/<pr#>/43/' >"$tmp/sync-reviews.sh"
+out="$(PATH="$stub:$PATH" bounded 20 bash "$tmp/sync-reviews.sh" </dev/null 2>"$tmp/stderr")"; rc=$?
+same "sync's review read: OWNER, MEMBER, and COLLABORATOR, every page, oldest first" \
+  "0|a APPROVED t1${nl}m COMMENTED t3${nl}c CHANGES_REQUESTED t5|" "$rc|$out|$(cat "$tmp/stderr")"
 
 echo "• the cookbook's label table is octo-labels.sh's"
 # label_table : "<name>|<colour>|<description>" per row of the cookbook's label table.
@@ -411,7 +656,8 @@ if [ -z "$left" ]; then ok "each raw create in the docs matches the table"; else
 
 echo "• REST only"
 same "no helper call in this suite was rejected" "" "$(cat "$ALL_REJECTED" 2>/dev/null)"
-same "every helper call was gh api repos/o/n/..." "" "$(grep -Ev '^api (-X [A-Z]+ )?repos/o/n/' "$ALL_LOG")"
+same "every helper call was gh api repos/o/n/..." "" \
+  "$(grep -Ev '^api (-X [A-Z]+ |-H Accept: [^ ]+ )?repos/o/n/' "$ALL_LOG")"
 [ "$(wc -l <"$ALL_LOG")" -gt 20 ] && ok "the suite made helper calls" || no "the suite made helper calls"
 
 echo

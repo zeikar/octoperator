@@ -360,6 +360,45 @@ All notable changes to Octoperator are documented in this file. The format is ba
   recipes through bash and check the body arrives byte for byte. `smoke.sh` now fails if a skill
   or agent file outside `genesis` names `gh issue` or `gh label` (after any global flags), outside
   a one-line allowlist, or sends a body as a `-f` argument.
+- Pull requests and reviews now go over REST too, in every skill and agent but `genesis` (part
+  of epic #79, #112). `implement`, `review`, `auto`, `autopilot`, `sync`, `research`,
+  `issue-implementer`, `pr-reviewer`, and the cookbook no longer run `gh pr create`, `view`,
+  `list`, `diff`, `review`, or `comment`. A PR opens with `POST .../pulls` (title, `head`, and
+  `base` raw, `-F draft=true` only where a draft was used before), and its reviewers follow in a
+  second call to `.../requested_reviewers`; a failed reviewer request leaves the PR open and is
+  reported. A review posts with `POST .../pulls/<n>/reviews` and `event` `COMMENT`, `APPROVE`,
+  or `REQUEST_CHANGES` (every self-review is a `COMMENT`), and a PR comment is an issue
+  comment. Every PR, review, and comment body now goes on stdin by the `-F body=@-` heredoc rule,
+  including the PR bodies `implement` and `issue-implementer` used to build in
+  `--body "$(cat <<'EOF' … EOF)"`; a double-quoted `--body` let backticks and `$( )` in the text
+  run. `review` now diffs the PR from the commit it checked out,
+  `git diff "origin/<base>...<head sha>"`, so the diff and the reviewed commit always match; only
+  when the checkout or the base fetch fails does it take GitHub's diff
+  (`Accept: application/vnd.github.diff`) and re-check the head, redoing the checkout once at a
+  moved head (or stopping when it moves again) so a diff never pairs with another commit's tree.
+  On a re-review, and in the fixer when a finding needs context, the PR's reviews, inline
+  comments, and conversation are read over REST, every page. The cookbook's new
+  "Read a pull request" section maps each `gh pr view --json` field to REST (`headRefOid` is
+  `.head.sha`, `isDraft` is `.draft`, `isCrossRepository` compares the head and base repos'
+  `full_name`, true for a deleted fork). REST has no `closingIssuesReferences`, so a new
+  REST-only helper, `octo-pr-closes.sh`, reads GitHub's closing keywords (`close`, `fixes`,
+  `resolved`, …, any case, an optional `:`, then `#N`, `GH-N`, `owner/name#N`, or an issue URL)
+  in each PR's body, on a PR into the default branch only, as GitHub links them. Fenced code,
+  inline code, and HTML comments are skipped, as GitHub links nothing there, and a negated
+  keyword still counts, as it does on GitHub. It prints
+  `<number> <state> <draft> <head> <closes> <title>` for one PR (`--pr`) or every PR in a state
+  (`--state`, every page, or `--limit N` most recently updated). `auto --pr` uses it to check
+  that a PR closes at most one issue, in `$REPO`; `implement`, `autopilot`, and `sync` use it in
+  place of `gh pr list --json closingIssuesReferences`, so their open-PR lists are no longer cut
+  at 200. `sync` reads each open PR's review decision from its reviews by write-access
+  reviewers. An issue linked by hand in a PR's Development sidebar is no longer seen. `rest.sh`
+  tests the helper (every keyword form, code, comments, negation, unclosed fences and comments,
+  CRLF, paging, a non-default base) and runs the cookbook's PR create, reviewer request, review
+  post, and PR reads, and sync's review read, through bash against the stub, which now serves
+  the pull request endpoints; the PR and review bodies arrive byte for byte with nothing run.
+  `smoke.sh` now also fails on `gh pr` in a skill or agent, outside an allowlist that holds the
+  merge gate's `gh pr checks`, `view`, and `merge` until they move to REST (#113), and fails on
+  an allowlist entry that no longer matches any line.
 - The conventions gain a rule for a flaky test found mid-run, unrelated to the current issue.
   Re-run it at most twice more on the PR head and run it on the base (`origin/<default>`); one
   that passes on the base but fails on the head is a regression, fixed in the PR. A real flake

@@ -60,6 +60,7 @@ you can also run by hand from a clone.
 - **`octo-labels.sh`** — make sure labels exist: create each missing one, with Octoperator's colour and description for its own labels, and leave existing ones alone; REST only (`created`, `exists`, or `failed` per label); used by `issue`, `plan-epic`, `setup`, `autopilot`, and the flaky-test procedure.
 - **`octo-issue-find.sh`** — find the open issues whose title or body contains a text, matched as a plain string ignoring case, over REST (the REST stand-in for `--search`); used by the flaky-test procedure to find an issue for a test.
 - **`octo-ledger-read.sh`** — print the newest entry-shaped comments on autopilot's run ledger from allowed authors, and a count of the skipped ones, as JSON; read-only, REST only; the ledger read command for a human or `research`.
+- **`octo-pr-closes.sh`** — list pull requests (one, or every one in a state, or the most recently updated) with the issues each one's body closes, the REST stand-in for `closingIssuesReferences`: GitHub's closing keywords in any case (`#N`, `GH-N`, `OWNER/NAME#N`, or an issue URL), negated ones too, skipping fenced code, inline code, and HTML comments, and only on a PR into the default branch; read-only, REST only; used by `implement`, `auto --pr`, `autopilot`, and `sync`.
 - **`octo-project-status.sh`** — add an issue/PR to the board and set its Status by name.
 - **`octo-merge-state.sh`** — print a PR's `mergeStateStatus`, waiting out GitHub's `UNKNOWN`; used by `auto`'s merge gate.
 - **`octo-after-merge.sh`** — after a merge, close the issue the PR closes (`--issue N`) if GitHub left it open, with a comment naming the PR, then each epic of that issue (native parent or `## Children` list) once every child is closed; never one with an open child or no children. REST only; prints what it closed, `warn: …`, or `nothing to close`, and always exits 0; used by `auto` after each merge.
@@ -103,8 +104,8 @@ bash scripts/test/vision.sh
 #     (offline; CI runs this).
 bash scripts/test/after-merge.sh
 
-# 1g. Test the REST issue, label, and sub-issue helpers, against a REST-only stub gh
-#     (offline; CI runs this).
+# 1g. Test the REST issue, label, sub-issue, and pull request helpers, and the cookbook's REST
+#     recipes, against a REST-only stub gh (offline; CI runs this).
 bash scripts/test/rest.sh
 
 # 2. Validate the benchmark tasks (offline; CI runs these too). See bench/README.md.

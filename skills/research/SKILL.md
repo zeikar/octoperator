@@ -48,16 +48,18 @@ Build an evidence base before proposing — read, do not write:
   (`${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`, or `.claude-plugin/plugin.json` relative to the
   repo root).
 - **Inventory:** `skills/`, `agents/`, `scripts/` — what capabilities already exist.
-- **Done & in-flight work (dedupe source):** every issue, one short line each (number, state,
-  title), over REST (the issues API lists PRs too, so they are dropped), then the PRs:
+- **Done & in-flight work (dedupe source):** every issue, then every PR, one short line each
+  (number, state, title; a PR's state is `merged` once merged, and its head branch follows), over
+  REST (the issues API lists PRs too, so they are dropped there):
   ```bash
   gh api "repos/$REPO/issues?state=all&per_page=100" --paginate \
     --jq '.[] | select(.pull_request == null) | "#\(.number) \(.state) \(.title)"'
-  gh pr list --repo "$REPO" --state all --limit 500 --json number,title,state,closingIssuesReferences
+  gh api "repos/$REPO/pulls?state=all&per_page=100" --paginate \
+    --jq '.[] | "#\(.number) \(if .merged_at then "merged" else .state end) \(.title) [\(.head.ref)]"'
   ```
-  The issue list is complete, and one short line an issue keeps it readable on a large repo. If
-  the PR list returns exactly its `--limit` (so it was likely truncated), say so and dedupe
-  conservatively — do not file a proposal you cannot confirm is novel against the full history.
+  Both lists are complete, and one short line an item keeps them readable on a large repo. An
+  Octoperator PR's head branch starts with the number of the issue it implements
+  (`branch_pattern`, default `{number}-{slug}`).
 - **Code-level gaps:** `grep`/Glob for `TODO`, `FIXME`, `HACK`, stubbed paths, missing error handling,
   inconsistencies between docs and code, untested helpers.
 - **Evidence** — the only things a filed proposal may rest on. Collect them with a pointer that can be
@@ -87,10 +89,16 @@ Build an evidence base before proposing — read, do not write:
     a bot's, are skipped. The idle rule stands in for "no `auto` run is fixing it", which research
     can't observe: a fix loop pushes and re-reviews within minutes. A loop stalled for over an hour
     still looks held, and a fresh hold is picked up by the next run. Measure idleness inside `gh`'s
-    `--jq` (its `now` is the current time) — this skill can run only `gh`, so never `date`:
+    `--jq` (its `now` is the current time) — this skill can run only `gh`, so never `date`. List
+    the idle open PRs, then read each non-draft candidate's reviews, oldest first, with the
+    verdict line of each body (`-` when it has none):
     ```bash
-    gh pr list --repo "$REPO" --state open --json number,url,isDraft,headRefName,updatedAt,reviews \
-      --jq '.[] | select(now - (.updatedAt | fromdateiso8601) > 3600)'
+    gh api "repos/$REPO/pulls?state=open&per_page=100" --paginate \
+      --jq '.[] | select(now - (.updated_at | fromdateiso8601) > 3600)
+            | "#\(.number) \(.html_url) draft=\(.draft) \(.head.ref) \(.updated_at)"'
+    gh api "repos/$REPO/pulls/<n>/reviews?per_page=100" --paginate \
+      --jq '.[] | "\(.submitted_at) \(.user.login) \(.html_url) \((.body // "") | split("\n")
+            | map(select(test("[Vv]erdict:"))) | first // "-")"'
     ```
     The ledger is the open issue labeled `octoperator-ledger`; each autopilot run appends one entry
     to it. Format, validity rules, and the read command (the newest 20 entry-shaped comments from
@@ -197,7 +205,8 @@ File the top `--count` **evidenced** proposals — never fill `--count` with une
 
 **Re-check the evidence first.** Right before filing a proposal, re-read every entry it cites, using
 the step 2 command for its type: re-run the eval's `gh run list --branch <default> --workflow "<name>"
-… --limit 1` query, `gh pr view <n> --repo "$REPO" --json state,isDraft,reviews` for a failure-log PR,
+… --limit 1` query, `gh api "repos/$REPO/pulls/<n>" --jq '{state, merged, draft, updated_at}'` and
+the reviews read above for a failure-log PR,
 the issue and comment reads above (or the comment's issue) for a user-feedback link or a
 ledger entry, Read for a
 benchmark file. Confirm the cited run, PR, comment, or task line is really there and still says
