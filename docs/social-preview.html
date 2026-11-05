@@ -1,0 +1,118 @@
+<!doctype html>
+<!--
+  Source for docs/social-preview.png (the repo's GitHub social preview, Settings → Social preview).
+  After editing, re-render at 1280x640:
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless --hide-scrollbars \
+      --window-size=1280,640 --screenshot=docs/social-preview.png docs/social-preview.html
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Octoperator social preview</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #151b23; --line: #30363d;
+    --text: #f0f6fc; --muted: #9198a1;
+    --green: #3fb950; --purple: #ab7df8; --blue: #4493f8; --amber: #d29922;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1280px; height: 640px; overflow: hidden; background: var(--bg); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+    color: var(--text);
+    position: relative;
+  }
+  .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+
+  /* Faint commit-graph texture, top right. */
+  .grid {
+    position: absolute; inset: 0;
+    background-image: radial-gradient(circle, #21262d 1.2px, transparent 1.3px);
+    background-size: 28px 28px;
+    mask-image: radial-gradient(ellipse 70% 90% at 100% 0%, #000 0%, transparent 70%);
+  }
+  .glow {
+    position: absolute; width: 760px; height: 760px; right: -260px; top: -380px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(171, 125, 248, .18), transparent 65%);
+  }
+
+  .wrap { position: absolute; left: 80px; right: 80px; top: 72px; bottom: 64px; }
+
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-size: 20px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--muted);
+  }
+  .eyebrow .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--amber); }
+
+  h1 {
+    margin-top: 18px;
+    font-size: 112px; line-height: 1; font-weight: 800; letter-spacing: -.035em;
+  }
+  h1 .op { color: var(--purple); }
+  .tag {
+    margin-top: 22px; max-width: 900px;
+    font-size: 36px; line-height: 1.25; font-weight: 500; color: #d1d7e0; letter-spacing: -.01em;
+  }
+  .tag b { color: var(--text); font-weight: 700; }
+
+  /* request → merged pipeline */
+  .flow { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 14px; }
+  .step {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 12px 18px; border-radius: 999px; border: 2px solid var(--c); color: var(--c);
+    background: color-mix(in srgb, var(--c) 10%, transparent);
+    font-size: 24px; font-weight: 600; white-space: nowrap;
+  }
+  .step svg { width: 24px; height: 24px; fill: currentColor; flex: none; }
+  .step.req { --c: var(--muted); }
+  .step.issue, .step.pr, .step.review { --c: var(--green); }
+  .step.branch { --c: var(--blue); }
+  .step.review { position: relative; }
+  .step.review::before {
+    content: "↻ fix → re-review"; position: absolute; left: 50%; bottom: calc(100% + 14px);
+    transform: translateX(-50%); white-space: nowrap;
+    padding: 6px 14px; border-radius: 8px; border: 1.5px dashed var(--amber);
+    color: var(--amber); background: color-mix(in srgb, var(--amber) 10%, transparent);
+    font-size: 19px; font-weight: 600;
+  }
+  .step.merged { --c: var(--purple); background: var(--purple); color: var(--bg); }
+  .arrow { color: #484f58; font-size: 26px; font-weight: 700; }
+
+  .cmd {
+    position: absolute; right: 0; top: 18px;
+    padding: 14px 20px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line);
+    font-size: 22px; color: var(--muted);
+  }
+  .cmd .p { color: var(--green); }
+  .cmd .n { color: var(--text); font-weight: 700; }
+</style>
+</head>
+<body>
+  <div class="grid"></div>
+  <div class="glow"></div>
+
+  <div class="wrap">
+    <div class="eyebrow"><span class="dot"></span>Claude Code plugin</div>
+    <div class="cmd mono"><span class="p">&gt;</span> /octoperator:<span class="n">auto 42</span></div>
+
+    <h1>Octo<span class="op">perator</span></h1>
+    <p class="tag">Ship GitHub issues <b>autonomously</b> —<br>every step a traceable issue, PR, and review.</p>
+
+    <div class="flow">
+      <span class="step req">request</span>
+      <span class="arrow">→</span>
+      <!-- Octicons (MIT): issue-opened, git-branch, git-pull-request, check, git-merge -->
+      <span class="step issue"><svg viewBox="0 0 16 16"><path d="M8 9.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"/><path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Z"/></svg>issue</span>
+      <span class="arrow">→</span>
+      <span class="step branch"><svg viewBox="0 0 16 16"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>branch</span>
+      <span class="arrow">→</span>
+      <span class="step pr"><svg viewBox="0 0 16 16"><path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z"/></svg>PR</span>
+      <span class="arrow">→</span>
+      <span class="step review"><svg viewBox="0 0 16 16"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg>review</span>
+      <span class="arrow">→</span>
+      <span class="step merged"><svg viewBox="0 0 16 16"><path d="M5.45 5.154A4.25 4.25 0 0 0 9.25 7.5h1.378a2.251 2.251 0 1 1 0 1.5H9.25A5.734 5.734 0 0 1 5 7.123v3.505a2.25 2.25 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.95-.218ZM4.25 13.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm8.5-4.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5ZM5 3.25a.75.75 0 1 0 0 .001V3.25Z"/></svg>merged</span>
+    </div>
+  </div>
+</body>
+</html>

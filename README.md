@@ -1,16 +1,21 @@
 # Octoperator
 
-**Autonomous GitHub-native execution for Claude Code.**
+**A Claude Code plugin that ships GitHub issues autonomously: implement, review, fix, and merge, with
+every step a traceable issue, PR, and review.**
 
-Octoperator turns Claude Code work into a GitHub-native workflow. It converts natural-language requests
-into epics, issues, sub-issues, milestones, branches, pull requests, and reviews — so agentic coding
-stays traceable from **request → issue → branch → PR → review**, with GitHub as the source of truth.
-An optional Projects v2 board mirrors that status when one is available (auto-detected via
-`/octoperator:setup`).
+[![CI](https://github.com/zeikar/octoperator/actions/workflows/ci.yml/badge.svg)](https://github.com/zeikar/octoperator/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/zeikar/octoperator)](https://github.com/zeikar/octoperator/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Built for solo developers, small teams, and AI-assisted workflows that already use GitHub Issues, Pull
-Requests, and Milestones — and, optionally, Projects — and want Claude Code to behave like a
-GitHub-native project operator instead of a one-off coding assistant.
+Point Octoperator at an issue and `/octoperator:auto` takes it the rest of the way: a branch, code
+and tests, a pull request, a structured review, fixes for what the review found, and a regular merge
+once the review, CI, and GitHub all agree. `/octoperator:autopilot` repeats that loop over your
+backlog and, when it runs dry, proposes what to build next. Everything happens in GitHub Issues and
+pull requests, so agentic coding stays traceable from **request → issue → branch → PR → review →
+merge**.
+
+Built for solo developers and small teams who already work in GitHub and use Claude Code. A Projects
+v2 board is optional: `/octoperator:setup` detects whether your token can use one.
 
 ## How it works
 
@@ -19,68 +24,67 @@ GitHub-native project operator instead of a one-off coding assistant.
   <img alt="Octoperator workflow: setup, then plan-epic / issue / research create issues; auto implements, reviews, fixes blocker/major/minor findings (up to 6 rounds), and merges through a gate; autopilot repeats it; sync tracks the optional board (Todo, In Progress, In Review, Done)." src="docs/workflow-light.png" width="100%">
 </picture>
 
-Octoperator drives the [`gh` CLI](https://cli.github.com) — it reuses your existing `gh auth`, stores
-no tokens, and runs no extra server. The trickier GraphQL / Projects-v2 operations are wrapped in small
-helper scripts for reliability.
-
 **Operating posture: autonomous.** Skills execute immediately rather than asking for confirmation. To
 preview what *would* happen without writing to GitHub, pass `--dry-run` (or say "dry run"). Every write
 echoes the issue/PR numbers and URLs it created so the trail stays auditable.
 
+## Quick start
+
+Inside Claude Code:
+
+```text
+/plugin marketplace add zeikar/octoperator
+/plugin install octoperator@zeikar-plugins
+/octoperator:setup
+```
+
+Then, in a repo with an open issue:
+
+```text
+/octoperator:auto 42
+  → branch 42-add-login, code + tests, PR "Closes #42", review, fixes, regular merge
+```
+
+You need the GitHub CLI signed in (`gh auth login`); see [Prerequisites](#prerequisites) and
+[Installation](#installation) for the rest.
+
+## Why Octoperator
+
+- **GitHub is the record.** Every change is an issue, a branch, a reviewed PR, and a merge commit,
+  not just a chat transcript.
+- **It merges only through a gate.** A non-blocking review of the current head, green CI, and a
+  `CLEAN` merge state; a PR that touches a path you mark for approval waits for a human.
+- **It runs where you are.** It drives the [`gh` CLI](https://cli.github.com) with your existing
+  `gh auth`: no server, no stored tokens, no GitHub App to install.
+- **It knows when to stop.** Autopilot is bounded by a cycle cap, logs every run on a ledger issue,
+  and switches to propose-only once runs stop making progress.
+
 ## Components
 
-### Skills (slash commands)
+### Commands
 
-Grouped by purpose — starting a new project, onboarding, then the lifecycle from intake to
-autonomous shipping, plus the always-on knowledge layer.
+| Command | What it does |
+|---------|--------------|
+| [`/octoperator:setup`](docs/commands.md#setup) | One-time onboarding: detect the repo, auto-detect Projects v2, write local settings |
+| [`/octoperator:plan-epic <request>`](docs/commands.md#plan-epic) | Break a big request into an epic and linked child issues |
+| [`/octoperator:issue <request>`](docs/commands.md#issue) | File one well-formed issue with labels and acceptance criteria |
+| [`/octoperator:implement <issue#...>`](docs/commands.md#implement) | Branch, code, test, and open a PR; several issues run in parallel worktrees |
+| [`/octoperator:auto <issue#...>`](docs/commands.md#auto) | Implement → review → fix (up to 6 rounds) → merge through the gate |
+| [`/octoperator:autopilot`](docs/commands.md#autopilot) | Loop `auto` over the backlog; when it's empty, `research` proposes more |
+| [`/octoperator:review <pr#>`](docs/commands.md#review) | Post a structured review with a verdict to a PR |
+| [`/octoperator:sync`](docs/commands.md#sync) | Standup-style status report; fixes board drift |
+| [`/octoperator:research`](docs/commands.md#research) | Rank proposed work across features, refactors, debt, tests, docs, and DX |
+| [`/octoperator:genesis "<sentence>"`](docs/commands.md#genesis) | Start a new project from one sentence: research, a proposal, the repo, an MVP epic |
 
-| Group | Command | What it does |
-|-------|---------|--------------|
-| **New project** | `/octoperator:genesis "<sentence>"` | Start a new project from one sentence, in an empty directory outside git: research existing services and similar open-source projects (at most 6 web searches and 10 page fetches), write a local proposal (`GENESIS.md`, `docs/research.md`, a PRD, a stack ADR, and a `VISION.md` draft), and stop at a human checkpoint with `genesis: proposed <dir>`. Makes no GitHub write |
-| | `/octoperator:genesis --approve [--dry-run]` | Re-run in the proposal folder once you've reviewed it: write a minimal skeleton (one module, one passing test, CI, `.gitignore`, README) and offline scenario evals (one per PRD scenario, run on pushes to `main`, with an append-only guard on PRs), run its test once, commit, create the **private** repo with `gh repo create`, write the Octoperator settings and labels, plan the MVP epic there with `plan-epic`'s procedure, and print the autopilot handoff (semi-mode triage, the scheduling recipes, the allow rules); ends with `genesis: handed off <repo> (epic #N)`. It never starts autopilot or adds `ready`. `--dry-run` prints every command and plan-epic's dry run, and writes nothing (see [Starting a new project](#starting-a-new-project-genesis)) |
-| | `/octoperator:genesis --next [--dry-run]` | In a repo genesis created, once every eval passes on `main`'s tip and no next-milestone PR is open: research the web (the same caps; `ungrounded` without web access, and under autopilot unless your settings allow the web tools), pick one milestone that fits `VISION.md`, and open one PR on `milestone-<n>-<slug>` with a `## Milestone <n>` PRD section, new must-fail evals only, and a cited Roadmap item; ends with `genesis: planned milestone <n> (PR #M)`. It never merges (`auto --pr` does) and never touches an existing eval or the Immutable constraints. `--dry-run` prints the milestone and the PR, and writes nothing |
-| **Onboarding** | `/octoperator:setup` | One-time onboarding: detect repo, auto-detect Projects v2 access, optionally create/link a board, write `.claude/octoperator.local.md` |
-| **Plan & intake** | `/octoperator:plan-epic <request>` | Decompose a request into an epic + linked child issues, milestone, labels, board items |
-| | `/octoperator:issue <request>` | Create one well-formed issue (labels, acceptance criteria, milestone, board) |
-| **Autonomous lifecycle** | `/octoperator:implement <issue#...> [--max N] [--draft] [--dry-run]` | Implement one or more issues end-to-end: branch, code, test, and PR. Single issue runs in-tree; multiple issues run in parallel worktrees (up to `--max`, default 3) |
-| | `/octoperator:auto <issue#...> [--max N] [--dry-run]` | End-to-end lifecycle: implement → review → merge for one or more issues. Blocker/major/minor review findings trigger up to 6 fix → re-review rounds; merges (regular merge) only on a non-blocking review of the current head + CI green + mergeable. A PR that touches an `approval_paths` glob is held for a human (`needs human approval: <path>`), and so is one that changes `VISION.md`'s Immutable constraints. After a merge it closes the issue if GitHub left it open, and the epic once its last child is closed. `--pr <pr#>` skips implement and takes an existing PR, such as a next-milestone PR, through the same review, fix, and merge gate |
-| | `/octoperator:autopilot [--mode semi\|full] [--cycles N] [--max M] [--resume] [--dry-run]` | Bounded loop: discover work → `auto` (implement→review→merge) → when empty, `research` refills. `semi` builds only `ready` issues then proposes; `full` runs unattended to the cycle cap. In both modes a `needs-approval` issue is skipped (reported as gated) until a human adds `approved`. Each run appends an entry to an `octoperator-ledger` issue; after `convergence_runs` runs (default 3) without a gain it switches to observe mode (propose only, no builds) until `--resume`. A gain is more evals passing than at any point since the count last restarted (the high-water mark) in a repo with genesis's evals, which the entry records as its `metric`, and otherwise a merge; when every eval passes and nothing is buildable, it plans the next milestone with `genesis --next`, ungrounded unless your settings allow the web tools, and ships the PR with `auto --pr` in either mode. Then it ends `autopilot: all evals pass → planning next milestone`. It observes instead while a next-milestone PR is open, after you declined one at the same tip, after planning failed at the same tip, or while the evals run hasn't judged `main`'s tip yet. In that last case it dispatches `evals.yml` once when no run for the tip is queued or running. Every run ends with an `autopilot: …` status line, and a run started by an in-session cron task or `/loop` ends that schedule once there is nothing left to do (see [Running continuously](#running-continuously)) |
-| **Review & status** | `/octoperator:review <pr#>` | Run a structured review and post the verdict + findings to the PR |
-| | `/octoperator:sync` | Standup-style status report; auto-reconciles board drift |
-| **What's next** | `/octoperator:research [--create] [--count N] [--focus <feature\|refactor\|debt\|tests\|docs\|dx\|all>] [--dry-run]` | Analyze the repo and produce a ranked list of proposals balanced across features, refactoring, tech debt, tests, docs, and DX; with `--create`, file the top ones as `proposed` issues — only proposals backed by verifiable evidence (a benchmark result, failing CI, a held PR or autopilot ledger entry, or user feedback). Proposals that would deploy, spend money, or delete data also get `needs-approval` |
-| **Knowledge layer** | `github-conventions` *(auto-loaded)* | Source-of-truth conventions, `gh` cookbook, settings schema shared by all actions |
+The `github-conventions` skill loads automatically and holds the conventions, `gh` cookbook, and
+settings schema the others share. Every flag and gate is in the
+[command reference](docs/commands.md).
 
 ### Agents
 
 - **`issue-planner`** — decomposes a request into an epic + well-scoped child issues (used by `plan-epic`). Read-only; proposes structure.
 - **`issue-implementer`** — implements a single issue inside a pre-created worktree, commits, pushes, and opens a PR (dispatched by `implement` for each parallel issue); in fix mode, fixes review findings on an existing PR for `auto`. Never writes to the project board.
 - **`pr-reviewer`** — produces a structured, actionable PR review with a verdict (used by `review` and `auto`). Read-only; the skill posts the result.
-
-### Helper scripts (`scripts/`)
-
-- **`octo-setup.sh`** — read-only probe used by `/octoperator:setup`: detect repo + default branch and whether the token can access Projects v2 (lists existing boards).
-- **`octo-worktree.sh`** — manage Git worktrees (`add`, `attach`, `detach`, `remove`, `list`); used by `implement` for per-issue worktrees (`attach` resumes on a branch already on the remote, reusing a local branch only when it matches or is ahead) and by `review` / `auto` for throwaway detached checkouts of a PR head.
-- **`octo-exclude.sh`** — idempotently add the settings file and `.octoperator/` (worktrees) to the repo-local `.git/info/exclude` so they never dirty `git status`; used by `setup` and `implement`.
-- **`octo-doctor.sh`** — verify auth/repo/project access and print the board's Status options.
-- **`octo-subissue.sh`** — link a child issue to its epic as a native sub-issue, over REST by the child's numeric id (exits 1 on failure, so the caller falls back to a task list).
-- **`octo-labels.sh`** — make sure labels exist: create each missing one, with Octoperator's colour and description for its own labels, and leave existing ones alone; REST only (`created`, `exists`, or `failed` per label); used by `issue`, `plan-epic`, `setup`, `autopilot`, and the flaky-test procedure.
-- **`octo-issue-find.sh`** — find the open issues whose title or body contains a text, matched as a plain string ignoring case, over REST (the REST stand-in for `--search`); used by the flaky-test procedure to find an issue for a test.
-- **`octo-ledger-read.sh`** — print the newest entry-shaped comments on autopilot's run ledger from allowed authors, and a count of the skipped ones, as JSON; read-only, REST only; the ledger read command for a human or `research`.
-- **`octo-project-status.sh`** — add an issue/PR to the board and set its Status by name.
-- **`octo-merge-state.sh`** — print a PR's `mergeStateStatus`, waiting out GitHub's `UNKNOWN`; used by `auto`'s merge gate.
-- **`octo-after-merge.sh`** — after a merge, close the issue the PR closes (`--issue N`) if GitHub left it open, with a comment naming the PR, then each epic of that issue (native parent or `## Children` list) once every child is closed; never one with an open child or no children. REST only; prints what it closed, `warn: …`, or `nothing to close`, and always exits 0; used by `auto` after each merge.
-- **`octo-evals-guard.sh`** — in a repo with genesis's evals guard, check that both guard jobs of the PR's own guard run passed on its reviewed commit, against the base branch's current tip when the PR changes `evals/` (`pass`, `none`, or why to hold: a `[skip ci]` head has no checks); read-only; used by `auto`'s merge gate.
-- **`octo-evals-metric.sh`** — in a repo with genesis's `evals.yml`, read the pass rate from the `evals-metric` notice of its latest completed default-branch push or dispatch run in this repo, as the ledger's `metric` (`{"passed":P,"total":T}` and `rate: P/T`, or `null` with the reason: no evals workflow, no completed run, a missing, malformed, or ambiguous annotation, or one the run's conclusion disagrees with), and the run's head commit; read-only; used by `autopilot` and `genesis --next`.
-- **`octo-milestone-gate.sh`** — decide whether to plan the next milestone now. It says `build` when autopilot's discovery found buildable work, `open <pr>` while a next-milestone PR (an open `milestone-*` branch from this repo) is open, and `not all-pass`. It says `failed` when the last run's planning failed at the default branch's tip, and `declined <pr>` when the newest milestone PR was closed unmerged and nothing has landed since it was planned, or since it was closed. It says `stale dispatch` or `stale wait <run>` when the metric's run judged an older commit than the tip (whether an `evals.yml` run for the tip is queued or running), else `plan`. Read-only; used by `autopilot` and `genesis --next`.
-- **`octo-genesis-next.sh`** — `genesis --next`'s offline half: number the next milestone from the default branch's `docs/prd.md` (`--rev`), and check the committed milestone before it is pushed, and in `auto`'s merge gate on the reviewed commit (`--check`, `--head <sha>` in a detached checkout). Only `docs/prd.md` (appended), `VISION.md` (its Roadmap), `docs/research.md` (file modes unchanged), and new `evals/<id>/` directories of regular files (no symlink, submodule, or `.gitattributes`) change. Each new eval has its scenario, no CI skip token appears in the title or the commit message, and an ungrounded milestone cites no URL. Offline.
-- **`octo-web-allowed.sh`** — whether your own Claude Code settings (the repo's `.claude/settings.json` and `.claude/settings.local.json`, and `~/.claude/settings.json`) allow WebSearch and WebFetch: a bare `permissions.allow` entry for each, and no `deny` or `ask` rule naming either, bare or scoped; offline; used by `autopilot` before `genesis --next` may ground.
-- **`octo-ledger-state.sh`** — apply autopilot's convergence rules to its run ledger and this run's metric, and print the walk, the no-gain streak, the high-water mark, whether every eval passes, and the decision (`build` or `observe`); read-only (one `gh issue view`); used by `autopilot`.
-- **`octo-approval-match.sh`** — normalize the `approval_paths` patterns and match a PR's changed files (renamed files' old paths too) against them, ignoring case; used by `auto`'s approval-path gate.
-- **`octo-vision-guard.sh`** — check that a PR changes the root `VISION.md` only in its Roadmap body, in plain text: everything outside that body keeps the merge base's bytes, no Roadmap line opens with `<`, `#`, `>`, or a fence, is only `=` or `-` marks, or holds HTML or a link definition, the merge base has one `## Roadmap` line and a body that passes the same rule (the body ends only at a column-0 heading), the file holds no NUL, bare CR, other control byte, or Unicode line break, and it isn't deleted, new, made a symlink, given another mode, or joined by a new or changed root twin such as `vision.md`; with `--milestone <n>`, also that the Roadmap names the milestone; `--plain-roadmap <file>` checks one file outside git by the head's byte rule and the merge base's Roadmap rules, for the genesis proposal check. Parses no Markdown and reads git's objects only, so the user's diff settings don't apply; offline; used by `auto`'s merge gate on every PR and by `octo-genesis-next.sh --check`.
-- **`octo-genesis-check.sh`** — check that a directory is empty and outside git for `genesis` (`--preflight`), and that the proposal it wrote is complete: `GENESIS.md` front matter (including a `test_command` that `issue-implementer` detects), the `docs/research.md`, `docs/prd.md`, and `docs/adr/0001-stack.md` sections, and a `VISION.md` with the baseline immutable constraints verbatim and a Roadmap body that passes the vision guard's plain-text rule (no template `<placeholder>` left) and no NUL, bare CR, other control byte, or Unicode line break anywhere in it; with `--skeleton`, that the skeleton `--approve` wrote is detectable and wired up (the test command's detection file and no earlier one, CI on `push` and `pull_request`, the `.gitignore` entries, the sentence in the README), and that its scenario evals are in place (the eval runner and guard copied verbatim, the evals workflows on their triggers, one `evals/<id>/` per PRD scenario); offline.
-- **`octo-genesis-plan.sh`** — work out where `genesis --approve` resumes from the folder's git state (`scaffold`, `commit`, `create`, `push`, or `setup`) and print its ordered commands, the `gh repo create` description made safe, through the MVP epic and the handoff; read-only and offline.
-- **`octo-genesis-epic.sh`** — find the open `epic` issue whose body quotes `GENESIS.md`'s sentence, so a re-run of `genesis --approve` plans no second MVP epic; read-only (one `gh issue list`).
-- **`octo-bench.sh`** — opt-in benchmark harness for contributors: runs `auto` on the `bench/` tasks in throwaway repos and records each outcome and its metrics (see [CONTRIBUTING.md](CONTRIBUTING.md#running-the-benchmark)).
 
 ## Prerequisites
 
@@ -159,7 +163,7 @@ Two things the skills can't pre-allow for you:
   subagent; settings-file rules apply to the whole session, subagents included.
 
 So for a run that never stops on a permission prompt (e.g. `autopilot --mode full`, or a
-[scheduled run](#running-continuously)), allow these in the target repo's `.claude/settings.json`
+[scheduled run](docs/running-continuously.md)), allow these in the target repo's `.claude/settings.json`
 (or `settings.local.json` to keep it personal):
 
 ```json
@@ -172,170 +176,6 @@ So for a run that never stops on a permission prompt (e.g. `autopilot --mode ful
 
 Use your repo's actual commands — `Bash(pytest:*)`, `Bash(make test:*)`, `Bash(go test:*)`,
 `Bash(npm ci:*)`, `Bash(npm run lint:*)`, …
-
-## Running continuously
-
-Autopilot is bounded, so running it continuously means re-invoking it on a schedule. Use Claude
-Code's own scheduling, on your machine. A local session uses your `gh` login, so the ledger entries
-come from you and convergence works, with no PAT or secret to store. `/schedule` cloud routines are
-not supported: cloud sessions block GitHub's GraphQL API, which `gh` relies on
-([#79](https://github.com/zeikar/octoperator/issues/79)).
-
-Every run ends with one status line: `autopilot: merged N`, `autopilot: converged → observe`,
-`autopilot: nothing to do`, `autopilot: all evals pass → planning next milestone`, or
-`autopilot: stopped: <reason>`. On `nothing to do` or `converged →
-observe`, a run started by an in-session cron task or a `/loop` ends that schedule. It deletes only
-the one recurring task whose prompt exactly matches the run's, says which one, and deletes nothing
-when it can't tell. A run you type by hand with that same prompt, in that session, ends it too. In
-semi mode that happens once a run finds no `ready` issue to build, so start the schedule again
-after you triage. A run in which every eval of a genesis repo passes never ends the schedule: it
-plans the next milestone (`autopilot: all evals pass → planning next milestone`), or observes
-while a next-milestone PR is open (`autopilot: stopped: next-milestone PR #<pr> open`) or until
-the evals run for `main`'s tip completes (`autopilot: stopped: evals metric stale`; with no run
-for the tip queued or running, it dispatches `evals.yml` once, never `evals-model.yml`). It also
-observes after you closed its milestone PR unmerged
-(`autopilot: stopped: next-milestone PR #<pr> declined`) or its planning failed
-(`autopilot: stopped: milestone planning failed at this tip`), until `main` moves or you pass
-`--resume`.
-
-**Permissions.** Nobody is there to answer a prompt, so first add the allow rules from
-[Unattended runs](#unattended-runs). That applies to every mode below.
-
-| Mode | Runs | Stops when | Cost bound |
-|---|---|---|---|
-| In-session cron (default) | in a background session | autopilot ends it; 7-day expiry; the session exits | `--cycles` per run; no $ cap |
-| `/loop` | in your session | autopilot ends it; you cancel it | `--cycles` per run; no $ cap |
-| `/goal` | back to back, in your session | the condition is met; the turn clause | the turn clause; no $ cap |
-| `claude -p` + launchd/cron | a fresh process per run | you remove the job | `--max-budget-usd` per run |
-
-**In-session cron (default).** Start a background session that runs autopilot every 6 hours:
-
-```bash
-claude --bg "Create a recurring cron task: schedule '17 */6 * * *', prompt '/octoperator:autopilot --mode full'"
-```
-
-The task lives in that session. It stops when autopilot ends it, when you ask Claude to cancel it,
-after 7 days (recurring tasks expire), or when the session exits — a reboot included.
-`claude --resume` brings back a stopped session's unexpired tasks. Each run adds to the session's
-context, so for runs over many days prefer `claude -p`. `CLAUDE_CODE_DISABLE_CRON=1` turns all
-session scheduling off.
-
-**`/loop`.** For a short stretch you're watching, in your current session:
-
-```text
-/loop 2h /octoperator:autopilot --mode semi
-/loop /octoperator:autopilot --mode semi
-```
-
-The first form runs on a fixed interval and is a cron task like the one above. The second is
-self-paced: Claude picks a wait of 1 minute to 1 hour after each run. You stop a self-paced loop
-with `Esc` while it waits. It isn't restored by `claude --resume`. Run `/bg` to move the session
-to the background.
-
-**`/goal`.** To drain the backlog now, run after run, without waiting on a timer:
-
-```text
-/goal Run /octoperator:autopilot --mode full each turn until its last line is "autopilot: nothing to do" or "autopilot: converged → observe" or starts with "autopilot: stopped:", or stop after 10 turns
-```
-
-A small model judges the condition after each turn, from the transcript only, which is why it
-names the status line. The turn clause is also a model judgment, not a hard cap. `/goal clear`
-ends it early. `/goal` doesn't change the permission mode.
-
-**`claude -p` + an OS scheduler.** For long unattended runs, each in a fresh process:
-
-```bash
-cd /path/to/repo && claude -p "/octoperator:autopilot --mode full --cycles 1" \
-  --max-budget-usd 10 --permission-mode acceptEdits --permission-prompts none \
-  --output-format json
-```
-
-This needs Claude Code v2.1.259 or later (`claude --version`). Older versions reject
-`--permission-prompts` as an unknown option, so every scheduled run fails and the error lands only
-in the err log.
-
-`--max-budget-usd` stops the run at that estimated spend; leave some headroom, since spend can
-pass the cap slightly. `--cycles 1` keeps a run small enough to finish under the cap. A run the cap
-stops ends with no final text: the log shows `"subtype": "error_max_budget_usd"`, the ledger gets
-no entry, and there's no status line, so convergence never builds. If you see it, raise the cap or
-lower `--max`. `--permission-mode acceptEdits` approves file edits, and `--permission-prompts none`
-denies anything else your allow rules don't cover instead of waiting. Don't add `--bare`: it skips
-plugins and skills, Octoperator included. Each run starts with a fresh context, and the state it
-needs lives in the ledger. The JSON output's `total_cost_usd` is the run's cost; autopilot leaves
-the ledger's `cost_usd` `null`, so a wrapper of your own could record it there.
-
-Autopilot can't remove an OS job. Once the ledger converges, each run is an observe run (research
-only, nothing built) until you pass `--resume`. Each run appends one JSON object to the log, and
-the status line is the last line of its `result`. To read it (with `jq`):
-
-```bash
-tail -n 1 /path/to/octoperator-autopilot.log | jq -r '.result // .subtype' | tail -n 1
-```
-
-Without `jq`, use `python3`:
-
-```bash
-tail -n 1 /path/to/octoperator-autopilot.log \
-  | python3 -c 'import json,sys; r=json.load(sys.stdin); print((r.get("result") or r["subtype"]).splitlines()[-1])'
-```
-
-Unload the job when it prints `autopilot: nothing to do` or `autopilot: converged → observe`.
-`error_max_budget_usd` means the cap stopped the run (see above). A run that fails before it
-writes its JSON (an unknown flag, an auth error, a crash) adds nothing to the log, so the last line
-is still the previous run's. If the err log grew since then, or the log file's modification time
-is older than the job's interval, the latest run didn't finish: read the err log before trusting
-the status line.
-
-On macOS, use a launchd agent. Save this as
-`~/Library/LaunchAgents/dev.octoperator.autopilot.plist`, then run
-`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.octoperator.autopilot.plist`.
-To stop it, run `launchctl bootout gui/$(id -u)/dev.octoperator.autopilot`.
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>dev.octoperator.autopilot</string>
-  <key>WorkingDirectory</key><string>/path/to/repo</string>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
-  </dict>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/opt/homebrew/bin/claude</string>
-    <string>-p</string><string>/octoperator:autopilot --mode full --cycles 1</string>
-    <string>--max-budget-usd</string><string>10</string>
-    <string>--permission-mode</string><string>acceptEdits</string>
-    <string>--permission-prompts</string><string>none</string>
-    <string>--output-format</string><string>json</string>
-  </array>
-  <key>StartInterval</key><integer>21600</integer>
-  <key>StandardOutPath</key><string>/path/to/octoperator-autopilot.log</string>
-  <key>StandardErrorPath</key><string>/path/to/octoperator-autopilot.err.log</string>
-</dict>
-</plist>
-```
-
-launchd runs no shell and doesn't read your shell's startup files, so it needs absolute paths.
-Replace `/opt/homebrew/bin/claude` with the output of `command -v claude`, and set `PATH` to the
-output of `echo $PATH` from your terminal, so the run finds `gh`, `git`, `node`, and your test
-tools. Wrapping the command in `zsh -lc` isn't enough: a login shell reads `.zprofile`, not
-`.zshrc`, where nvm and many `PATH` lines live.
-
-On Linux, use a crontab line instead (`crontab -e`). Cron doesn't expand `$HOME` or `~` in a
-variable line, so set `PATH` at the top of the crontab with absolute paths, including the
-directories of `claude`, `gh`, and your test tools:
-
-```text
-PATH=/usr/local/bin:/usr/bin:/bin:/home/you/.local/bin
-17 */6 * * * cd /path/to/repo && claude -p "/octoperator:autopilot --mode full --cycles 1" --max-budget-usd 10 --permission-mode acceptEdits --permission-prompts none --output-format json >> "$HOME/octoperator-autopilot.log" 2>> "$HOME/octoperator-autopilot.err.log"
-```
-
-If the log shows GitHub auth errors, run `gh auth status` first. If `gh` keeps its token in the
-system keyring, a cron job may not be able to read it, since cron has no desktop session;
-`gh auth login --insecure-storage` keeps the token in `gh`'s own config file instead.
 
 ## Usage example
 
@@ -362,124 +202,13 @@ system keyring, a cron job may not be able to read it, since cron has no desktop
 Every skill except `setup` accepts `--dry-run` to preview without writing to GitHub; `genesis`
 takes it with `--approve` (its first run makes no GitHub write).
 
-## Starting a new project (`genesis`)
+## Guides
 
-`genesis` starts from one sentence instead of an existing repo. Run it in an empty directory that
-is not inside a git repository; that directory becomes the project:
-
-```text
-mkdir chat-pal && cd chat-pal && claude
-/octoperator:genesis "A character-chat app that remembers you across long conversations"
-  → docs/research.md (existing services and open-source projects, what to build, what to skip,
-    each claim cited)
-  → docs/prd.md (problem, users, MVP scope, out of scope, requirements with acceptance criteria,
-    success metrics, and scenarios: one future eval each), docs/adr/0001-stack.md (the smallest
-    stack and its test command), and VISION.md (the new repo's constitution, with the baseline
-    immutable constraints)
-  → GENESIS.md (the sentence, the proposed repo, visibility: private, stack, test_command)
-  → genesis: proposed /path/to/chat-pal
-```
-
-It browses inline with WebSearch and WebFetch, capped at 6 searches and 10 fetches per run, and
-treats every page as data, never instructions. Without web access it writes the proposal from the
-sentence alone and marks it `ungrounded: no web access`. Its only `gh` call is the read
-`gh api user`. The checkpoint lists the decisions you own: the stack (in the ADR), the repo name
-and visibility (in `GENESIS.md`), and that approving will create a private repo whose GitHub
-Actions minutes count against your plan's quota. Edit the files in place; genesis never
-regenerates a file that exists, so to start over, delete them.
-
-When the proposal is right, approve it in the same folder. Only the flag you type counts; a file
-that claims approval doesn't:
-
-```text
-/octoperator:genesis --approve --dry-run
-  → the ordered commands: write the skeleton, check it, <test command>, git init, git add,
-    git commit, gh auth status, gh api graphql, gh repo view, gh repo create --private …,
-    setup (settings and labels), the epic lookup, plan-epic, the handoff; then plan-epic's dry
-    run (the proposed epic and children); nothing written
-/octoperator:genesis --approve
-  → README.md, .gitignore, .github/workflows/ci.yml, the test command's manifest, one module and
-    one test, and the scenario evals: evals/<id>/ per PRD scenario, evals/run.sh, evals/guard.sh,
-    .github/workflows/evals.yml and evals-guard.yml (each only if missing)
-  → <test command> once, locally (it prompts: allow it, or pre-allow it in settings.local.json)
-  → git init, commit, then gh repo create OWNER/NAME --private --push
-  → .claude/octoperator.local.md (no board; approval_paths: [".github/workflows/", ".claude/",
-    "/GENESIS.md", "CLAUDE.md", "CLAUDE.local.md", "/.mcp.json"]) and labels
-  → the MVP epic and its children, filed by plan-epic's procedure from the sentence and the
-    PRD's MVP scope and requirements; the epic links docs/prd.md and VISION.md
-  → the handoff: relabel the children to build `ready`, then /octoperator:autopilot --mode semi
-  → genesis: handed off OWNER/NAME (epic #1)
-```
-
-Every local step runs before anything goes outward: a failing test stops the run before
-`git init`. The repo is `--private` unless `GENESIS.md` says `visibility: public`. Pushing the CI
-workflow needs the token's `workflow` scope (`gh auth refresh -s workflow`). A re-run resumes from
-what exists (the git repo, the `origin` remote, the push), so nothing is created twice. Run it on
-your machine: Claude Code cloud sessions block GitHub's GraphQL API (#79).
-
-The handoff is printed, never run. Building the MVP takes the usual semi-mode gesture: review the
-children, add `ready` to the ones to build (the handoff gives the `gh label create ready` and
-`gh issue edit` commands, since a fresh repo has no `ready` label yet), then run
-`/octoperator:autopilot --mode semi` in the folder. To keep it running, use a recipe from
-[Running continuously](#running-continuously); the handoff points there rather than copying them.
-It also prints the [allow rules](#unattended-runs) for your stack's test command
-(`Bash(npm test:*)`, …, plus `Bash(gh:*)`, `Bash(git:*)`, `Edit`, and `Write`) for you to add,
-and a reminder that a plugin loaded with `--plugin-dir` needs that flag in every later session. Genesis never
-writes permission settings, never adds `ready` or `approved`, and never starts autopilot or a
-schedule. A re-run of `--approve` after planning finds the open epic that quotes the sentence and
-only prints the handoff.
-
-The scenario evals judge the product itself, such as "at turn 200 the context still holds the
-turn-3 fact". `evals.yml` runs `bash evals/run.sh` on every push to `main`, never on PRs (a
-failing eval there would hold every PR, the fix included), and prints
-`evals: <passed>/<total> passed`. Every eval fails on the bare skeleton, and a failing run on
-`main` is the `eval` evidence `research` files issues from. The `evals-guard` check holds any PR
-that modifies or deletes an eval, or adds one that already passes on `main`, so evals only grow
-and adding must-fail ones merges unattended; weakening one takes a human. Its workflow is under
-`.github/workflows/`, which the settings' `approval_paths` covers, and `auto` merges only when its
-checks passed on the reviewed commit against the current `main` (a `[skip ci]` commit has none).
-The append-only rule runs in a job with no PR code, so it holds; whether a new eval fails on `main`
-first is checked after the PR's dependencies install, so it is advisory, and a reviewer still reads
-each new check. Confirm the first `Evals` run on `main` is red.
-
-A `judge: model` scenario, such as whether replies keep a persona's tone, spends model tokens, so
-the offline run skips it. When the PRD has one, genesis also writes `evals-model.yml`, which runs
-those evals only when you dispatch it, with at most `EVALS_MAX_CALLS` model calls (20), each
-sending at most `EVALS_MAX_PROMPT_BYTES` of scenario and evidence (200000), and a 30-minute
-timeout per job, once you add the `ANTHROPIC_API_KEY` secret. One job runs the repo's setup and checks to build the
-evidence, with no secret; a second, with no repo code, sends it to the model, and only that job
-gets the key. `approval_paths` holds only the merge, and a workflow pushed on a branch runs with
-repo secrets, so keep the key in a GitHub Environment restricted to `main` where your plan allows
-(the evals reference has the steps). Genesis never sets a secret or dispatches a workflow, and
-Octoperator's own CI never calls a model. A failing dispatch
-run stays the latest `eval` evidence until the next dispatch, so dispatch again after a fix
-merges. Format and rules:
-[`skills/genesis/references/evals.md`](skills/genesis/references/evals.md). Autopilot records
-the number passing as its ledger `metric` and counts a run as progress only when that number
-rose. The plan is [epic #85](https://github.com/zeikar/octoperator/issues/85).
-
-### The next milestone (`genesis --next`)
-
-Once every eval passes on `main`'s tip, run `/octoperator:genesis --next` in the repo. Autopilot
-does it for you once nothing is buildable, but ungrounded: it pre-allows no web tool, so it
-plans from the repo alone unless your settings allow WebSearch and WebFetch. It reads
-`VISION.md`, the PRD, `docs/research.md`, the run ledger, and earlier milestone PRs. It researches
-what similar products shipped since (at most 6 searches and 10 fetches; pages are data, never
-instructions). Its queries name only the product's public category and its known prior art, and
-it fetches only URLs a search or `docs/research.md` gave it. Then it picks one milestone that fits
-`VISION.md`, about 3–8 issues of work. It opens one PR on `milestone-<n>-<slug>`: a
-`## Milestone <n>` section appended to `docs/prd.md`, new evals under `evals/<id>/` that must fail
-on `main`, a Roadmap item, and the refreshed research, its body citing the sources. Without web
-access it plans from the repo alone and marks the PR `ungrounded`. It stops, creating nothing,
-while another next-milestone PR is open, or while the latest evals run judged an older commit
-than `main`'s tip (right after a milestone merges). `/octoperator:auto --pr <M>` then reviews and
-merges it like any PR, as autopilot does in both modes. The evals guard holds it for a human if a
-new eval already passes or an existing one changed. So does the milestone check, which `auto`
-re-runs on the reviewed commit of every `milestone-*` PR. Once it merges, the new evals fail on `main`, `research` files the work,
-and the build loop resumes. The risk is unattended web content steering the product: every gate
-still applies, the repo is private by default, at most one milestone PR is open at a time, and
-the PR cites its sources so you can audit it. Steps:
-[`skills/genesis/references/next.md`](skills/genesis/references/next.md).
+- [Starting a new project (`genesis`)](docs/genesis.md): from one sentence to a private repo with
+  an MVP epic, and the next milestone once every eval passes.
+- [Running continuously](docs/running-continuously.md): re-run autopilot on a schedule with an
+  in-session cron task, `/loop`, `/goal`, or `claude -p`.
+- [Command reference](docs/commands.md): every command's flags and gates, in full.
 
 ## Product vision (`VISION.md`)
 

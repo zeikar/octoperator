@@ -405,8 +405,8 @@ plan-epic's procedure reads them as written and files everything in `<repo>`.
 
       Then, in `<dir>`: `/octoperator:autopilot --mode semi`.
     - **Running continuously.** To re-run autopilot on a schedule, use the in-session cron,
-      `/loop`, `/goal`, or `claude -p` recipes in the README's
-      [Running continuously](https://github.com/zeikar/octoperator#running-continuously) section.
+      `/loop`, `/goal`, or `claude -p` recipes in
+      [Running continuously](https://github.com/zeikar/octoperator/blob/main/docs/running-continuously.md).
       Link it; don't copy the recipes.
     - **Allow rules.** An unattended run stops on any permission prompt, so per the README's
       [Unattended runs](https://github.com/zeikar/octoperator#unattended-runs), add these to
