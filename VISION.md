@@ -27,8 +27,9 @@ Not a target: teams that need a hosted service, a dashboard, or a non-GitHub tra
 - Every merge passes the gate: a non-blocking review of the current head, green CI, and
   `mergeStateStatus == CLEAN`.
 - The benchmark success rate (`bench/`, see [#66](https://github.com/zeikar/octoperator/issues/66))
-  must not drop below the recorded baseline. **Baseline: pending** — the live run (#69) is on hold.
-  Until it exists, `bench/validate.sh` and `scripts/test/smoke.sh` must pass.
+  must not drop below the recorded baseline. **Baseline: none** — a live baseline run (#69) was
+  not pursued (maintainer decision, 2026-11-05). Without one, `bench/validate.sh` and
+  `scripts/test/smoke.sh` must pass.
 - No churn: a change that only rewords or restructures, without evidence that it fixes something, is
   not worth proposing.
 
@@ -61,8 +62,8 @@ Revisable — but every change to this section cites evidence (a benchmark resul
 failure, a failure log, or user feedback). The current plan is epic
 [#66](https://github.com/zeikar/octoperator/issues/66):
 
-1. **Benchmark** — tasks with hidden checks and a harness that runs `auto` on them (#67, #68; the
-   baseline run #69 is on hold).
+1. **Benchmark** — tasks with hidden checks and a harness that runs `auto` on them (#67, #68; a
+   live baseline run, #69, is not planned).
 2. **Constitution** — this file, read by `research` (#70).
 3. **Evidence-gated research** — no evidence, no issue (#71).
 4. **Continuous operation** — a run ledger, convergence detection, and approval gates (#72), then
@@ -74,7 +75,8 @@ failure, a failure log, or user feedback). The current plan is epic
    is moving to REST to run in a cloud session too, without a Projects board (epic #79, not yet
    proven by a live cloud run). A local run
    also posts ledger entries under the owner's own `gh` login, so it needs no stored token.
-5. **Self-improvement** — control-loop changes only on a separate branch, gated by the benchmark (#74).
+5. **Self-improvement** — control-loop changes only on a separate branch, gated by the benchmark
+   (#74). Not planned: it needs a benchmark baseline, and control-loop changes stay human-run.
 6. **Genesis** — one sentence → a new project, planned as epic
    [#85](https://github.com/zeikar/octoperator/issues/85) (in place of #75): prior-art research and
    a local proposal, stopped at a human checkpoint (#86, #87); with `--approve`, a private repo, an
