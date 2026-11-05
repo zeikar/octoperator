@@ -13,18 +13,18 @@
 #   - octo-worktree.sh     : add / detach / list / remove run for real in a throwaway local repo,
 #                            and attach against a throwaway bare remote (a remote-only branch,
 #                            a crashed run's local branch that matches, is ahead, or has diverged)
-#   - octo-merge-state.sh  : the UNKNOWN re-query loop and gh-error exit, against a stub `gh`
 #   - octo-evals-guard.sh  : no guard workflow, both guard jobs passed, one missing (a
 #                            `[skip ci]` head), pending, skipped, or failed, a stale or unrecorded
 #                            base (held only when the PR changes evals/ or .gitattributes, or its
 #                            file list is cut short), another workflow's or PR's run, and a gh
-#                            error, against a stub `gh` that runs the helper's --jq filters with jq
+#                            error, against a REST-only stub `gh` that runs the helper's --jq
+#                            filters with jq
 #   - octo-approval-match.sh : pattern normalization, malformed patterns, matching (renames
 #                            included, case ignored, Unicode folding too, genesis's entries
 #                            holding the evals guard, .claude/ (`.Claude/` too), GENESIS.md,
 #                            every CLAUDE.md and CLAUDE.local.md, and the root .mcp.json, but
 #                            not evals/ or a milestone's files),
-#                            and the incomplete-file-list hold, against a stub `gh`
+#                            and the incomplete-file-list hold, against a REST-only stub `gh`
 #   - octo-genesis-check.sh : a valid proposal, a missing section or front-matter key, an
 #                            ungrounded proposal (and one with URLs or a misplaced or misspelled
 #                            marker), the PRD, ADR, and VISION.md checks (missing sections, an
@@ -64,7 +64,7 @@
 #                            and `claude`
 #   - skills and agents    : no skill or agent file but genesis's runs `gh issue`, `gh label`,
 #                            or `gh pr` (GraphQL-backed), outside a short allowlist of lines that
-#                            only mention them or are the merge gate's (#113), every entry used
+#                            only mention them, every entry used
 #
 # The eval templates genesis copies (run.sh, guard.sh) have their own tests: scripts/test/evals.sh.
 # The helpers behind autopilot's run ledger, its P == T decision, and its web access
@@ -75,7 +75,9 @@
 # and auto's after-merge closing of issues and epics, octo-after-merge.sh:
 # scripts/test/after-merge.sh,
 # and the REST issue, label, sub-issue, and pull request helpers (octo-subissue.sh,
-# octo-labels.sh, octo-issue-find.sh, octo-ledger-read.sh, octo-pr-closes.sh): scripts/test/rest.sh.
+# octo-labels.sh, octo-issue-find.sh, octo-ledger-read.sh, octo-pr-closes.sh): scripts/test/rest.sh,
+# and auto's REST merge state, CI wait, and merge (octo-merge-state.sh, octo-ci-wait.sh,
+# octo-merge.sh): scripts/test/merge-gate.sh.
 # The proposal fixture the genesis tests share is in scripts/test/genesis-fixture.sh.
 #
 # It deliberately never invokes a helper in a way that reaches the real gh / the network.
@@ -149,6 +151,10 @@ expect 2 "octo-merge-state.sh --pr exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-merge-state.sh" --repo o/n --pr
 expect 2 "octo-merge-state.sh non-numeric --tries exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-merge-state.sh" --repo o/n --pr 1 --tries x
+expect 2 "octo-ci-wait.sh --interval exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-ci-wait.sh" --repo o/n --sha abc --interval
+expect 2 "octo-merge.sh --sha exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-merge.sh" --repo o/n --pr 1 --sha
 expect 2 "octo-after-merge.sh --pr exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-after-merge.sh" --repo o/n --pr
 expect 2 "octo-evals-guard.sh --sha exits 2" \
@@ -334,75 +340,46 @@ expect 0 "invalid UTF-8 in gh's message: dropped, the rest kept, the JSON valid 
 expect 0 "octo-doctor.sh: a failing gh auth status no longer stops it (gh api user is the probe)" \
   bounded 10 env PATH="$sstub:$PATH" bash "$SCRIPTS_DIR/octo-doctor.sh" --repo o/n
 
-echo "• octo-merge-state.sh (offline, stub gh)"
-# A stub `gh` first on PATH: it counts its calls in a file beside itself, prints UNKNOWN for the
-# first $STUB_UNKNOWN calls and CLEAN after, or exits $STUB_GH_RC when that is non-zero.
-stub="$wtmp/stub-bin"
-mkdir -p "$stub"
-cat >"$stub/gh" <<'STUB'
-#!/usr/bin/env bash
-calls="$(dirname "$0")/calls"
-n=$(( $(cat "$calls" 2>/dev/null || echo 0) + 1 ))
-echo "$n" >"$calls"
-[ "${STUB_GH_RC:-0}" -eq 0 ] || exit "$STUB_GH_RC"
-if [ "$n" -le "${STUB_UNKNOWN:-0}" ]; then echo UNKNOWN; else echo CLEAN; fi
-STUB
-chmod +x "$stub/gh"
-# merge_state <unknown-calls> <gh-exit> : run the helper against the stub; sets ms_out / ms_rc /
-# ms_calls.
-merge_state() {
-  rm -f "$stub/calls"
-  ms_out="$(STUB_UNKNOWN="$1" STUB_GH_RC="$2" PATH="$stub:$PATH" \
-    bounded 10 bash "$SCRIPTS_DIR/octo-merge-state.sh" --repo o/n --pr 1 --interval 0 2>/dev/null)"
-  ms_rc=$?
-  ms_calls="$(cat "$stub/calls" 2>/dev/null || echo 0)"
-}
-merge_state 0 0
-expect 0 "CLEAN at once: prints CLEAN after 1 call" \
-  test "$ms_rc/$ms_out/$ms_calls" = "0/CLEAN/1"
-merge_state 2 0
-expect 0 "UNKNOWN x2 then CLEAN: prints CLEAN after 3 calls" \
-  test "$ms_rc/$ms_out/$ms_calls" = "0/CLEAN/3"
-merge_state 99 0
-expect 0 "always UNKNOWN: gives up after --tries (3), prints UNKNOWN" \
-  test "$ms_rc/$ms_out/$ms_calls" = "0/UNKNOWN/3"
-merge_state 0 4
-expect 0 "gh exit 4 (auth): exits 1, prints nothing" test "$ms_rc/$ms_out" = "1/"
-merge_state 0 2
-expect 0 "gh exit 2: exits 1, not the bad-arguments 2" test "$ms_rc/$ms_out" = "1/"
-
 echo "• octo-evals-guard.sh (offline, stub gh)"
-# A stub `gh` first on PATH answers from JSON files in $EG_DIR, through the helper's own --jq
-# filter (jq -r): `pr view` → pr.json, git/ref → the tip, contents → a file or, with $EG_NOGUARD,
-# gh's 404, actions/runs → runs.json, a run's jobs → jobs-<run>.json, the PR's files →
-# files.json, annotations → ann-<id>.json. $EG_RC makes the contents call fail with that code.
+# A stub `gh` first on PATH serves REST only, like a Claude Code cloud session: anything but
+# `gh api repos/...` (porcelain, `gh api graphql`) gets the cloud proxy's 403. It answers from
+# JSON files in $EG_DIR, through the helper's own --jq filter (jq -r): the PR → pr.json, git/ref →
+# the tip, contents → a file or, with $EG_NOGUARD, gh's 404, actions/runs → runs.json, a run's
+# jobs → jobs-<run>.json, the PR's files → files.json, annotations → ann-<id>.json. $EG_RC makes
+# the contents call fail with that code.
 egstub="$wtmp/eg-bin"
 EG_DIR="$wtmp/eg"
 mkdir -p "$egstub" "$EG_DIR"
 cat >"$egstub/gh" <<'STUB'
 #!/usr/bin/env bash
-cmd="$1"; shift; ep="" jq=""
+proxy_403() {
+  echo 'gh: GitHub GraphQL is not available from Claude Code sessions; use the REST API (gh api repos/{owner}/{repo}/...). (HTTP 403)' >&2
+  exit 1
+}
+[ "$1" = api ] || proxy_403
+shift; ep="" jq=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --paginate) shift ;; --jq) jq="$2"; shift 2 ;; --repo | --json) shift 2 ;;
+    --paginate) shift ;; --jq) jq="$2"; shift 2 ;;
+    -*) echo "stub: unexpected flag $1" >&2; exit 9 ;;
     *) ep="${ep:-$1}"; shift ;;
   esac
 done
-if [ "$cmd" = pr ]; then f="$EG_DIR/pr.json"; else
-  case "$ep" in
-    */git/ref/heads/main) f="$EG_DIR/ref.json" ;;
-    */contents/*)
-      [ "${EG_RC:-0}" -eq 0 ] || { echo "gh: Server Error (HTTP 500)" >&2; exit "$EG_RC"; }
-      [ -z "${EG_NOGUARD:-}" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
-      echo file; exit 0 ;;
-    */actions/runs/*/jobs*) f="${ep%/jobs*}"; f="$EG_DIR/jobs-${f##*/}.json" ;;
-    */actions/runs\?*) f="$EG_DIR/runs.json" ;;
-    */pulls/1/files*) f="$EG_DIR/files.json" ;;
-    */check-runs/*/annotations*) f="${ep%/annotations*}"; f="$EG_DIR/ann-${f##*/}.json"
-      [ -f "$f" ] || { echo '[]' | jq -r "$jq"; exit; } ;;
-    *) echo "stub: unexpected endpoint $ep" >&2; exit 9 ;;
-  esac
-fi
+case "$ep" in repos/*) ;; *) proxy_403 ;; esac
+case "$ep" in
+  */git/ref/heads/main) f="$EG_DIR/ref.json" ;;
+  */contents/*)
+    [ "${EG_RC:-0}" -eq 0 ] || { echo "gh: Server Error (HTTP 500)" >&2; exit "$EG_RC"; }
+    [ -z "${EG_NOGUARD:-}" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+    echo file; exit 0 ;;
+  */actions/runs/*/jobs*) f="${ep%/jobs*}"; f="$EG_DIR/jobs-${f##*/}.json" ;;
+  */actions/runs\?*) f="$EG_DIR/runs.json" ;;
+  */pulls/1/files*) f="$EG_DIR/files.json" ;;
+  */pulls/1) f="$EG_DIR/pr.json" ;;
+  */check-runs/*/annotations*) f="${ep%/annotations*}"; f="$EG_DIR/ann-${f##*/}.json"
+    [ -f "$f" ] || { echo '[]' | jq -r "$jq"; exit; } ;;
+  *) echo "stub: unexpected endpoint $ep" >&2; exit 9 ;;
+esac
 jq -r "$jq" "$f"
 STUB
 chmod +x "$egstub/gh"
@@ -444,7 +421,7 @@ eg_files() {
     sep=","; n=$((n + 1))
   done
   printf '[%s]\n' "$body" >"$EG_DIR/files.json"
-  printf '{"baseRefName":"main","changedFiles":%s}\n' "${EG_COUNT:-$n}" >"$EG_DIR/pr.json"
+  printf '{"base":{"ref":"main"},"changed_files":%s}\n' "${EG_COUNT:-$n}" >"$EG_DIR/pr.json"
 }
 # eg_base <id> <sha> : the check run's evals-guard-base notice, beside an unrelated annotation.
 eg_base() {
@@ -533,19 +510,29 @@ expect 0 "a gh error (not a 404) reading the workflow: exits 3, prints nothing" 
   test "$eg_rc/$eg_out" = "3/"
 
 echo "• octo-approval-match.sh (offline, stub gh)"
-# A stub `gh` first on PATH logs each call to $STUB_LOG. `api` prints the file list in $STUB_FILES
-# as the helper's jq filter would (one line per file: its path, a tab, then a rename's old path);
-# it does not run the filter itself. `pr view` prints $STUB_COUNT, or the list's line count when
-# that is unset. Both exit $STUB_GH_RC when that is non-zero.
+# A stub `gh` first on PATH logs each call to $STUB_LOG and serves REST only, like a Claude Code
+# cloud session: anything but `gh api repos/...` gets the cloud proxy's 403. The PR's files
+# endpoint prints the file list in $STUB_FILES as the helper's jq filter would (one line per
+# file: its path, a tab, then a rename's old path); it does not run the filter itself. The PR
+# itself prints its `changed_files`: $STUB_COUNT, or the list's line count when that is unset.
+# Both exit $STUB_GH_RC when that is non-zero.
 astub="$wtmp/approval-bin"
 mkdir -p "$astub"
 cat >"$astub/gh" <<'STUB'
 #!/usr/bin/env bash
-echo "gh $1" >>"$STUB_LOG"
+echo "gh $*" >>"$STUB_LOG"
+proxy_403() {
+  echo 'gh: GitHub GraphQL is not available from Claude Code sessions; use the REST API (gh api repos/{owner}/{repo}/...). (HTTP 403)' >&2
+  exit 1
+}
+[ "$1" = api ] || proxy_403
 [ "${STUB_GH_RC:-0}" -eq 0 ] || exit "$STUB_GH_RC"
-case "$1" in
-  api) cat "$STUB_FILES" ;;
-  pr) echo "${STUB_COUNT:-$(grep -c '' "$STUB_FILES")}" ;;
+ep=""
+for a in "$@"; do case "$a" in repos/*) ep="$a" ;; esac; done
+case "$ep" in
+  repos/o/n/pulls/1/files) cat "$STUB_FILES" ;;
+  repos/o/n/pulls/1) echo "${STUB_COUNT:-$(grep -c '' "$STUB_FILES")}" ;;
+  *) proxy_403 ;;
 esac
 STUB
 chmod +x "$astub/gh"
@@ -647,8 +634,14 @@ printf 'docs/ci.yml%s.github/workflows/ci.yml\n' "$tab" >"$STUB_FILES"
 approval '.github/workflows/'
 expect 0 "rename: the old path alone matches" \
   test "$am_rc" -eq 1 -a "$am_out" = ".github/workflows/ci.yml$tab.github/workflows/"
+rm -f "$STUB_LOG"
 STUB_COUNT=2 approval 'nothing'
-expect 0 "fewer files listed than changedFiles: exits 3" test "$am_rc" -eq 3
+expect 0 "fewer files listed than changed_files: exits 3" test "$am_rc" -eq 3
+expect 0 "it lists the files, then reads changed_files, over REST" test "$(cat "$STUB_LOG")" = \
+  "gh api --paginate repos/o/n/pulls/1/files --jq .[] | [.filename, (.previous_filename // \"\")]
+        | if any(.[]; test(\"[\t\n\r]\")) then error(\"tab or newline in a changed path\")
+          else join(\"\t\") end
+gh api repos/o/n/pulls/1 --jq .changed_files"
 # A tab or newline inside a path would split it into pieces the pattern misses. Real gh fails in
 # the jq filter; these cases cover the helper's own line checks behind it.
 printf '.github/workflows/x\t.yml\t\n' >"$STUB_FILES"
@@ -1883,19 +1876,9 @@ echo "• skills and agents read and write issues, labels, and pull requests ove
 # through `gh api repos/...` (the cookbook's REST rules). genesis runs only locally, where GraphQL
 # works, and is left out.
 # PORCELAIN_ALLOW lists the lines that only mention a command, one "<path>|<text on the line>" each.
-# The `gh pr checks` / `gh pr view` / `gh pr merge` entries are the merge gate, which moves to REST
-# in #113: delete them with it. An entry that no longer matches any line fails the check.
+# An entry that no longer matches any line fails the check.
 PORCELAIN_ALLOW='skills/github-conventions/references/gh-cli-cookbook.md|never the porcelain
-skills/autopilot/references/milestone.md|`gh pr create failed`) may well pass then
-skills/auto/SKILL.md|gh pr checks
-skills/auto/SKILL.md|gh pr merge
-skills/auto/SKILL.md|gh pr view <pr#> --repo "$REPO" \
-skills/auto/SKILL.md|gh pr view <pr#> --repo "$REPO" --json state --jq '"'"'.state'"'"'
-skills/github-conventions/references/gh-cli-cookbook.md|gh pr checks
-skills/github-conventions/references/gh-cli-cookbook.md|gh pr merge
-skills/github-conventions/references/gh-cli-cookbook.md|gh pr view <pr#> --repo OWNER/NAME \
-skills/github-conventions/references/gh-cli-cookbook.md|gh pr view <pr#> --repo OWNER/NAME --json state --jq '"'"'.state'"'"'
-skills/github-conventions/references/conventions.md|(`gh pr merge <pr#> --merge --delete-branch`)'
+skills/autopilot/references/milestone.md|`gh pr create failed`) may well pass then'
 # porcelain_hits <file...> : "<path>:<line>:<text>" for each line naming gh issue, gh label, or
 # gh pr, after any spaces and global flags (`gh -R o/n issue`, `gh --repo=o/n label`).
 porcelain_hits() {

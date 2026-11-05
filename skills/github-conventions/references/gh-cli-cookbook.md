@@ -12,8 +12,8 @@ A Claude Code cloud session's proxy refuses GraphQL, with `GitHub GraphQL is not
 Claude Code sessions; use the REST API (gh api repos/{owner}/{repo}/...)`. Most `gh` porcelain
 uses GraphQL under the hood, including every issue, label, and pull request command, so issues,
 labels, sub-issues, pull requests, and reviews go through `gh api repos/OWNER/NAME/...` (REST),
-never the porcelain. REST works locally too, so one path serves both. The merge recipes further
-down still use porcelain for now, and Projects v2 has no REST API at all.
+never the porcelain. REST works locally too, so one path serves both. That includes the merge
+gate's checks wait, merge state, and merge. Only Projects v2 has no REST API at all.
 
 The rules every REST step follows:
 
@@ -376,43 +376,60 @@ sufficient. A plain comment on the PR's conversation is an issue comment: the co
 
 ## Merge a pull request (regular merge — preserve history)
 
-Check the merge gate, then merge with a **regular merge commit** (never `--squash`/`--rebase`):
+Check the merge gate, then merge with a **regular merge commit** (never squash or rebase). Every
+step is REST, through a helper where it needs a loop or a decision:
 
 ```bash
-# First wait (bounded) for running checks to settle — pending checks read as UNSTABLE/BLOCKED.
-# Exit code is informational only; the gate below decides.
-gh pr checks <pr#> --repo OWNER/NAME --watch --fail-fast --interval 30
+# First wait (bounded) for the reviewed commit's checks to settle — pending checks read as
+# UNSTABLE/BLOCKED. Prints green, none, failed <names>, or pending <names>; give the call a
+# 10-minute Bash timeout (it stops itself after 9).
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-ci-wait.sh --repo OWNER/NAME --sha <reviewed-sha>
 
-# Gate: the latest review's intended verdict is not request_changes, headRefOid is the commit that
-# review covered, and mergeStateStatus is CLEAN (OPEN + not draft + mergeable + required checks
-# green + not blocked/behind). GitHub computes it async — re-query on UNKNOWN.
-gh pr view <pr#> --repo OWNER/NAME \
-  --json headRefOid,state,isDraft,mergeStateStatus,closingIssuesReferences
+# Gate: the latest review's intended verdict is not request_changes, the head is the commit that
+# review covered, the PR is open and not a draft, and the merge state is CLEAN (mergeable +
+# required checks green + not blocked/behind).
+gh api repos/OWNER/NAME/pulls/43 --jq '{head_sha: .head.sha, head: .head.ref, state, merged, draft}'
+# REST's mergeable_state, uppercased (CLEAN, DIRTY, …); GitHub computes it lazily, so the helper
+# re-reads while it is null or unknown.
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-merge-state.sh --repo OWNER/NAME --pr 43
 
-# When the gate passes — regular merge commit (preserves full history) + delete branch, pinned to the
-# reviewed commit so a later push cannot merge unreviewed:
-gh pr merge <pr#> --repo OWNER/NAME --merge --delete-branch --match-head-commit <reviewed-sha>
-# On a non-zero exit, re-read the state: the merge may have landed and only the branch delete
-# failed. MERGED → success (report the error as cleanup); anything else → the merge failed.
-gh pr view <pr#> --repo OWNER/NAME --json state --jq '.state'
+# When the gate passes — a regular merge commit (preserves full history), pinned to the reviewed
+# commit so a later push cannot merge unreviewed, then the branch deleted, best effort:
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-merge.sh --repo OWNER/NAME --pr 43 --sha <reviewed-sha>
 
 # After merge: move the linked issue's board item to Done (board-optional).
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh --owner <owner> --project <number> \
   --url <issue-url> --status "Done"
 ```
 
+Under the merge helper, one call merges and one reads the result back:
+
+```bash
+gh api -X PUT repos/OWNER/NAME/pulls/43/merge -f merge_method=merge -f sha=<reviewed-sha>
+gh api repos/OWNER/NAME/pulls/43 --jq .merged
+```
+
+`sha` is the REST form of `--match-head-commit`: GitHub answers 409 when the head has moved past
+it, and 405 when the PR isn't mergeable. Both mean not merged. With no `commit_title` or
+`commit_message`, GitHub writes its default merge commit ("Merge pull request #43 from
+OWNER/branch"), as every merge so far has. A merge can land even when the call reports an error,
+so `.merged` decides. Then the helper deletes the head branch with
+`gh api -X DELETE repos/OWNER/NAME/git/refs/heads/<branch>`, but only one in `OWNER/NAME` (never
+a fork's) that isn't the default branch. A Claude Code cloud session's proxy refuses that
+delete, so a failed delete only warns: the PR is merged either way.
+
 Merge ONLY when the latest review's intended verdict is not `request_changes` and covered the current
-`headRefOid`, `state` is `OPEN`, `isDraft` is `false`, and `mergeStateStatus` is **`CLEAN`**. Any
-other state — `DIRTY` (conflicts), `BLOCKED` (protection/required checks unmet), `BEHIND` (needs
-update), `UNSTABLE` (a check failing/pending), `UNKNOWN` (still computing) — means do NOT merge; report
-the reason. `gh pr checks <pr#>` is informational only (it conflates required and optional checks), not
-the gate — `--watch` uses it only to wait, so give that call a bounded timeout and, if checks are still
-pending when it expires, let the gate hold the PR. When `approval_paths` is set, `auto` first
-holds any PR whose changed files match it, and it holds any PR that changes `VISION.md` outside
-its Roadmap body (see `skills/auto/SKILL.md`, step 5). `--merge` keeps
-every commit; do not substitute `--squash` or `--rebase`. The PR's `Closes #N` auto-closes the
-issue; `auto` then runs `scripts/octo-after-merge.sh`, which closes it when GitHub didn't and
-closes the epic once its last child is closed.
+head, the PR is `open` and not a draft, the checks wait printed `green` or `none`, and the merge
+state is **`CLEAN`**. Any other state — `DIRTY` (conflicts), `BLOCKED` (protection/required checks
+unmet), `BEHIND` (needs update), `UNSTABLE` (a check failing/pending), `HAS_HOOKS` (pre-receive
+hooks), `DRAFT`, `UNKNOWN` (still computing), or any other — means do NOT merge; report the
+reason. The checks wait counts optional checks too and can't see branch protection, so it adds a
+hold and explains one, never replacing the merge state. When `approval_paths` is set, `auto`
+first holds any PR whose changed files match it, and it holds any PR that changes `VISION.md`
+outside its Roadmap body (see `skills/auto/SKILL.md`, step 5). `merge_method=merge` keeps every
+commit; never substitute `squash` or `rebase`. The PR's `Closes #N` auto-closes the issue; `auto`
+then runs `scripts/octo-after-merge.sh`, which closes it when GitHub didn't and closes the epic
+once its last child is closed.
 
 ## Sync queries (read-only)
 
