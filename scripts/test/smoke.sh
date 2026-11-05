@@ -66,7 +66,9 @@
 # (octo-evals-metric.sh, octo-ledger-state.sh, octo-milestone-gate.sh, octo-web-allowed.sh) have
 # their own tests too: scripts/test/autopilot.sh;
 # and so does genesis --next's offline helper, octo-genesis-next.sh: scripts/test/genesis-next.sh,
-# and auto's VISION.md check, octo-vision-guard.sh: scripts/test/vision.sh.
+# and auto's VISION.md check, octo-vision-guard.sh: scripts/test/vision.sh,
+# and auto's after-merge closing of issues and epics, octo-after-merge.sh:
+# scripts/test/after-merge.sh.
 # The proposal fixture the genesis tests share is in scripts/test/genesis-fixture.sh.
 #
 # It deliberately never invokes a helper in a way that reaches the real gh / the network.
@@ -131,6 +133,8 @@ expect 2 "octo-merge-state.sh --pr exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-merge-state.sh" --repo o/n --pr
 expect 2 "octo-merge-state.sh non-numeric --tries exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-merge-state.sh" --repo o/n --pr 1 --tries x
+expect 2 "octo-after-merge.sh --pr exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-after-merge.sh" --repo o/n --pr
 expect 2 "octo-evals-guard.sh --sha exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-evals-guard.sh" --repo o/n --pr 1 --sha
 expect 2 "octo-evals-guard.sh a short --sha exits 2" \

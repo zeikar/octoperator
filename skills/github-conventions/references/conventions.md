@@ -171,6 +171,13 @@ Linking procedure (per child):
 Either way, every child issue body opens with `Part of #<epic#>` for a textual back-link that works
 regardless of the linking mechanism.
 
+Closing: an epic is closed once its last child closes. After each merge, `auto` runs
+`octo-after-merge.sh` (REST only), which closes the merged PR's issue if GitHub left it open and
+then each epic of that issue (its native parent, or an open `epic` issue whose `## Children`
+checklist lists it) whose children are all closed. Its children are its sub-issues and its
+checklist items together. An epic with an open child, with no children, or with a checklist item
+that names no issue (`- [ ] #<child#>` is the form to use) stays open for a human.
+
 ## Milestones
 
 - Milestones represent releases or time-boxes (e.g. `v0.2`, `Sprint 14`), not epics.
@@ -220,7 +227,8 @@ merge; report the reason. A PR that touches an `approval_paths` pattern, or chan
 outside its Roadmap body, is never merged by `auto` either (Approval gates above). Never
 force-merge. The PR's `Closes #N` auto-closes the issue; move its board item to the mapped `done`
 status afterward with
-`octo-project-status.sh ... --status "<statuses.done>"`.
+`octo-project-status.sh ... --status "<statuses.done>"`, then run `octo-after-merge.sh`, which
+closes the issue when GitHub didn't and the epic when its last child closed (Epic model above).
 
 ## Traceability matrix
 

@@ -70,6 +70,10 @@ bash scripts/test/genesis-next.sh
 # 1e. Test auto's VISION.md check (offline; CI runs this).
 bash scripts/test/vision.sh
 
+# 1f. Test auto's after-merge closing of issues and epics, against a REST-only stub gh
+#     (offline; CI runs this).
+bash scripts/test/after-merge.sh
+
 # 2. Validate the benchmark tasks (offline; CI runs these too). See bench/README.md.
 bash bench/validate.sh && bash bench/test/selftest.sh
 
@@ -95,7 +99,7 @@ than Octoperator's own reviewer. Every result is one JSON line in `bench/results
 > `--max-cost-usd`, and check the plan with `--dry-run` first. With the cap set, `run` also stops
 > after a solve that reports no cost (a timeout, say), since that spend is unknown. **Never run
 > it in CI.** CI runs only the offline parts (`smoke.sh`'s stub tests, `evals.sh`, `autopilot.sh`,
-> `genesis-next.sh`, `vision.sh`, and `bench/validate.sh`).
+> `genesis-next.sh`, `vision.sh`, `after-merge.sh`, and `bench/validate.sh`).
 > Every network step exits 2 unless you pass `--live`.
 
 Run it in a **Claude Code remote (cloud) session on Linux**, not on your machine. Prerequisites:
