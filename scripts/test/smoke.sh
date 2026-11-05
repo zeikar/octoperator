@@ -20,7 +20,8 @@
 #                            .gitattributes, or its file list may be cut short at 300 files,
 #                            judged by that commit's files, not the PR's current head's), another
 #                            workflow's or PR's run, a base branch with `#` in its name, a bad
-#                            base tip, and a gh error, against a REST-only stub `gh`
+#                            base tip, an eval listed before 400 KB of other paths, and a gh
+#                            error, against a REST-only stub `gh`
 #                            that runs the helper's --jq filters with jq
 #   - octo-approval-match.sh : pattern normalization, malformed patterns, matching (renames
 #                            included, case ignored, Unicode folding too, genesis's entries
@@ -78,6 +79,10 @@
 #                            GraphQL-backed porcelain
 #                            (`gh issue`, `gh label`, `gh pr`, `gh repo`, `gh project`; a
 #                            script's comment lines skipped), outside a short allowlist, each
+#                            entry with its reason and every entry used
+#   - pipe check           : no scripts/octo-*.sh, bench/*.sh, or eval template that sets
+#                            pipefail pipes into a reader that can stop early (`grep -q`, `-m`,
+#                            `head`, sed's `q`, an awk `exit`), outside a short allowlist, each
 #                            entry with its reason and every entry used
 #
 # The eval templates genesis copies (run.sh, guard.sh) have their own tests: scripts/test/evals.sh.
@@ -582,6 +587,14 @@ expect 0 "299 changed files, none in evals/, judged against an older base: print
 eg_files $(seq -f 'src/f%g.js' 300)
 eg
 expect 0 "a file list maybe cut short (300 files, the compare API's most): the base is checked, stale" \
+  test "$eg_rc/$eg_out" = "1/evals guard stale: $EG_A ran against $OLD, main is at $TIP"
+# An eval first, then 400 KB of other paths, more than a pipe holds: a reader that stops at the
+# eval line would leave the writer to die of SIGPIPE, and pipefail would read it as no eval (#133).
+long="src/$(printf 'd%.0s' $(seq 1400))"
+# shellcheck disable=SC2046
+eg_files evals/recall/check.sh $(seq -f "$long/f%g.js" 298)
+eg
+expect 0 "an eval listed first, then 400 KB of other paths: still the eval, stale" \
   test "$eg_rc/$eg_out" = "1/evals guard stale: $EG_A ran against $OLD, main is at $TIP"
 # The PR's head moved after the review: its own file list is no longer the reviewed commit's.
 eg_files src/app.js
@@ -1968,6 +1981,9 @@ no_calls "solve --dry-run" 0 solve "$r" 1 --dry-run
 no_calls "check --dry-run" 0 check vsort-numeric "$r" --dry-run
 no_calls "cleanup --dry-run" 0 cleanup --run-id r1 --dry-run
 no_calls "run --dry-run" 0 run --tasks all --run-id r1 --max-cost-usd 5 --dry-run
+no_calls "run --max-cost-usd with a second line is refused" 2 \
+  run --tasks all --run-id r1 --max-cost-usd $'5\nx' --dry-run
+no_calls "run --max-cost-usd 1.x is refused" 2 run --tasks all --run-id r1 --max-cost-usd 1.x --dry-run
 no_calls "--live --dry-run is still a dry run" 0 setup vsort-numeric --run-id r1 --live --dry-run
 no_calls "solve refuses a non-bench repo" 2 solve zeikar/octoperator 77 --dry-run
 no_calls "solve refuses an unknown task's repo" 2 solve o/octo-bench-nosuch-r1 1 --dry-run
@@ -2316,6 +2332,147 @@ expect 0 "the body check catches -f, -F, --field and --raw-field literals, not -
 left="$(cd "$ROOT" && body_hits "${scope[@]}")"
 if [ -z "$left" ]; then ok "no body sent as a quoted literal"; else
   no "no body sent as a quoted literal; found:"; printf '  %s\n' "$left"; fi
+
+echo "• no reader that stops early sits behind a pipe in a pipefail script"
+# Under pipefail, `writer | grep -q …` fails when the reader stops at a match before the writer is
+# done: the writer dies of SIGPIPE (141), or gets EPIPE (1) when SIGPIPE is ignored, so a check
+# reads the wrong way (#123, #133). A reader that can stop early reads a here-string
+# (`grep -q … <<<"$x"`), or, behind a command, is one that reads to the end (`grep -c … >/dev/null`).
+# Scope: every scripts/octo-*.sh, bench/*.sh, bench/tasks/*/check.sh, and genesis eval template
+# that sets pipefail. A reader is `| grep` with -q, -m, -l, or -L (or a long form), `| head`,
+# `| sed` with a q command, or `| awk` with an `exit` outside an END block on the same line. A line
+# ending in `\` or `|` is joined with the next; comment lines are skipped.
+# Known gaps, which it does not catch: an awk program over several lines behind a pipe (only its
+# first line is seen), a reader in a group (`| { grep -q …; }`), `| command grep`, `|&`, a flag
+# after the pattern (`| grep y -q`), and `awk -f <file>`.
+# PIPE_ALLOW lists the pipes allowed, one "<path> TAB <text on the line> TAB <why>" each: a line
+# passes when, with every matching entry's text taken out, no reader is left. An entry that no
+# longer matches a line fails the check.
+PIPE_ALLOW="$(printf '%s\t%s\t%s\n' \
+  scripts/octo-doctor.sh 'gh --version | head -1' \
+    "its status is unused: the version is only text in ok's message (set -e doesn't reach a command substitution in an argument)" \
+  scripts/octo-bench.sh "\\1/p' | head -n 1" \
+    'its status is unused (no set -e): LOGIN is checked for empty, and head prints the first' \
+  scripts/octo-bench.sh "| head -n 1 | sed 's/[[:space:]]*\$//'" \
+    'its status is unused (no set -e): the first scopes header head prints is the value' \
+  scripts/octo-milestone-gate.sh '| sort -n | head -n 1' \
+    'its status is unused (no set -e): the lowest PR head prints is the value' \
+  skills/genesis/templates/evals/run.sh 'diff "$tmp/before" "$tmp/after" | head -n 20' \
+    'its status is unused: the first lines of the diff are shown, then the run exits 1' \
+  skills/genesis/templates/evals/run.sh '} | head -c "$((MAX_BYTES + 1))"' \
+    'the cap itself: its status is unused, the size of what head kept decides' \
+  skills/genesis/templates/evals/run.sh '2>"$log" | head -n 1' \
+    "its status is unused (no set -e): the judge's first line is the verdict")"
+pipe_at='(^|[^|])[|][[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*'
+q="'"
+pipe_reader_re="${pipe_at}(grep([[:space:]]+-[^[:space:]]+)*[[:space:]]+(-[A-Za-z]*[qmlL]|--(quiet|silent|max-count|files-with))|head([[:space:]]|\$)|sed[[:space:]][^|]*[;{[:space:]${q}\"0-9\$/]q[[:space:]]*[0-9]*[[:space:]]*([;}${q}\"]|\$))"
+pipe_awk_re="${pipe_at}awk[[:space:]][^|]*[^[:alnum:]_]exit([^[:alnum:]_]|\$)"
+# pipe_is_hit <text> : the text pipes into a reader that can stop early.
+pipe_is_hit() {
+  grep -Eq -- "$pipe_reader_re" <<<"$1" \
+    || grep -Eq -- "$pipe_awk_re" <<<"$(sed -E 's/END[[:space:]]*[{][^}]*[}]//g' <<<"$1")"
+}
+# pipe_lines <file...> : "<path>:<line>:<text>" for each line that is not a comment, a line ending
+# in `\` or `|` joined with the next (numbered by its first line).
+pipe_lines() {
+  awk 'function flush() { if (open && !comment) print file ":" start ":" buf; open = 0 }
+    FNR == 1 { flush() }
+    {
+      if (!open) { open = 1; file = FILENAME; start = FNR; buf = ""; comment = /^[ \t]*#/ }
+      line = $0
+      if (!comment && (sub(/\\$/, "", line) || line ~ /[|][ \t]*$/)) { buf = buf line " "; next }
+      buf = buf line; flush()
+    }
+    END { flush() }' "$@"
+}
+# pipe_hits <file...> : each of pipe_lines' lines that pipes into a reader that can stop early.
+pipe_hits() {
+  local hit
+  while IFS= read -r hit; do
+    [ -n "$hit" ] || continue
+    pipe_is_hit "${hit#*:*:}" && printf '%s\n' "$hit"
+  done <<<"$(pipe_lines "$@" | grep -E -- "$pipe_at(grep|head|sed|awk)")"
+}
+# pipefail_files <file...> : the files that set pipefail.
+pipefail_files() { grep -lE '^[[:space:]]*set -([A-Za-z]*o|o) pipefail' "$@"; }
+cat >"$tmp/pipe-sample.sh" <<'SH'
+printf '%s\n' "$x" | grep -q y
+cmd | grep -Fxq y
+cmd | grep -E -m 1 y
+cmd | grep -Eq y
+cmd | head -n 1
+cmd | sed -n '1{p;q;}'
+cmd | sed 5q
+cmd | awk '{ print; exit }'
+cmd | awk -F '\t' -v n=x '$2 == n { print; exit }'
+cmd | grep --quiet y
+cmd | LC_ALL=C grep -qx y
+cmd \
+  | grep -qx y
+cmd |
+  head -n 1
+cmd | grep -l y
+cmd | awk '$1 == "x" { ok = 1 } END { exit !ok }'
+grep -q y <<<"$x"
+cmd | grep -c y >/dev/null
+cmd | grep -E '^- ' || true
+cmd || head -n 1 f
+# cmd | grep -q y
+cmd | sed 's/q/x/'
+cmd | awk '{ print }' || exit 1
+LC_ALL=C grep -q y f
+head -c 5 f | cmp -s - g
+SH
+expect 0 "the check finds grep -q, -m, -Fxq, -Eq, --quiet, -l, head, sed q, and an awk exit, across \\ and |" \
+  test "$(pipe_hits "$tmp/pipe-sample.sh" | cut -d: -f2 | tr '\n' ' ')" \
+    = "1 2 3 4 5 6 7 8 9 10 11 12 14 16 "
+printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' >"$tmp/pipe-on.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'set -o pipefail' >"$tmp/pipe-o.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'set -eu' '# set -o pipefail' >"$tmp/pipe-off.sh"
+expect 0 "only a script that sets pipefail is in scope" \
+  test "$(pipefail_files "$tmp/pipe-on.sh" "$tmp/pipe-o.sh" "$tmp/pipe-off.sh" | tr '\n' ' ')" \
+    = "$tmp/pipe-on.sh $tmp/pipe-o.sh "
+# pipe_allowed <allowlist> <hit> : the hit's line is allowed, each entry it matches appended to
+# $used. Every matched entry's text is taken out first, so another reader on the line still counts.
+pipe_allowed() {
+  local file=${2%%:*} text=${2#*:*:} rest matched=0 af at
+  rest=$text
+  while IFS=$'\t' read -r af at _; do
+    if [ "$file" = "$af" ] && [[ "$text" == *"$at"* ]]; then
+      matched=1; used="$used$af"$'\t'"$at"$'\n'; rest=${rest//"$at"/}
+    fi
+  done <<<"$1"
+  [ "$matched" -eq 1 ] && ! pipe_is_hit "$rest"
+}
+used=""
+expect 0 "an allowlist entry allows its own pipe" \
+  pipe_allowed $'a.sh\tgh --version | head -1\twhy' 'a.sh:1:x="$(gh --version | head -1)"'
+expect 1 "a second reader on an allowed line still counts" \
+  pipe_allowed $'a.sh\tgh --version | head -1\twhy' 'a.sh:1:gh --version | head -1; x | grep -q y'
+expect 1 "an entry for another file allows nothing" \
+  pipe_allowed $'b.sh\tgh --version | head -1\twhy' 'a.sh:1:gh --version | head -1'
+pscope=()
+while IFS= read -r f; do pscope+=("$f"); done <<<"$(cd "$ROOT" && pipefail_files scripts/octo-*.sh \
+  bench/*.sh bench/tasks/*/check.sh skills/genesis/templates/evals/*.sh)"
+expect 0 "the check covers the pipefail scripts (${#pscope[@]} files), the eval templates, bench/validate.sh, and the bench task checks too" \
+  test "${#pscope[@]}" -ge 39 \
+    -a -n "$(printf '%s\n' "${pscope[@]}" | grep -Fx bench/tasks/wordfreq-top/check.sh)" \
+    -a -n "$(printf '%s\n' "${pscope[@]}" | grep -Fx skills/genesis/templates/evals/guard.sh)" \
+    -a -n "$(printf '%s\n' "${pscope[@]}" | grep -Fx skills/genesis/templates/evals/run.sh)" \
+    -a -n "$(printf '%s\n' "${pscope[@]}" | grep -Fx bench/validate.sh)"
+left="" used=""
+while IFS= read -r hit; do
+  [ -n "$hit" ] || continue
+  pipe_allowed "$PIPE_ALLOW" "$hit" || left="$left  $hit"$'\n'
+done <<<"$(cd "$ROOT" && pipe_hits "${pscope[@]}")"
+if [ -z "$left" ]; then ok "no early-stopping reader behind a pipe outside the allowlist"; else
+  no "no early-stopping reader behind a pipe outside the allowlist; found:"; printf '%s' "$left"; fi
+stale=""
+while IFS=$'\t' read -r af at _; do
+  grep -Fxq -- "$af"$'\t'"$at" <<<"$used" || stale="$stale  $af	$at"$'\n'
+done <<<"$PIPE_ALLOW"
+if [ -z "$stale" ]; then ok "every pipe allowlist entry still matches a line"; else
+  no "every pipe allowlist entry still matches a line; unused:"; printf '%s' "$stale"; fi
 
 echo
 echo "smoke: $pass passed, $fail failed"

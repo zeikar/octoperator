@@ -87,8 +87,9 @@ Octoperator has no build step. Before opening a PR:
 # 1. Smoke-test the helper scripts (syntax, --help, arg handling, and real octo-exclude /
 #    octo-worktree runs in a temp repo), and check that no script, skill, or agent outside
 #    genesis uses GraphQL (`gh api graphql` or GraphQL-backed porcelain such as `gh pr` and
-#    `gh repo`), outside a short allowlist. CI-safe: no network / gh / auth required. CI runs
-#    this on ubuntu and macOS on every push and PR.
+#    `gh repo`), outside a short allowlist, and that no script under pipefail pipes into a reader
+#    that can stop early (`grep -q`, `head`), outside another. CI-safe: no network / gh / auth
+#    required. CI runs this on ubuntu and macOS on every push and PR.
 bash scripts/test/smoke.sh
 
 # 1b. Test the scenario-eval templates genesis copies into a new repo (offline; CI runs this).

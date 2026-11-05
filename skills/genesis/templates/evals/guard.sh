@@ -48,6 +48,8 @@
 set -uo pipefail
 # No replace refs: a `git replace` planted before the guard runs must not swap BASE or HEAD.
 export LC_ALL=C GIT_NO_REPLACE_OBJECTS=1 GIT_LITERAL_PATHSPECS=1
+# A grep that stops at a match reads a here-string, never `printf | …`: under pipefail, a writer
+# that dies of SIGPIPE would read as a failed check.
 
 FAILS=0
 fail() { echo "FAIL: $*"; FAILS=$((FAILS + 1)); }
@@ -135,12 +137,12 @@ formats() {
     fi
     okid=1
     v="$(fm_value "$s" id)"
-    if [ "$v" != "$id" ] || ! printf '%s\n' "$id" | grep -Eqx '[a-z0-9]+(-[a-z0-9]+)*'; then
+    if [ "$v" != "$id" ] || ! grep -Eqx '[a-z0-9]+(-[a-z0-9]+)*' <<<"$id"; then
       okid=0
       fail "evals/$id/scenario.md: front matter needs id: $id, in lowercase kebab-case (got '$v')"
     fi
     v="$(fm_value "$s" requirement)"
-    printf '%s\n' "$v" | grep -Eqx 'R[0-9]+' \
+    grep -Eqx 'R[0-9]+' <<<"$v" \
       || fail "evals/$id/scenario.md: front matter needs requirement: R<n> (got '$v')"
     j="$(fm_value "$s" judge)"
     case "$j" in

@@ -38,6 +38,8 @@ done
 command -v jq >/dev/null || { echo "web: not allowed (jq is not installed)"; exit 0; }
 
 no() { echo "web: not allowed ($1)"; exit 0; }
+# The greps that stop at a match read a here-string, never `printf | …`: under pipefail, a long
+# rule list would give the printf SIGPIPE, and a deny or an allow would go unseen (#133).
 # Each file's lines: `allow <tool>` for a bare allow entry, `deny <tool> <file>` or
 # `ask <tool> <file>` for a rule naming the tool at all.
 rules=""
@@ -61,10 +63,10 @@ done <<EOF
 EOF
 
 for t in WebSearch WebFetch; do
-  hit="$(printf '%s' "$rules" | grep -E -m 1 "^(deny|ask) $t ")" \
+  hit="$(grep -E -m 1 "^(deny|ask) $t " <<<"$rules")" \
     && no "${hit#* * }'s permissions.${hit%% *} names $t"
 done
 for t in WebSearch WebFetch; do
-  printf '%s' "$rules" | grep -qx "allow $t" || no "no bare \"$t\" in permissions.allow"
+  grep -qx "allow $t" <<<"$rules" || no "no bare \"$t\" in permissions.allow"
 done
 echo "web: allowed"
