@@ -35,8 +35,10 @@ ME=$(gh api user --jq '.login' 2>&1) \
 ok "Authenticated as @$ME"
 
 [ -n "$REPO" ] || fail "Missing --repo OWNER/NAME"
-gh repo view "$REPO" --json nameWithOwner >/dev/null 2>&1 || fail "Cannot access repo: $REPO"
-DEFAULT=$(gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBranchRef.name')
+# REST (works where GraphQL is refused, as in a Claude Code cloud session). The Projects v2
+# checks below have no REST API.
+DEFAULT=$(gh api "repos/$REPO" --jq '.default_branch' 2>/dev/null) \
+  || fail "Cannot access repo: $REPO"
 ok "Repo $REPO reachable (default branch: $DEFAULT)"
 
 if [ -n "$PROJECT" ]; then

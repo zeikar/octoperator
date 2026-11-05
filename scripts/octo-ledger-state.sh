@@ -34,7 +34,8 @@
 #   all-pass: yes | no
 #   planning-failed: none | <tip> <reason, at most 80 characters on one line>
 #   decision: observe | build
-# Read-only: one `gh issue view`.
+# Read-only, REST only: every page of `GET repos/OWNER/NAME/issues/LEDGER/comments`, so it works
+# where GraphQL is refused (a Claude Code cloud session).
 #
 # Exit codes: 0 decided, 2 bad arguments, 3 a gh error (the ledger is unreadable).
 set -uo pipefail
@@ -75,8 +76,15 @@ if [ -z "$ISSUE" ]; then
   exit 0
 fi
 
-# gh's --jq has no --arg, so RUNS, ALLPASS, RESUME, and MARKP are written in as literals. Comments
-# come oldest first. Every type test sits in an `if`, so a malformed entry never makes jq fail.
+# REST serves the comments oldest first, a page at a time, and gh's --jq runs once per page, so
+# the filter reads each comment on its own and the walk below, in awk, sees the whole ledger.
+# Every type test sits in an `if`, so a malformed entry never makes jq fail. One tab-separated
+# line per comment whose body holds ```json:
+#   <author_association> <kind, or - when it is no valid entry> <passed, or - when the metric is
+#   not numeric> <all-pass: 1 or 0> <merged >= 1: 1 or 0> <planning_failed: <tip> <reason> | none>
+# planning_failed is read for a run entry only. Its reason holds no control character (so no
+# tab), is at most 80 characters, and comes last.
+# shellcheck disable=SC2016  # backticks and \(...) belong to the jq filter
 filter='
 def keys9: ["time", "mode", "cycles_used", "merged", "held", "proposals_filed", "metric",
   "cost_usd", "kind"];
@@ -93,43 +101,76 @@ def num: if type == "object" then
         and (.total >= 1) and (.passed <= .total)
     else false end)
   else false end;
-def allpass: (.metric | num) and (.metric.passed == .metric.total);
-def mark: [.[] | select(.metric | num) | .metric.passed] | max;
-def gains($mark): if .kind == "observe" then false
-  elif (.metric | num) and ($mark != null) then .metric.passed > $mark
-  else ((.merged | type) == "number") and (.merged >= 1) end;
-[.comments[] | select(.body | contains("```json"))] as $c
-| ($c | map(select(.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")))) as $ok
-| ($c - $ok | group_by(.authorAssociation)
-    | map("\(length) (\(.[0].authorAssociation))") | join(", ")) as $skipped
-| [$ok | reverse | .[] | entry] as $v
-| ([range(0; $v | length) | select($v[.] | (.kind == "reset") or allpass)] | .[0]) as $hit
-| (if RESUME then 0 elif $hit == null then ($v | length) else $hit end) as $stop
-| (if RESUME then "since --resume" elif $hit == null then "all"
-   elif $v[$hit].kind == "reset" then "since the last reset"
-   else "since the last all-pass entry" end) as $why
-| [range(0; $stop) as $i | $v[$i] | gains($v[$i + 1:$stop + 1] | mark)] as $g
-| ([range(0; $g | length) | select($g[.])] | .[0] // ($g | length)) as $streak
-| ([$v[] | select(.kind != "observe")] | .[0]) as $last
-| (if $last.kind == "run" then $last.planning_failed else null end) as $pf
-| (if RESUME then "none"
-   elif ($pf | type) == "object" and (($pf.tip | type) == "string")
-        and ($pf.tip | test("^[0-9a-f]{40}$")) and (($pf.reason | type) == "string") then
-     "\($pf.tip) \($pf.reason | gsub("[[:cntrl:]]"; " ") | .[0:80])"
-   else "none" end) as $failed
-| "entries: \($stop) (\($why))",
-  "skipped: \(if $skipped == "" then "none" else $skipped end)",
-  "streak: \($streak)/RUNS",
-  "high-water: \(if RESUME then "MARKP" else $v[0:$stop + 1] | mark // "none" end)",
-  "all-pass: ALLPASS",
-  "planning-failed: \($failed)",
-  "decision: \(if $streak >= RUNS then "observe" else "build" end)"'
-filter="${filter//MARKP/$resume_mark}"
-filter="${filter//RESUME/$RESUME}"
-filter="${filter//ALLPASS/$all_pass}"
-filter="${filter//RUNS/$RUNS}"
+def failed($pf): if ($pf | type) == "object" and (($pf.tip | type) == "string")
+    and ($pf.tip | test("^[0-9a-f]{40}$")) and (($pf.reason | type) == "string") then
+    "\($pf.tip) \($pf.reason | gsub("[[:cntrl:]]"; " ") | .[0:80])"
+  else "none" end;
+.[] | select((.body // "") | contains("```json"))
+| "\(.author_association)\t" + ([entry][0]
+  | if . == null then "-\t-\t0\t0\tnone"
+    else (if .kind == "run" then .planning_failed else null end) as $pf
+      | "\(.kind)\t\(if .metric | num then .metric.passed else "-" end)"
+        + "\t\(if (.metric | num) and (.metric.passed == .metric.total) then 1 else 0 end)"
+        + "\t\(if ((.merged | type) == "number") and (.merged >= 1) then 1 else 0 end)"
+        + "\t\(failed($pf))"
+    end)'
 
 err="$(mktemp)" && [ -n "$err" ] || { echo "mktemp failed" >&2; exit 3; }
 trap 'rm -f "$err"' EXIT
-gh issue view "$ISSUE" --repo "$REPO" --json comments --jq "$filter" 2>"$err" \
-  || { cat "$err" >&2; exit 3; }
+lines="$(gh api "repos/$REPO/issues/$ISSUE/comments?per_page=100" --paginate --jq "$filter" \
+  2>"$err")" || { cat "$err" >&2; exit 3; }
+
+# The walk, over the valid entries from allowed authors, newest first: v[j] is entry n - j.
+# mark(lo, hi) is the highest numeric passed among v[lo..hi], or "" for none.
+printf '%s' "$lines" | LC_ALL=C awk -F '\t' -v runs="$RUNS" -v resume="$RESUME" \
+  -v markp="$resume_mark" -v allpass="$all_pass" '
+  function mark(lo, hi,    j, m) {
+    m = ""
+    for (j = lo; j <= hi && j < n; j++)
+      if (P[n - j] != "-" && (m == "" || P[n - j] + 0 > m + 0)) m = P[n - j]
+    return m
+  }
+  $1 == "OWNER" || $1 == "MEMBER" || $1 == "COLLABORATOR" {
+    if ($2 != "-") { n++; K[n] = $2; P[n] = $3; A[n] = $4; M[n] = $5; F[n] = $6 }
+    next
+  }
+  { if (!($1 in skip)) names[++nn] = $1; skip[$1]++ }
+  END {
+    hit = -1
+    for (j = 0; j < n; j++) if (K[n - j] == "reset" || A[n - j] == 1) { hit = j; break }
+    if (resume == "true") { stop = 0; why = "since --resume" }
+    else if (hit < 0) { stop = n; why = "all" }
+    else {
+      stop = hit
+      why = (K[n - hit] == "reset") ? "since the last reset" : "since the last all-pass entry"
+    }
+    # An entry gains against the mark of the older entries of the walk and the one that ends it.
+    streak = stop
+    for (j = 0; j < stop; j++) {
+      i = n - j; m = mark(j + 1, stop)
+      if (K[i] == "observe") g = 0
+      else if (P[i] != "-" && m != "") g = (P[i] + 0 > m + 0)
+      else g = (M[i] == 1)
+      if (g) { streak = j; break }
+    }
+    hw = (resume == "true") ? markp : mark(0, stop)
+    if (hw == "") hw = "none"
+    # The newest run or reset entry: a run entry names the tip its planning failed at.
+    pf = "none"
+    for (j = 0; resume != "true" && j < n; j++)
+      if (K[n - j] != "observe") { if (K[n - j] == "run") pf = F[n - j]; break }
+    # The other authors, by name, as "<count> (<author_association>)".
+    for (a = 2; a <= nn; a++)
+      for (b = a; b > 1 && names[b - 1] > names[b]; b--) {
+        t = names[b]; names[b] = names[b - 1]; names[b - 1] = t
+      }
+    skipped = ""
+    for (a = 1; a <= nn; a++) skipped = skipped (a > 1 ? ", " : "") skip[names[a]] " (" names[a] ")"
+    printf "entries: %d (%s)\n", stop, why
+    printf "skipped: %s\n", (skipped == "") ? "none" : skipped
+    printf "streak: %d/%s\n", streak, runs
+    printf "high-water: %s\n", hw
+    printf "all-pass: %s\n", allpass
+    printf "planning-failed: %s\n", pf
+    printf "decision: %s\n", (streak >= runs + 0) ? "observe" : "build"
+  }'

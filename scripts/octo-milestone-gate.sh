@@ -18,7 +18,7 @@
 #   5. A human did not decline the last milestone at this tip: the newest closed or merged
 #      next-milestone PR from this repo was closed unmerged, and nothing landed since. That is,
 #      the tip is still the merge base of its head and the tip (nothing landed since it was
-#      planned), or the tip's committer date is no later than the PR's closedAt (ready work
+#      planned), or the tip's committer date is no later than the PR's closed_at (ready work
 #      merged while it was open, before the human closed it). A compare that 404s (no common
 #      ancestor) shares no base, so only the date can decide it. (A commit pushed after the
 #      close with an older committer date also reads as declined.) A new commit, or --resume,
@@ -34,8 +34,9 @@
 #   tip: <the default branch's tip commit> | unchecked
 #   decision: build | open <number> | not all-pass | failed | declined <number> |
 #             stale dispatch | stale wait <run id> | plan
-# The tip is read only when steps 1 to 3 passed. Read-only: `gh pr list`, `gh repo view`, and
-# `gh api` GETs.
+# The tip is read only when steps 1 to 3 passed. Read-only, REST only (`gh api` GETs), so it works
+# where GraphQL is refused (a Claude Code cloud session). For an empty repo REST still names a
+# default branch, and reading its tip fails (exit 3), as before.
 #
 # Exit codes: 0 decided, 2 bad arguments, 3 a gh error (gh's output on stderr; nothing decided).
 set -uo pipefail
@@ -84,11 +85,13 @@ err="$(mktemp)" && [ -n "$err" ] || { echo "mktemp failed" >&2; exit 3; }
 trap 'rm -f "$err"' EXIT
 # gh_failed <what> : gh's own error on stderr, exit 3.
 gh_failed() { echo "$1 failed: $(grep -m 1 . "$err" || echo "exit status")" >&2; exit 3; }
-mine='select((.isCrossRepository | not) and (.headRefName | startswith("milestone-")))'
+# From this repo, not a fork (a deleted fork's head repo is null), on a milestone- branch.
+mine='select(.head.repo.full_name == .base.repo.full_name
+  and (.head.ref | startswith("milestone-")))'
 
-prs="$(gh pr list --repo "$REPO" --state open --limit 200 \
-  --json number,url,headRefName,isCrossRepository \
-  --jq ".[] | $mine | \"\(.number) \(.url)\"" 2>"$err")" || gh_failed "gh pr list"
+prs="$(gh api "repos/$REPO/pulls?state=open&per_page=100" --paginate \
+  --jq ".[] | $mine | \"\(.number) \(.html_url)\"" 2>"$err")" \
+  || gh_failed "listing open pull requests"
 pr="$(printf '%s\n' "$prs" | grep . | sort -n | head -n 1)"
 if [ -n "$pr" ]; then
   case "${pr%% *}" in '' | *[!0-9]*) echo "unexpected gh output: $pr" >&2; exit 3 ;; esac
@@ -96,8 +99,7 @@ if [ -n "$pr" ]; then
 fi
 [ "$all_pass" = yes ] || decide none unchecked "not all-pass"
 
-branch="$(gh repo view "$REPO" --json defaultBranchRef --jq .defaultBranchRef.name 2>"$err")" \
-  || gh_failed "gh repo view"
+branch="$(gh api "repos/$REPO" --jq .default_branch 2>"$err")" || gh_failed "reading the repo"
 [ -n "$branch" ] || { echo "gh printed no default branch" >&2; exit 3; }
 tip="$(gh api "repos/$REPO/git/ref/heads/$branch" --jq .object.sha 2>"$err")" \
   || gh_failed "reading the tip of $branch"
@@ -105,11 +107,11 @@ tip="$(gh api "repos/$REPO/git/ref/heads/$branch" --jq .object.sha 2>"$err")" \
 [ "$FAILED_TIP" != "$tip" ] || decide none "$tip" failed
 
 if [ "$RESUME" = false ]; then
-  # The newest closed or merged next-milestone PR (gh's closed state holds both).
-  last="$(gh pr list --repo "$REPO" --state closed --limit 100 \
-    --json number,state,headRefName,headRefOid,isCrossRepository,closedAt \
-    --jq ".[] | $mine | \"\(.number) \(.state) \(.headRefOid) \(.closedAt)\"" 2>"$err")" \
-    || gh_failed "gh pr list"
+  # The newest closed or merged next-milestone PR (REST's closed state holds both), among the
+  # 100 newest closed PRs.
+  last="$(gh api "repos/$REPO/pulls?state=closed&sort=created&direction=desc&per_page=100" \
+    --jq ".[] | $mine | \"\(.number) \(if .merged_at then \"MERGED\" else \"CLOSED\" end)\"
+      + \" \(.head.sha) \(.closed_at)\"" 2>"$err")" || gh_failed "listing closed pull requests"
   last="$(printf '%s\n' "$last" | grep . | sort -n | tail -n 1)"
   read -r num state sha closed <<EOF
 $last
@@ -118,7 +120,7 @@ EOF
     case "$num" in '' | *[!0-9]*) echo "unexpected gh output: $last" >&2; exit 3 ;; esac
     [[ "${sha:-}" =~ ^[0-9a-f]{40}$ ]] || { echo "unexpected head from gh: $last" >&2; exit 3; }
     date_re='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
-    [[ "${closed:-}" =~ $date_re ]] || { echo "unexpected closedAt from gh: $last" >&2; exit 3; }
+    [[ "${closed:-}" =~ $date_re ]] || { echo "unexpected closed_at from gh: $last" >&2; exit 3; }
     if base="$(gh api "repos/$REPO/compare/$tip...$sha" --jq .merge_base_commit.sha 2>"$err")"
     then [ "$base" != "$tip" ] || decide none "$tip" "declined $num"
     else grep -q 'HTTP 404' "$err" || gh_failed "comparing PR #$num with $branch"

@@ -23,7 +23,9 @@
 #           unreadable: <reason>
 #   head: <the run's head commit, 40 hex digits>   or   head: none   (when metric is null)
 # octo-milestone-gate.sh compares `head:` with the default branch's tip.
-# Read-only: `gh repo view` and `gh api` GETs.
+# Read-only, REST only (`gh api` GETs), so it works where GraphQL is refused (a Claude Code cloud
+# session). An empty repo has no evals workflow: REST still names its default branch, and the
+# workflow file's read 404s.
 #
 # Exit codes: 0 whenever it printed a metric line (null included), 2 bad arguments.
 set -uo pipefail
@@ -51,8 +53,7 @@ trap 'rm -f "$err"' EXIT
 # $(…), so its exit ends the script rather than a subshell.
 gh_failed() { none "unreadable: gh error: $(grep -m 1 . "$err" || echo "exit status")"; }
 
-branch="$(gh repo view "$REPO" --json defaultBranchRef --jq .defaultBranchRef.name 2>"$err")" \
-  || gh_failed
+branch="$(gh api "repos/$REPO" --jq .default_branch 2>"$err")" || gh_failed
 [ -n "$branch" ] || none "unreadable: gh printed no default branch"
 if ! gh api -X GET "repos/$REPO/contents/.github/workflows/$WF" -f ref="$branch" --jq .type \
     >/dev/null 2>"$err"; then

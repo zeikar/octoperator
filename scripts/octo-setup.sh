@@ -3,7 +3,10 @@
 #
 # Detects the repo + default branch and whether the token can access Projects v2 (read),
 # listing any existing boards. Emits a single JSON object on stdout so the setup skill can
-# decide whether to enable board features. Makes no changes.
+# decide whether to enable board features. Makes no changes. The repo reads are REST
+# (`gh api repos/...`; with no --repo, gh fills `{owner}/{repo}` from the git remote), so they
+# work where GraphQL is refused (a Claude Code cloud session); the Projects v2 probe has no REST
+# API and fails there. REST names a default branch even for an empty repo.
 #
 # Usage:
 #   octo-setup.sh [--repo OWNER/NAME] [--owner PROJECT_OWNER]
@@ -42,14 +45,14 @@ fail() { printf '{"error":"%s","detail":"%s"}\n' "$1" "$(detail)"; exit 1; }
 # this run uses works (a Claude Code cloud session's). The repo lookups below are the real probe,
 # and a failure reports gh's own message.
 if [ -z "$REPO" ]; then
-  REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>"$ERRF") \
+  REPO=$(gh api 'repos/{owner}/{repo}' --jq '.full_name' 2>"$ERRF") \
     || fail "no repo: pass --repo OWNER/NAME or run inside a repo (or gh is not authenticated)"
 fi
 [ -n "$REPO" ] || fail "no repo: pass --repo OWNER/NAME or run inside a repo"
 [[ "$REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] \
   || { echo '{"error":"--repo must be OWNER/NAME"}'; exit 2; }
 
-DEFAULT=$(gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBranchRef.name' 2>"$ERRF") \
+DEFAULT=$(gh api "repos/$REPO" --jq '.default_branch' 2>"$ERRF") \
   || fail "cannot read $REPO (not found, no access, or gh is not authenticated: gh auth login)"
 [ -n "$POWNER" ] || POWNER="${REPO%%/*}"
 [[ "$POWNER" =~ ^[A-Za-z0-9-]+$ ]] || { echo '{"error":"--owner must be a GitHub login"}'; exit 2; }

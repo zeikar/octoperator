@@ -25,6 +25,9 @@
 #            starts no more tasks; with the cap set, it also stops after a solve whose cost is
 #            unknown (claude ran but reported none, e.g. it timed out).
 #
+# Every gh call is REST (`gh api`), and git reaches github.com with gh's credentials, so no step
+# needs GraphQL, which a Claude Code cloud session's proxy refuses (`gh repo create`, `clone`,
+# `list`, and `delete` all use it).
 # Every subcommand creates or reads real GitHub repos, so it runs only with --live. Without
 # --live (or --dry-run) it exits 2 before any gh or claude call. --dry-run prints the planned
 # repos, issues, and commands and touches nothing. <results> is BENCH_RESULTS_DIR (default
@@ -174,6 +177,13 @@ bounded() {
   fi
 }
 
+# gitgh <git args...> : git with gh's credentials for github.com, as `gh repo clone` and
+# `gh repo create --push` run it, so an https URL works without any other git login.
+gitgh() {
+  git -c credential.https://github.com.helper= \
+    -c 'credential.https://github.com.helper=!gh auth git-credential' "$@"
+}
+
 # preflight : the tools this subcommand needs are installed (checked before setup creates any
 # repo), and gh is signed in with the repo scope; a missing delete_repo only warns.
 # Sets LOGIN and CAN_DELETE (yes, no, or unknown when the token has no classic scopes).
@@ -221,10 +231,11 @@ cmd_setup() {
     echo "setup $task"
     echo "  repo:  $OWNER_SHOWN/$name (private): bench/tasks/$task/seed/ + .claude/settings.json"
     echo "  issue: $title [label: $kind]"
-    echo "  \$ gh repo create $OWNER_SHOWN/$name --private --source <seed copy> --push"
-    echo "  \$ gh label create $kind --repo $OWNER_SHOWN/$name --force"
-    echo "  \$ gh issue create --repo $OWNER_SHOWN/$name --title <title> --label $kind \\"
-    echo "      --body-file -  (body: task.md after the title)"
+    echo "  \$ gh api user/repos -f name=$name -F private=true  (orgs/<owner>/repos for an org)"
+    echo "  \$ git push https://github.com/$OWNER_SHOWN/$name.git main  (from <seed copy>)"
+    echo "  \$ octo-labels.sh --repo $OWNER_SHOWN/$name $kind"
+    echo "  \$ gh api repos/$OWNER_SHOWN/$name/issues -f title=<title> -f 'labels[]=$kind' \\"
+    echo "      -F body=@-  (body: task.md after the title)"
     return 0
   fi
   repo="${OWNER:-$LOGIN}/$name"; dir="$tmp/seed-$task"
@@ -240,26 +251,32 @@ cmd_setup() {
     && git -C "$dir" -c user.name=octo-bench -c user.email=octo-bench@example.invalid \
          -c commit.gpgsign=false commit -q --no-verify -m "seed: $task"; } \
     || die "could not commit the seed"
-  gh repo create "$repo" --private --source "$dir" --push >&2 || die "could not create $repo"
-  gh label create "$kind" --repo "$repo" --force >/dev/null || die "could not create label $kind"
-  url="$(task_part "$md" body \
-    | gh issue create --repo "$repo" --title "$title" --label "$kind" --body-file -)" \
-    || die "could not file the issue in $repo"
-  echo "$repo ${url##*/}"
+  # A user's repo is created under user/repos, an organization's under orgs/<owner>/repos.
+  create=user/repos
+  [ "$(printf '%s' "${OWNER:-$LOGIN}" | tr '[:upper:]' '[:lower:]')" \
+    = "$(printf '%s' "$LOGIN" | tr '[:upper:]' '[:lower:]')" ] || create="orgs/$OWNER/repos"
+  gh api "$create" -f name="$name" -F private=true --jq .full_name >&2 \
+    || die "could not create $repo"
+  gitgh -C "$dir" push -q "https://github.com/$repo.git" main >&2 || die "could not push to $repo"
+  bash "$ROOT/scripts/octo-labels.sh" --repo "$repo" "$kind" >/dev/null \
+    || die "could not create label $kind"
+  issue="$(task_part "$md" body | gh api "repos/$repo/issues" -f title="$title" \
+    -f "labels[]=$kind" -F body=@- --jq .number)" || die "could not file the issue in $repo"
+  echo "$repo $issue"
 }
 
 cmd_solve() {
   repo="$1"; issue="$2"; out="$RESULTS/${repo#*/}.solve.json"
   if [ "$DRY" -eq 1 ]; then
     echo "solve $repo #$issue"
-    echo "  \$ gh repo clone $repo <clone>"
+    echo "  \$ git clone https://github.com/$repo.git <clone>"
     echo "  \$ claude -p \"/octoperator:auto $issue\" --output-format json --plugin-dir $PLUGIN_DIR"
     echo "    (in <clone>, killed after ${SOLVE_TIMEOUT}s)"
     echo "  save: $out"
     return 0
   fi
   dir="$tmp/solve-${repo#*/}"
-  gh repo clone "$repo" "$dir" -- -q || die "could not clone $repo"
+  gitgh clone -q "https://github.com/$repo.git" "$dir" || die "could not clone $repo"
   sha="$(git -C "$PLUGIN_DIR" rev-parse HEAD 2>/dev/null)"
   start="$(date +%s)"
   (cd "$dir" && bounded "$SOLVE_TIMEOUT" claude -p "/octoperator:auto $issue" \
@@ -285,17 +302,19 @@ PY
   fi
 }
 
-# metrics <task> <repo> <check passed: true|false> <pr view json> <solve json> <sha> : print
-# the result line. (A function, not a heredoc in $(...), which bash 3.2 misparses.)
+# metrics <task> <repo> <check passed: true|false> <pr json> <reviews> <solve json> <sha> :
+# print the result line. <pr json> is the PR's REST fields (or null for no PR), <reviews> its
+# review bodies, oldest first, one JSON string a line. (A function, not a heredoc in $(...),
+# which bash 3.2 misparses.)
 metrics() {
   python3 - "$@" <<'PY'
 import json, os, re, sys
-task, repo, passed, view_path, solve_path, sha = sys.argv[1:7]
+task, repo, passed, view_path, reviews_path, solve_path, sha = sys.argv[1:8]
 view = json.load(open(view_path)) or {}
 # Only Octoperator's own reviews count: the review skill posts a verdict line, as
 # "**Intended verdict: ...**" when it had to downgrade a self-review to a comment.
 octo = re.compile(r"intended verdict|^\*\*verdict:", re.I | re.M)
-reviews = [r.get("body") or "" for r in view.get("reviews") or []]
+reviews = [json.loads(l) or "" for l in open(reviews_path) if l.strip()]
 reviews = [b for b in reviews if octo.search(b)]
 def has(body, *names):
     return any(re.search(r"^###\s+" + n, body, re.I | re.M) for n in names)
@@ -304,14 +323,16 @@ verdict = None
 if reviews:
     m = re.search(r"verdict:\W*(approve|request_changes|comment)", reviews[-1], re.I)
     verdict = m.group(1).lower() if m else None
-merged = view.get("state") == "MERGED"
+# REST's mergeable_state, uppercased as octo-merge-state.sh prints it (null reads as UNKNOWN).
+state = (view.get("mergeable_state") or "unknown").upper()
+merged = view.get("merged") is True
 if merged: held = None
 elif not view: held = "no PR"
-elif view.get("state") == "CLOSED": held = "closed"
-elif view.get("isDraft"): held = "draft"
+elif view.get("state") == "closed": held = "closed"
+elif view.get("draft"): held = "draft"
 elif not reviews: held = "not reviewed"
 elif verdict == "request_changes": held = "review blocking"
-elif view.get("mergeStateStatus") != "CLEAN": held = "merge state %s" % view.get("mergeStateStatus")
+elif state != "CLEAN": held = "merge state %s" % state
 else: held = "not merged"
 solve = {}
 if os.path.exists(solve_path):
@@ -338,15 +359,16 @@ cmd_check() {
   lines="$RESULTS/$run_id.jsonl"; solve="$RESULTS/${repo#*/}.solve.json"
   if [ "$DRY" -eq 1 ]; then
     echo "check $task $repo"
-    echo "  \$ gh repo clone $repo <clone>"
+    echo "  \$ git clone https://github.com/$repo.git <clone>"
     echo "  \$ bash check.sh <clone>  (in bench/tasks/$task/, killed after ${CHECK_TIMEOUT}s)"
-    echo "  \$ gh pr list --repo $repo --state all --limit 1 --json number"
-    echo "  \$ gh pr view <pr> --repo $repo --json number,state,isDraft,mergeStateStatus,reviews"
+    echo "  \$ gh api 'repos/$repo/pulls?state=all&per_page=1'  (the newest PR)"
+    echo "  \$ gh api repos/$repo/pulls/<pr>"
+    echo "  \$ gh api 'repos/$repo/pulls/<pr>/reviews?per_page=100' --paginate"
     echo "  append: $lines"
     return 0
   fi
   dir="$tmp/check-${repo#*/}"
-  gh repo clone "$repo" "$dir" -- -q || die "could not clone $repo"
+  gitgh clone -q "https://github.com/$repo.git" "$dir" || die "could not clone $repo"
   (cd "$TASKS/$task" && bounded "$CHECK_TIMEOUT" bash ./check.sh "$dir") </dev/null \
     >"$dir.log" 2>&1
   rc=$?
@@ -354,19 +376,22 @@ cmd_check() {
   if [ "$rc" -eq 0 ]; then passed=true
   else warn "check.sh failed (exit $rc):"; tail -n 20 "$dir.log" >&2
   fi
-  gh pr list --repo "$repo" --state all --limit 1 --json number >"$dir.list" \
+  # The newest PR: REST lists pull requests newest first.
+  pr="$(gh api "repos/$repo/pulls?state=all&per_page=1" --jq '.[0].number // empty')" \
     || die "could not list $repo's PRs"
-  pr="$(python3 -c 'import json, sys
-l = json.load(open(sys.argv[1])); print(l[0]["number"] if l else "")' "$dir.list")" \
-    || die "could not parse $repo's PR list"
+  case "$pr" in *[!0-9]*) die "could not parse $repo's PR list: $pr" ;; esac
+  : >"$dir.reviews"
   if [ -n "$pr" ]; then
-    gh pr view "$pr" --repo "$repo" --json number,state,isDraft,mergeStateStatus,reviews \
+    gh api "repos/$repo/pulls/$pr" --jq '{number, state, merged, draft, mergeable_state}' \
       >"$dir.view" || die "could not read $repo PR #$pr"
+    gh api "repos/$repo/pulls/$pr/reviews?per_page=100" --paginate \
+      --jq '.[] | .body // "" | tojson' >"$dir.reviews" \
+      || die "could not read $repo PR #$pr's reviews"
   else
     echo null >"$dir.view"
   fi
   sha="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)"
-  line="$(metrics "$task" "$repo" "$passed" "$dir.view" "$solve" "$sha")" \
+  line="$(metrics "$task" "$repo" "$passed" "$dir.view" "$dir.reviews" "$solve" "$sha")" \
     || die "could not compute the metrics"
   mkdir -p "$RESULTS" && printf '%s\n' "$line" >>"$lines" || die "could not write $lines"
   echo "$line"
@@ -376,19 +401,21 @@ cmd_cleanup() {
   if [ "$DRY" -eq 1 ]; then
     echo "cleanup run $RUN_ID"
     for d in "$TASKS"/*/; do
-      echo "  \$ gh repo delete $OWNER_SHOWN/octo-bench-$(basename "$d")-$RUN_ID --yes  (if any)"
+      echo "  \$ gh api -X DELETE repos/$OWNER_SHOWN/octo-bench-$(basename "$d")-$RUN_ID  (if any)"
     done
     return 0
   fi
   owner="${OWNER:-$LOGIN}"
-  names="$(gh repo list "$owner" --limit 1000 --json name --jq '.[].name')" \
-    || die "could not list $owner's repos"
   left="" found=0
   for d in "$TASKS"/*/; do
     repo="$owner/octo-bench-$(basename "$d")-$RUN_ID"
-    printf '%s\n' "$names" | grep -Fxq "${repo#*/}" || continue
+    # Each of this run's repo names, read by name: a 404 is a task this run made no repo for.
+    if ! out="$(gh api "repos/$repo" --jq .full_name 2>&1)"; then
+      case "$out" in *"(HTTP 404)"*) continue ;; esac
+      die "could not read $repo: $(printf '%s\n' "$out" | tail -n 1)"
+    fi
     found=1
-    if [ "$CAN_DELETE" != no ] && gh repo delete "$repo" --yes >&2; then echo "deleted $repo"
+    if [ "$CAN_DELETE" != no ] && gh api -X DELETE "repos/$repo" >&2; then echo "deleted $repo"
     else left="$left $repo"
     fi
   done

@@ -435,6 +435,47 @@ All notable changes to Octoperator are documented in this file. The format is ba
   stub `gh` that serves REST and refuses GraphQL and porcelain with the proxy's 403. `smoke.sh`'s
   evals-guard and approval-match stubs refuse porcelain the same way. The smoke allowlist's
   merge-gate entries are gone, so no skill or agent outside `genesis` names `gh pr` any more.
+- The remaining helper scripts and the benchmark harness now run over REST too, so they work in a
+  Claude Code cloud session (part of epic #79, #114). Each keeps its arguments, its output, and
+  its exit codes. `octo-milestone-gate.sh` lists the open and the 100 newest closed pull requests
+  with `GET .../pulls` (the open ones every page, where `gh pr list` stopped at 200), and reads
+  the default branch with `GET repos/OWNER/NAME`. A deleted fork's `milestone-*` PR still
+  doesn't count. `octo-evals-metric.sh` reads the default branch the same way.
+  `octo-ledger-state.sh` reads the ledger's comments with `GET .../issues/<n>/comments`, every
+  page. gh's `--jq` runs once per page, so its filter now checks each comment and the walk over
+  the whole ledger moved to awk. A differential run against the old jq walk, on 2000 generated
+  ledgers, printed the same lines. `octo-genesis-epic.sh` lists the open `epic` issues with
+  `GET .../issues?labels=epic`, every page (no longer at most 500), leaving pull requests out.
+  `octo-setup.sh` and `octo-doctor.sh` read the repo and its default branch over REST (with no
+  `--repo`, `gh api 'repos/{owner}/{repo}'`, which gh fills from the git remote). Their
+  Projects v2 calls stay `gh project`, which has no REST API (#115). REST has no `isEmpty`: an
+  empty repo still has a `default_branch`, where GraphQL's `defaultBranchRef` was null, so
+  `octo-evals-metric.sh` now reports an empty repo as `no evals workflow` (its contents read
+  404s) instead of `unreadable: gh printed no default branch`, and the gate still exits 3 there
+  (its tip read 409s). `octo-bench.sh` creates a repo with `POST user/repos`
+  (`orgs/<owner>/repos` for an organization's `--owner`), since `gh repo create` and
+  `gh repo clone` use GraphQL. It pushes the seed and clones with plain git over https, with the
+  credentials those commands used (`gh auth git-credential`). It makes the label with
+  `octo-labels.sh` and files the issue with `POST .../issues`. `check` reads the newest PR, its
+  fields, and its reviews over REST, and maps `mergeable_state` as `octo-merge-state.sh` does
+  (null is `UNKNOWN`). `cleanup` reads each of the run's repo names (`GET repos/OWNER/NAME`, a
+  404 meaning none) and deletes with `DELETE repos/OWNER/NAME`, so it no longer lists the owner's
+  repos. Its dry runs print the new
+  commands. The cookbook's "Resolve repo and defaults" recipe and every skill and agent that
+  resolved the repo or its default branch with `gh repo view` now use
+  `gh api 'repos/{owner}/{repo}' --jq '.full_name, .default_branch'` or
+  `gh api repos/OWNER/NAME --jq .default_branch`. `smoke.sh`'s GraphQL check now covers every
+  `scripts/octo-*.sh` and `bench/*.sh` too, besides the skills and agents, skipping a script's
+  comment lines. It fails on `gh api graphql`, `gh repo`, and `gh project` as well as `gh issue`,
+  `gh label`, and `gh pr`. `gh run` and `gh workflow` are REST and pass. genesis
+  (`skills/genesis/` and `octo-genesis-plan.sh`, which prints `--approve`'s local steps) is out of
+  scope, as it runs only locally. Its allowlist gives each entry a reason: four lines that only
+  mention a command, and the Projects v2 commands (#115). The autopilot suite's stub `gh`, and
+  `smoke.sh`'s setup, genesis-epic, and bench stubs, now serve REST only and refuse GraphQL and
+  porcelain with the proxy's 403. The bench stub's `git` intercepts github.com clones and pushes.
+  New tests cover an empty repo, a deleted fork's PR, the ledger and PR lists across pages, a PR
+  labeled `epic`, setup's REST calls under a user or an organization, check's held and closed
+  PRs, and cleanup's read failures.
 - The conventions gain a rule for a flaky test found mid-run, unrelated to the current issue.
   Re-run it at most twice more on the PR head and run it on the base (`origin/<default>`); one
   that passes on the base but fails on the head is a regression, fixed in the PR. A real flake
