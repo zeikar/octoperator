@@ -62,10 +62,11 @@ rest of the run on the first board failure.
 
 ### 2. Resolve target repo and default branch (ONCE)
 
-Always run this command, which reads the local clone; its output is `LOCAL_REPO`:
+Always run this command, which reads the local clone's remote (gh fills `{owner}` and `{repo}`
+from it); its output is `LOCAL_REPO`:
 
 ```bash
-gh repo view --json nameWithOwner --jq '.nameWithOwner'
+gh api 'repos/{owner}/{repo}' --jq .full_name
 ```
 
 Resolve `REPO` exactly once: the `repo` from settings (step 1) if set, else `LOCAL_REPO`.
@@ -77,7 +78,7 @@ local branches/worktrees and push, so this check applies to both.
 Resolve the default branch ONCE here (a read, safe before the dry-run gate); its output is `DEFAULT`:
 
 ```bash
-gh repo view --repo "$REPO" --json defaultBranchRef --jq '.defaultBranchRef.name'
+gh api "repos/$REPO" --jq .default_branch
 ```
 
 Both the single-issue path and the parallel preflight reference `$DEFAULT`. Nothing below references

@@ -10,10 +10,14 @@ for cases the scripts do not cover. Replace `OWNER/NAME` with the target repo an
 
 A Claude Code cloud session's proxy refuses GraphQL, with `GitHub GraphQL is not available from
 Claude Code sessions; use the REST API (gh api repos/{owner}/{repo}/...)`. Most `gh` porcelain
-uses GraphQL under the hood, including every issue, label, and pull request command, so issues,
-labels, sub-issues, pull requests, and reviews go through `gh api repos/OWNER/NAME/...` (REST),
+uses GraphQL under the hood, including every issue, label, pull request, and repo command
+(`gh repo view`, `list`, `clone`, `create`, and `delete` too), so issues, labels, sub-issues,
+pull requests, reviews, and the repo itself go through `gh api repos/OWNER/NAME/...` (REST),
 never the porcelain. REST works locally too, so one path serves both. That includes the merge
-gate's checks wait, merge state, and merge. Only Projects v2 has no REST API at all.
+gate's checks wait, merge state, and merge. `gh run` and `gh workflow` are REST already. Only
+Projects v2 has no REST API at all. `scripts/test/smoke.sh` fails on any GraphQL call or
+GraphQL-backed porcelain in a script, skill, or agent outside genesis (which runs only locally),
+except the few lines its allowlist names, such as the Projects v2 commands.
 
 The rules every REST step follows:
 
@@ -71,8 +75,14 @@ The rules every REST step follows:
 ## Resolve repo and defaults
 
 ```bash
-gh repo view --json nameWithOwner,defaultBranchRef --jq '{repo:.nameWithOwner, default:.defaultBranchRef.name}'
+gh api 'repos/{owner}/{repo}' --jq '.full_name, .default_branch'
 ```
+
+It prints the repo (`OWNER/NAME`), then its default branch, over REST: `gh api` fills
+`{owner}` and `{repo}` from the current directory's git remote (or `GH_REPO`), with no GraphQL.
+For a named repo, `gh api repos/OWNER/NAME --jq .default_branch`. REST has no `isEmpty`: an empty
+repo still has a `default_branch` (GraphQL's `defaultBranchRef` was null), and reading that
+branch's tip, `git/ref/heads/<default>`, answers 409.
 
 ## Ensure labels exist (idempotent)
 
@@ -235,7 +245,7 @@ gh project item-edit --id "$ITEM_ID" --project-id "$PROJECT_ID" \
 Local (developer is working in the repo — preferred):
 
 ```bash
-DEFAULT=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+DEFAULT=$(gh api 'repos/{owner}/{repo}' --jq .default_branch)
 git fetch origin "$DEFAULT"
 git switch -c 42-add-oauth-login "origin/$DEFAULT"
 ```
