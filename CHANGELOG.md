@@ -399,6 +399,42 @@ All notable changes to Octoperator are documented in this file. The format is ba
   `smoke.sh` now also fails on `gh pr` in a skill or agent, outside an allowlist that holds the
   merge gate's `gh pr checks`, `view`, and `merge` until they move to REST (#113), and fails on
   an allowlist entry that no longer matches any line.
+- `auto`'s merge gate now runs over REST too, so it works in a Claude Code cloud session (part of
+  epic #79, #113). Its guarantees are unchanged: it merges only the reviewed head, pinned, with a
+  regular merge commit, only at merge state `CLEAN`, and the approval-path, vision, evals-guard,
+  and milestone checks still apply. A new helper, `octo-ci-wait.sh`, replaces
+  `gh pr checks --watch --fail-fast`. It polls the reviewed commit's check runs
+  (`filter=latest`, and the newest of each name within its check suite, so a re-run replaces the
+  run it repeats while a same-named run in another suite, such as a workflow's `push` and
+  `pull_request` runs, still counts), its check suites, and its commit statuses, every page,
+  required and optional, every 30 seconds for at most 9 minutes. It buckets each as
+  `gh pr checks` does: `success`, `neutral`, and `skipped` pass; `failure`, `cancelled`,
+  `timed_out`, and `action_required` fail, as do a status's `failure` and `error`; anything else,
+  `stale` included, is pending, as is a check suite with runs that hasn't completed (a suite with
+  no runs is ignored). It prints `green`, `none` (nothing found, on a second read one interval
+  later), `failed <names>` as soon as one fails, or `pending <names>` at the timeout. A failed read is retried, at most
+  twice in a row. The gate now also holds on `failed`, `pending`, or a wait that couldn't read the
+  checks, where it used to wait and let the merge state alone decide. `octo-merge-state.sh` reads
+  REST's `mergeable_state` and prints it uppercased, so its callers see the same names. GitHub
+  computes it lazily, so a null or `unknown` is UNKNOWN and is re-read, as before. Only `CLEAN`
+  merges: `HAS_HOOKS` (pre-receive hooks) and `DRAFT` hold, as they did under GraphQL, and so
+  does any value GitHub adds. A new helper, `octo-merge.sh`, replaces
+  `gh pr merge --merge --delete-branch --match-head-commit`. It sends
+  `PUT .../pulls/<n>/merge` with `merge_method=merge` and the reviewed `sha`, keeping GitHub's
+  default merge commit message. A 409 (the head moved) holds as `new commits since the last
+  review`, and a 405 (not mergeable) holds with GitHub's message. Then it reads the PR back. The PR
+  counts as merged when the merge call or the read-back says so, since a merge can land though
+  the call failed and a read-back can lag a merge that landed. It deletes the head branch
+  only when it is in the repo (never a fork's) and isn't the default branch. A failed delete,
+  such as the cloud proxy's 403, only warns. The readiness read is `GET .../pulls/<n>`, and
+  `octo-approval-match.sh` and `octo-evals-guard.sh` read the PR's `changed_files` and base
+  branch over REST, keeping their semantics. That includes the approval check's hold when the
+  file list falls short of the count. New offline tests in `scripts/test/merge-gate.sh`, which
+  CI runs, cover every `mergeable_state`, each check result, a re-run, a pending timeout, failing
+  reads, a merge's 200, 405, and 409, and a branch delete's 204, 403, and fork cases, against a
+  stub `gh` that serves REST and refuses GraphQL and porcelain with the proxy's 403. `smoke.sh`'s
+  evals-guard and approval-match stubs refuse porcelain the same way. The smoke allowlist's
+  merge-gate entries are gone, so no skill or agent outside `genesis` names `gh pr` any more.
 - The conventions gain a rule for a flaky test found mid-run, unrelated to the current issue.
   Re-run it at most twice more on the PR head and run it on the base (`origin/<default>`); one
   that passes on the base but fails on the head is a regression, fixed in the PR. A real flake

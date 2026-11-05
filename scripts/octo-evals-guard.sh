@@ -10,7 +10,7 @@
 # `path` and `pull_requests`, so no other workflow's job of the same name counts) must hold the
 # jobs `evals-guard append-only` and `evals-guard verdict`, both completed with success: a head
 # commit whose message holds `[skip ci]` runs no workflow, so it has none, and GitHub's
-# mergeStateStatus can read CLEAN all the same. A run whose PR is closed, or comes from a fork,
+# merge state can read CLEAN all the same. A run whose PR is closed, or comes from a fork,
 # lists no pull request, so it never counts.
 #
 # When the PR changes a path the guard reads (anything under evals/, or the root .gitattributes,
@@ -26,7 +26,7 @@
 #   none                                        the base branch has no evals guard workflow
 #   evals guard did not pass: <check> <state>   missing, pending, skipped, or failed
 #   evals guard stale: <check> ran against <sha>, <branch> is at <sha>
-# Read-only: `gh pr view` and `gh api` GETs.
+# Read-only, REST only: `gh api` GETs, so it works where GraphQL is refused.
 #
 # Exit codes: 0 pass or none, 1 hold (the line says why), 2 bad arguments, 3 a gh error.
 set -uo pipefail
@@ -54,8 +54,7 @@ trap 'rm -f "$err"' EXIT
 gh_get() { gh "$@" 2>"$err" || { cat "$err" >&2; exit 3; }; }
 
 IFS=$'\t' read -r branch count <<EOF || exit 3
-$(gh_get pr view "$PR" --repo "$REPO" --json baseRefName,changedFiles \
-  --jq '[.baseRefName, .changedFiles] | @tsv')
+$(gh_get api "repos/$REPO/pulls/$PR" --jq '[.base.ref, .changed_files] | @tsv')
 EOF
 [ -n "$branch" ] || { echo "gh printed no base branch for PR $PR" >&2; exit 3; }
 tip="$(gh_get api "repos/$REPO/git/ref/heads/$branch" --jq .object.sha)" || exit 3

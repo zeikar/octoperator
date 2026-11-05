@@ -35,7 +35,7 @@ unless your own permission settings allow WebSearch and WebFetch
   `ready`, `proposed`, AND unlabeled issues (full mode applies no `ready` gate; that breadth is the
   point of "unattended"). When none remain, `research --create` refills the backlog and the loop
   builds those too — until the `--cycles` cap or a stop condition. **Merges land on `main` with no human in the loop** (each
-  still gated by `auto`'s non-blocking-review + `mergeStateStatus == CLEAN` check).
+  still gated by `auto`'s non-blocking-review + merge state CLEAN check).
   Because it will build any open issue, only use `full` on a repo whose open issues you are willing to
   ship unattended; use `semi` (the default) when you want the `ready` label to gate what gets built.
   **Milestone PRs** ship as in semi mode, with `auto --pr`.

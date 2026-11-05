@@ -79,12 +79,13 @@ If `--dry-run` is present, print the plan and STOP with no mutation:
 - **Merge** — the approval-path gate (the helper's normalized `approval_paths` from step 1,
   "none", or "unreadable — every PR held"), the vision check on every PR, the milestone check
   for a `milestone-*` branch, the
-  bounded wait for running checks, the evals-guard
+  bounded wait for the reviewed commit's checks (green or none, or held), the evals-guard
   gate (only where the base branch has `.github/workflows/evals-guard.yml`), the gate each PR
-  must pass (last review not blocking and taken at the current head, `state OPEN`, not draft,
-  `mergeStateStatus == CLEAN`), and that passing PRs merge with a **regular merge commit**
-  (`--merge`, never squash/rebase), after which `octo-after-merge.sh` closes the PR's issue if
-  GitHub left it open, and any epic whose children are then all closed.
+  must pass (last review not blocking and taken at the current head, `state open`, not draft,
+  merge state `CLEAN`), and that passing PRs merge with a **regular merge commit**
+  (`merge_method=merge`, never squash/rebase) pinned to the reviewed commit, after which
+  `octo-after-merge.sh` closes the PR's issue if GitHub left it open, and any epic whose children
+  are then all closed.
 
 Do NOT implement, review, or merge under `--dry-run`. (`auto --dry-run` stops here rather than
 delegating to the phases' own dry-run handling.)
@@ -284,21 +285,35 @@ an older `origin/$DEFAULT`, a PR that reverts a recent change there would show n
 PR with the reason `milestone check failed`, listing its `FAIL:` lines in the report. Remove the
 checkout whatever the result. Like the approval-path hold, only a human lifts it.
 
-**Then wait for running checks.** Review usually finishes while CI is still running, and pending
+**Then wait for the checks.** Review usually finishes while CI is still running, and pending
 checks read as `UNSTABLE`/`BLOCKED` — a hold — so reading the gate immediately would hold nearly every
-PR in a repo with CI. For each reviewed PR, block until its checks settle:
+PR in a repo with CI. For each reviewed PR, block until the reviewed commit's checks settle, over
+REST (the helper holds the poll and its pause, so the step stays one call):
 
 ```bash
-gh pr checks <pr#> --repo "$REPO" --watch --fail-fast --interval 30
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-ci-wait.sh" --repo "$REPO" --sha "<reviewed headRefOid>"
 ```
 
-Run it with an extended Bash timeout (e.g. 10 minutes). It returns once every check finishes, as
-soon as one fails, or immediately when the PR has no checks. Its exit code is informational only — the
-gate below still decides. If the timeout expires with checks still pending, stop waiting and let the
-gate hold the PR (reason: checks still pending).
+Run it with a 10-minute Bash timeout (600000 ms): it polls every 30 seconds and stops on its own
+after 9 minutes. It reads every check run on the commit (within each check suite the newest of each name, so a
+re-run replaces the run it repeats, while a same-named run in another suite, such as a workflow's
+`push` and `pull_request` runs, still counts), every check suite, and every commit status,
+required or not, from any workflow or app, and buckets each check run and status as gh's own PR
+checks command does: `success`, `neutral`, and `skipped` pass; `failure`, `cancelled`,
+`timed_out`, and `action_required` fail, as does a status in `failure` or `error`; anything else
+(queued, in progress, waiting, `stale`, a pending status) is still pending, and so is a check
+suite with runs that hasn't completed (a suite with no runs is ignored). It returns once every
+check finishes, as soon as one fails, or, when the commit has no checks, after reading again one
+interval later. Act on what it prints:
+- `green` (every check passed) or `none` (the commit has no checks) → continue; the merge state
+  below still decides.
+- `failed <names>` → hold (reason: checks failed: <names>).
+- `pending <names>` (still running when it stopped) → hold (reason: checks still pending: <names>).
+- Exit 2, 3 (a read failed three times in a row), or anything else → hold (reason: checks
+  unavailable).
 
 **Then the evals guard.** A repo that genesis created has `.github/workflows/evals-guard.yml`,
-which keeps its evals append-only so that PRs adding evals can merge unattended. `mergeStateStatus`
+which keeps its evals append-only so that PRs adding evals can merge unattended. The merge state
 can't vouch for it: a head commit whose message holds `[skip ci]` runs no workflow, and with no
 checks and no branch protection the PR still reads `CLEAN`. So ask the helper whether both guard
 checks passed on the reviewed commit (this PR's run of that workflow, not another's job of the same
@@ -320,42 +335,48 @@ Act on its exit code:
   nor `.gitattributes` is never stale: the guard's diff is empty on any base.
 - **2**, **3**, or anything else — hold (reason: evals guard state unavailable).
 
-Then query its readiness:
+Then read its readiness over REST (the issue it closes is already known: the one implemented, or
+step 3's subject with `--pr`):
 
 ```bash
-gh pr view <pr#> --repo "$REPO" \
-  --json headRefOid,headRefName,state,isDraft,closingIssuesReferences
+gh api "repos/$REPO/pulls/<pr#>" --jq '{head_sha: .head.sha, head: .head.ref, state, merged, draft}'
 ```
 
 **Merge ONLY when ALL of these hold** (step 4 has already held every PR whose latest review blocks):
-- `headRefOid` equals the commit the last non-blocking review covered (a later push is unreviewed),
-- `state` is `OPEN`,
-- `isDraft` is `false`,
-- `mergeStateStatus` is **`CLEAN`** — the value the helper below prints decides, not a query,
+- `head_sha` (`headRefOid`) equals the commit the last non-blocking review covered (a later push is
+  unreviewed),
+- `state` is `open` and `merged` is `false`,
+- `draft` is `false`,
+- the checks wait above printed `green` or `none`,
+- the merge state is **`CLEAN`** — the value the helper below prints decides, not a query,
 - the vision check above passed,
 - the evals-guard gate above passed (`pass` or `none`),
-- and, when any read of its `headRefName` (this query's included) starts with `milestone-`, the
-  milestone check above passed.
+- and, when any read of its `headRefName` (this query's `head` included) starts with `milestone-`,
+  the milestone check above passed.
 
 `CLEAN` is GitHub's "ready to merge" state: it means the PR is mergeable (no conflicts), **every
 required status check has passed**, the branch is not behind in a way protection forbids, and no branch
-protection blocks the merge. Do NOT hand-roll the check from `mergeable` + `gh pr checks` — `gh pr
-checks` conflates required and optional checks and reports nothing useful when no checks exist, so it
-is informational only (use it to explain WHY a PR is held). Treat **every** non-`CLEAN` state as a
-HOLD (do not merge) and report the reason:
+protection blocks the merge. Do NOT hand-roll it from `mergeable` and the checks wait: the wait
+can't see branch protection, so it adds its own hold and explains WHY a PR is held, but never
+stands in for `CLEAN`. Treat **every** non-`CLEAN` state as a HOLD (do not merge) and report the
+reason:
 
-| `mergeStateStatus` | Meaning → held reason |
+| Merge state (REST `mergeable_state`) | Meaning → held reason |
 |---|---|
-| `DIRTY` | merge conflict — resolve first |
-| `BLOCKED` | required reviews/checks unmet (branch protection) |
-| `BEHIND` | branch behind base; protection requires updating first |
-| `UNSTABLE` | a status check is failing or still pending (CI not green) |
-| `UNKNOWN` | GitHub is still computing mergeability (see retry below) |
+| `DIRTY` (`dirty`) | merge conflict — resolve first |
+| `BLOCKED` (`blocked`) | required reviews/checks unmet (branch protection) |
+| `BEHIND` (`behind`) | branch behind base; protection requires updating first |
+| `UNSTABLE` (`unstable`) | a status check is failing or still pending (CI not green) |
+| `HAS_HOOKS` (`has_hooks`) | mergeable, but behind GitHub Enterprise pre-receive hooks: never `CLEAN`, so held |
+| `DRAFT` (`draft`) | the PR is a draft |
+| `UNKNOWN` (null or `unknown`) | GitHub is still computing mergeability (see retry below) |
+| anything else | a state GitHub added since: held, by the same rule |
 
-Because GitHub computes mergeability asynchronously, an immediate query can return `UNKNOWN`. Read
-`mergeStateStatus` through the helper, which re-queries up to 3 times, 10 seconds apart, while it is
-`UNKNOWN`, and prints the final value — the loop and pause live in the script so the call stays
-within the pre-allowed `Bash(bash:*)` (see `implement`'s command rule):
+GitHub computes mergeability lazily, so an immediate read can return null or `unknown`. Read the
+merge state through the helper, which reads REST's `mergeable_state` (`GET .../pulls/<pr#>`),
+re-queries up to 3 times, 10 seconds apart, while it is `UNKNOWN`, and prints the final value
+uppercased, as in the table — the loop and pause live in the script so the call stays within the
+pre-allowed `Bash(bash:*)` (see `implement`'s command rule):
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-merge-state.sh" --repo "$REPO" --pr <pr#>
@@ -368,28 +389,35 @@ When every condition holds, merge with a **regular merge commit** and delete the
 the reviewed commit so a push that lands after the check cannot slip in unreviewed:
 
 ```bash
-gh pr merge <pr#> --repo "$REPO" --merge --delete-branch --match-head-commit "<reviewed headRefOid>"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-merge.sh" --repo "$REPO" --pr <pr#> --sha "<reviewed headRefOid>"
 ```
 
-**Never use `--squash` or `--rebase`** — a regular merge preserves the full per-commit history (e.g.
-the per-task commits from the implement phase). The PR's `Closes #N` normally auto-closes the
-linked issue; the after-merge step below closes it when GitHub doesn't.
+It sends one `PUT repos/$REPO/pulls/<pr#>/merge` with `merge_method=merge` and
+`sha=<reviewed headRefOid>`: GitHub refuses it (409) once the head has moved past that commit, the
+REST form of `--match-head-commit`. GitHub's default merge commit message stays ("Merge pull
+request #N from …"). **Never squash or rebase** — a regular merge preserves the full per-commit
+history (e.g. the per-task commits from the implement phase). The PR's `Closes #N` normally
+auto-closes the linked issue; the after-merge step below closes it when GitHub doesn't.
 
-`gh pr merge` can exit non-zero even though the remote merge went through (e.g. the branch delete
-that follows it failed). So on a non-zero exit, re-read the PR before deciding:
-
-```bash
-gh pr view <pr#> --repo "$REPO" --json state --jq '.state'
-```
-
-`MERGED` → treat the merge as a success (continue to the `Done` write and the after-merge step
-below) and report the `gh pr merge` error separately as a cleanup issue (e.g. "merged; branch not
-deleted: <error>"). Any other state → the merge failed: hold the PR with the error as the reason.
+A merge can land even when the merge call reports an error, so the helper then reads the PR back;
+the PR counts as merged when either the merge call or the read-back says `merged` (a read-back can
+lag a merge that landed). Then it deletes the head branch, best effort: only a branch in `$REPO`
+(never a fork's) that is not the default branch; a failed delete (a Claude Code cloud session's
+proxy refuses it) only warns. Act on its exit code:
+- **0** — it printed `merged <merge commit>`: continue to the `Done` write and the after-merge
+  step below. Its other lines (`deleted branch <b>`, `branch <b> already deleted`,
+  `kept branch <b>: …`, `warn: …`) are cleanup for the report, never a hold: the PR is merged.
+- **1** — not merged: hold the PR. `not merged: head moved: …` (409) → reason
+  `new commits since the last review`; any other `not merged: …` line (a 405's
+  `not mergeable: …` included) → that line as the reason.
+- **3** or anything else — the merge call failed and the PR couldn't be read back, so whether it
+  merged is unknown: hold (reason: merge result unknown: check the PR), and run neither the `Done`
+  write nor the after-merge step.
 
 When the gate does NOT pass, do NOT merge and do NOT force: leave the PR open and record the precise
-reason — `new commits since the last review` for a `headRefOid` mismatch, otherwise the
-`mergeStateStatus` reason from the table above (optionally run `gh pr checks <pr#> --repo "$REPO"` to
-show which checks are pending/failing).
+reason — `new commits since the last review` for a `headRefOid` mismatch, the checks wait's reason,
+otherwise the merge state's reason from the table above (the checks wait's names show which checks
+are pending or failing).
 
 After a successful merge, set the linked issue's board status to `Done` — board-guarded and
 non-fatal, exactly as in `implement` step 7 (with `--pr` and no closed issue, there is none to set):
@@ -440,7 +468,7 @@ Print a per-issue table — every input issue appears, nothing silently dropped:
 |-------|----|--------|-------|--------|-----------------|
 | `#42` | `<url>` | `comment` (after 2 fix rounds) | `merged` | `closed epic #39` | `Done` |
 | `#46` | `<url>` | `approve` (1 fix round, 1 minor left) | `merged` | `closed issue #46` | `Done` |
-| `#43` | `<url>` | `comment` | `held: UNSTABLE (checks not green)` | `—` | `In Review` |
+| `#43` | `<url>` | `comment` | `held: checks failed: test (ubuntu)` | `—` | `In Review` |
 | `#44` | `—` | `—` | `held: no PR (no-changes)` | `—` | `In Progress` |
 | `#45` | `<url>` | `request_changes` (6 fix rounds) | `held: review still blocking` | `—` | `In Review` |
 | `#47` | `<url>` | `approve` | `held: needs human approval: infra/main.tf` | `—` | `In Review` |
@@ -450,7 +478,8 @@ With `--pr`, the one row's first cell is the closed issue, or `PR #<pr#>` when i
 
 The Closed column is what step 5's after-merge helper printed for a merged PR: its `closed issue`
 and `closed epic` lines as printed (joined with `; ` when there are several), or `nothing to
-close`; `—` for a held PR. List its `warn:` lines under the table.
+close`; `—` for a held PR. List its `warn:` lines under the table, and the merge helper's lines
+after `merged` (the branch deleted or kept, or why not, and any `warn:`).
 
 The Review column shows the latest **intended** verdict, how many fix rounds ran, and any minors left.
 Under the table, list each PR's outstanding blocker/major/minor findings (`path:line` — issue) and the
@@ -464,7 +493,8 @@ resolve conflicts, wait for checks, address the outstanding findings, or merge m
 
 ## Notes
 
-- **Regular merge only** (`gh pr merge --merge`), never `--squash`/`--rebase` — preserve full history.
+- **Regular merge only** (`merge_method=merge`, through `octo-merge.sh`), never squash or rebase —
+  preserve full history.
   If this rule ever changes, change it here AND in `github-conventions/references/conventions.md`.
 - Never merge a draft PR, a PR with conflicts, a PR with failing/pending required checks, a PR
   that touches an `approval_paths` pattern, a PR that changes `VISION.md` outside its Roadmap

@@ -300,15 +300,18 @@ rather than guessing.
 
 ## Merging pull requests
 
-Merge with a **regular merge commit** (`gh pr merge <pr#> --merge --delete-branch`) — never `--squash`
-or `--rebase`. A merge commit preserves the full per-commit history on the default branch (e.g. the
-per-task commits behind a feature). Merge only when the latest Octoperator review's intended verdict is
+Merge with a **regular merge commit** (`merge_method=merge`, over REST through
+`scripts/octo-merge.sh`, which then deletes the branch, best effort) — never squash or rebase. A
+merge commit preserves the full per-commit history on the default branch (e.g. the per-task commits
+behind a feature). Merge only when the latest Octoperator review's intended verdict is
 not `request_changes` (any blocker/major/minor finding first goes through `auto`'s bounded fix →
 re-review loop; leftover minors never block), that review covered the current head commit (pin it
-with `--match-head-commit`), and the PR is `OPEN`, not draft, with `mergeStateStatus` **`CLEAN`**
-(GitHub's "ready to merge" — no conflicts, all required checks green, not blocked by protection,
-not behind). Any other state (`DIRTY` / `BLOCKED` / `BEHIND` / `UNSTABLE` / `UNKNOWN`) → do not
-merge; report the reason. A PR that touches an `approval_paths` pattern, or changes `VISION.md`
+with the merge call's `sha`, which GitHub refuses with a 409 once the head has moved), the
+reviewed commit's checks finished green or there are none (`scripts/octo-ci-wait.sh`), and the PR
+is open, not draft, with merge state **`CLEAN`** (`scripts/octo-merge-state.sh`; GitHub's "ready
+to merge" — no conflicts, all required checks green, not blocked by protection, not behind). Any
+other state (`DIRTY` / `BLOCKED` / `BEHIND` / `UNSTABLE` / `HAS_HOOKS` / `DRAFT` / `UNKNOWN`) → do
+not merge; report the reason. A PR that touches an `approval_paths` pattern, or changes `VISION.md`
 outside its Roadmap body, is never merged by `auto` either (Approval gates above). Never
 force-merge. The PR's `Closes #N` auto-closes the issue; move its board item to the mapped `done`
 status afterward with
