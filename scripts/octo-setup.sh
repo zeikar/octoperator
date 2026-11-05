@@ -6,7 +6,9 @@
 # decide whether to enable board features. Makes no changes. The repo reads are REST
 # (`gh api repos/...`; with no --repo, gh fills `{owner}/{repo}` from the git remote), so they
 # work where GraphQL is refused (a Claude Code cloud session); the Projects v2 probe has no REST
-# API and fails there. REST names a default branch even for an empty repo.
+# API, so there it reports `projects_capable: false` with the note `Projects unavailable here:
+# ...` (the proxy's GraphQL 403), and the board is skipped. REST names a default branch even for
+# an empty repo.
 #
 # Usage:
 #   octo-setup.sh [--repo OWNER/NAME] [--owner PROJECT_OWNER]
@@ -66,6 +68,11 @@ if BOARDS=$(gh project list --owner "$POWNER" --limit 100 --format json \
      --jq '[.projects[] | {number, title, url}]' 2>"$ERRF"); then
   CAPABLE=true
   NOTE=""
+elif grep -Fq 'GitHub GraphQL is not available from Claude Code sessions' "$ERRF"; then
+  # The cloud proxy's refusal: no token or scope fixes it, so say that rather than gh's message.
+  CAPABLE=false
+  BOARDS="[]"
+  NOTE="Projects unavailable here: Projects v2 has no REST API and this session refuses GraphQL (a Claude Code cloud session). The board is skipped."
 else
   CAPABLE=false
   BOARDS="[]"

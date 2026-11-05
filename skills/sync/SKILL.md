@@ -47,6 +47,10 @@ changes.
          or .author_association == "COLLABORATOR") | "\(.user.login) \(.state) \(.submitted_at)"'
      ```
    - Board items (if configured): `gh project item-list <number> --owner <project_owner> --format json`.
+     If it fails with `GitHub GraphQL is not available from Claude Code sessions` (a Claude Code
+     cloud session's proxy; Projects v2 has no REST API), there is no board here: note "board
+     skipped: projects unavailable here" once, and skip steps 4 and 5. Any other failure is
+     handled as the notes below say.
    - Milestones: `gh api repos/<repo>/milestones`.
 
 3. **Build the report.** Group work by board status (`Todo`, `In Progress`, `In Review`, `Blocked`,
@@ -70,4 +74,5 @@ changes.
 - The report is the primary output; keep it scannable (grouped, with `#number` + short title + links).
 - Only reconcile status that follows unambiguously from PR/issue state; never guess `Blocked`.
 - If board access fails (missing `project` scope), still print the issue/PR/milestone report and note
-  that the board could not be read.
+  that the board could not be read. A board failure never stops sync, the cloud session's skip
+  (step 2) included.

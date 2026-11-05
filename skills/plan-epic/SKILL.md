@@ -68,6 +68,9 @@ exact commands. Octoperator is autonomous: execute the creation immediately unle
 
 8. **Add to the board.** If a project is configured, add the epic and every child with
    `bash ${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh --owner <project_owner> --project <number> --url <url> --status "<statuses.todo>"`.
+   A board failure skips that step and never stops the skill. On exit 3
+   (`skipped: projects unavailable here`, where GraphQL is refused, as in a Claude Code cloud
+   session) make no more board calls and warn once.
 
 9. **Report.** Print the epic and the child tree with all URLs, note any sub-issue fallbacks used
    (with their error), and surface any link that could not be established.

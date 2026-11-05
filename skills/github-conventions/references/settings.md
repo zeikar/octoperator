@@ -7,7 +7,8 @@ notes. Octoperator reads it at the start of every action to resolve targets and 
 The easiest way to create it is `/octoperator:setup`, which detects the repo, auto-detects Projects v2
 access, optionally links/creates a board, and writes this file. The Projects v2 board is **optional**:
 when `project_owner`/`project_number` are absent, Octoperator skips all board steps and everything else
-works unchanged.
+works unchanged. Where GraphQL is refused (a Claude Code cloud session), Projects v2 is unavailable
+whatever the settings say, so the board steps are skipped there too, with one warning.
 
 ## Schema
 

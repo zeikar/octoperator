@@ -186,7 +186,9 @@ gitgh() {
 
 # preflight : the tools this subcommand needs are installed (checked before setup creates any
 # repo), and gh is signed in with the repo scope; a missing delete_repo only warns.
-# Sets LOGIN and CAN_DELETE (yes, no, or unknown when the token has no classic scopes).
+# Sets LOGIN and CAN_DELETE (yes, no, or unknown when the token has no classic scopes: no
+# X-OAuth-Scopes header, or an empty one, as in a Claude Code cloud session, whose proxy injects
+# the credential).
 preflight() {
   command -v gh >/dev/null 2>&1 || die "gh is not installed (https://cli.github.com)"
   case "$SUB" in
@@ -200,12 +202,14 @@ preflight() {
   out="$(printf '%s\n' "$out" | tr -d '\r')"
   LOGIN="$(printf '%s\n' "$out" | sed -n 's/.*"login": *"\([^"]*\)".*/\1/p' | head -n 1)"
   [ -n "$LOGIN" ] || die "could not read the gh user from \`gh api user\`"
-  if ! printf '%s\n' "$out" | grep -qi '^x-oauth-scopes:'; then
-    warn "cannot read the token's scopes (not a classic token?); assuming it can create repos"
+  scopes="$(printf '%s\n' "$out" | sed -n 's/^[Xx]-[Oo][Aa]uth-[Ss]copes:[[:space:]]*//p' \
+    | head -n 1 | sed 's/[[:space:]]*$//')"
+  if [ -z "$scopes" ]; then
+    warn "cannot read the token's scopes (not a classic token, no scopes, or proxy-injected?); assuming it can create repos"
     CAN_DELETE=unknown
     return 0
   fi
-  scopes=", $(printf '%s\n' "$out" | sed -n 's/^[Xx]-[Oo][Aa]uth-[Ss]copes: *//p' | head -n 1),"
+  scopes=", $scopes,"
   case "$scopes" in
     *", repo,"*) ;;
     *) die "the gh token lacks the repo scope; run \`gh auth refresh -s repo\`" ;;

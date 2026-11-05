@@ -38,6 +38,10 @@ Follow the `github-conventions` skill for the settings schema
      and tell the user board features are off and how to enable them: user-owned Projects v2 require a
      **classic PAT** with the `repo` + `project` scopes (fine-grained PATs do not support user-owned
      projects); org-owned projects work with a fine-grained token's Organization → Projects permission.
+     When the `note` starts with `Projects unavailable here`, the session refuses GraphQL (a Claude
+     Code cloud session's proxy) and Projects v2 has no REST API, so no token fixes it: say board
+     features are off in this session instead of giving the PAT guidance, and write no `project_*`
+     keys. Everything else works there over REST.
 
 4. **Write settings.** Write `.claude/octoperator.local.md` (Write tool) using the schema from
    `references/settings.md`: always include `repo`, `branch_pattern`, and `statuses`; include

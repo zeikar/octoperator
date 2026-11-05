@@ -86,7 +86,9 @@
 # and the REST issue, label, sub-issue, and pull request helpers (octo-subissue.sh,
 # octo-labels.sh, octo-issue-find.sh, octo-ledger-read.sh, octo-pr-closes.sh): scripts/test/rest.sh,
 # and auto's REST merge state, CI wait, and merge (octo-merge-state.sh, octo-ci-wait.sh,
-# octo-merge.sh): scripts/test/merge-gate.sh.
+# octo-merge.sh): scripts/test/merge-gate.sh,
+# and the Projects v2 cloud skip and the bench scopes preflight (octo-project-status.sh,
+# octo-setup.sh, octo-doctor.sh, octo-bench.sh): scripts/test/cloud.sh.
 # The proposal fixture the genesis tests share is in scripts/test/genesis-fixture.sh.
 #
 # It deliberately never invokes a helper in a way that reaches the real gh / the network.
@@ -2029,14 +2031,14 @@ PORCELAIN_ALLOW='skills/github-conventions/references/gh-cli-cookbook.md|never t
 skills/github-conventions/references/gh-cli-cookbook.md|(`gh repo view`, `list`, `clone`, `create`, and `delete` too)|a mention: the REST rule itself
 skills/autopilot/references/milestone.md|`gh pr create failed`) may well pass then|a mention: genesis --next'"'"'s stop reason
 skills/autopilot/references/milestone.md|failure (`git fetch failed`, `gh repo view failed`|a mention: genesis --next'"'"'s stop reason
-scripts/octo-project-status.sh|gh project|Projects v2 has no REST API; its cloud-session fallback is #115
-scripts/octo-setup.sh|gh project list|Projects v2 (#115): the read-only board probe
-scripts/octo-doctor.sh|gh project|Projects v2 (#115): the board checks
-skills/github-conventions/references/gh-cli-cookbook.md|gh project|Projects v2 (#115): the board recipes
-skills/github-conventions/references/settings.md|gh project|Projects v2 (#115): the board bootstrap
-skills/github-conventions/SKILL.md|When a `gh project ...` call fails|Projects v2 (#115): the board-failure rule
-skills/setup/SKILL.md|gh project create|Projects v2 (#115): setup creates a board
-skills/sync/SKILL.md|gh project item-list|Projects v2 (#115): sync reads the board'
+scripts/octo-project-status.sh|gh project|Projects v2: GraphQL only; skipped in cloud sessions (#115). The board write
+scripts/octo-setup.sh|gh project list|Projects v2: GraphQL only; skipped in cloud sessions (#115). The read-only board probe
+scripts/octo-doctor.sh|gh project|Projects v2: GraphQL only; skipped in cloud sessions (#115). The board checks
+skills/github-conventions/references/gh-cli-cookbook.md|gh project|Projects v2: GraphQL only; skipped in cloud sessions (#115). The board recipes
+skills/github-conventions/references/settings.md|gh project|Projects v2: GraphQL only; skipped in cloud sessions (#115). The board bootstrap
+skills/github-conventions/SKILL.md|When a `gh project ...` call fails|Projects v2: GraphQL only; skipped in cloud sessions (#115). The board-failure rule
+skills/setup/SKILL.md|gh project create|Projects v2: GraphQL only; skipped in cloud sessions (#115). Setup creates a board
+skills/sync/SKILL.md|gh project item-list|Projects v2: GraphQL only; skipped in cloud sessions (#115). Sync reads the board'
 # porcelain_re : a gh issue, gh label, gh pr, gh repo, or gh project command, after any spaces and
 # global flags (`gh -R o/n issue`, `gh --repo=o/n label`), or gh api graphql, after any api flags
 # (`gh api -X POST graphql`), not inside a longer word.
