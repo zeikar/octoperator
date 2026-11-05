@@ -15,15 +15,17 @@
 #                            a crashed run's local branch that matches, is ahead, or has diverged)
 #   - octo-evals-guard.sh  : no guard workflow, both guard jobs passed, one missing (a
 #                            `[skip ci]` head), pending, skipped, or failed, a stale or unrecorded
-#                            base (held only when the PR changes evals/ or .gitattributes, or its
-#                            file list is cut short), another workflow's or PR's run, and a gh
-#                            error, against a REST-only stub `gh` that runs the helper's --jq
-#                            filters with jq
+#                            base (held only when the reviewed commit changes evals/ or
+#                            .gitattributes, or its file list may be cut short at 300 files,
+#                            judged by that commit's files, not the PR's current head's), another
+#                            workflow's or PR's run, and a gh error, against a REST-only stub `gh`
+#                            that runs the helper's --jq filters with jq
 #   - octo-approval-match.sh : pattern normalization, malformed patterns, matching (renames
 #                            included, case ignored, Unicode folding too, genesis's entries
 #                            holding the evals guard, .claude/ (`.Claude/` too), GENESIS.md,
 #                            every CLAUDE.md and CLAUDE.local.md, and the root .mcp.json, but
-#                            not evals/ or a milestone's files),
+#                            not evals/ or a milestone's files), the reviewed commit's files
+#                            (--sha, required) rather than the PR's current head's,
 #                            and the incomplete-file-list hold, against a REST-only stub `gh`
 #   - octo-genesis-check.sh : a valid proposal, a missing section or front-matter key, an
 #                            ungrounded proposal (and one with URLs or a misplaced or misspelled
@@ -187,6 +189,8 @@ expect 2 "octo-approval-match.sh --pr exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-approval-match.sh" --pattern a --repo o/n --pr
 expect 2 "octo-approval-match.sh with no --pattern exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-approval-match.sh" --repo o/n --pr 1
+expect 2 "octo-approval-match.sh --sha exits 2" \
+  bounded 10 bash "$SCRIPTS_DIR/octo-approval-match.sh" --pattern a --repo o/n --pr 1 --sha
 expect 2 "octo-bench.sh setup --run-id exits 2" \
   bounded 10 bash "$SCRIPTS_DIR/octo-bench.sh" setup vsort-numeric --dry-run --run-id
 
@@ -371,8 +375,10 @@ echo "• octo-evals-guard.sh (offline, stub gh)"
 # `gh api repos/...` (porcelain, `gh api graphql`) gets the cloud proxy's 403. It answers from
 # JSON files in $EG_DIR, through the helper's own --jq filter (jq -r): the PR → pr.json, git/ref →
 # the tip, contents → a file or, with $EG_NOGUARD, gh's 404, actions/runs → runs.json, a run's
-# jobs → jobs-<run>.json, the PR's files → files.json, annotations → ann-<id>.json. $EG_RC makes
-# the contents call fail with that code.
+# jobs → jobs-<run>.json, a compare of the tip with a commit → compare-<sha>.json (another base
+# gets a 404), the PR's own files (its current head's) → files.json, annotations →
+# ann-<id>.json. $EG_RC makes the contents call fail with that code. Each endpoint is logged to
+# $EG_DIR/log.
 egstub="$wtmp/eg-bin"
 EG_DIR="$wtmp/eg"
 mkdir -p "$egstub" "$EG_DIR"
@@ -392,8 +398,13 @@ while [ $# -gt 0 ]; do
   esac
 done
 case "$ep" in repos/*) ;; *) proxy_403 ;; esac
+echo "$ep" >>"$EG_DIR/log"
 case "$ep" in
   */git/ref/heads/main) f="$EG_DIR/ref.json" ;;
+  */compare/*...*)
+    b="${ep#*/compare/}"; b="${b%%...*}"; f="$EG_DIR/compare-${ep##*...}.json"
+    [ "$b" = "$(jq -r .object.sha "$EG_DIR/ref.json")" ] && [ -f "$f" ] \
+      || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; } ;;
   */contents/*)
     [ "${EG_RC:-0}" -eq 0 ] || { echo "gh: Server Error (HTTP 500)" >&2; exit "$EG_RC"; }
     [ -z "${EG_NOGUARD:-}" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
@@ -435,19 +446,28 @@ eg_jobs() {
   done
   printf '{"total_count":0,"jobs":[%s]}\n' "$body" >"$EG_DIR/jobs-$run.json"
 }
-# eg_files <path[:old path]>... : write the PR's changed files, and pr.json with their count
-# (or $EG_COUNT).
-eg_files() {
-  local sep="" body="" n=0 p
+# eg_list <path[:old path]>... : print those changed files as a JSON array.
+eg_list() {
+  local sep="" body="" p
   for p in "$@"; do
     case "$p" in
       *:*) body="$body$sep{\"filename\":\"${p%%:*}\",\"previous_filename\":\"${p#*:}\"}" ;;
       *) body="$body$sep{\"filename\":\"$p\"}" ;;
     esac
-    sep=","; n=$((n + 1))
+    sep=","
   done
-  printf '[%s]\n' "$body" >"$EG_DIR/files.json"
-  printf '{"base":{"ref":"main"},"changed_files":%s}\n' "${EG_COUNT:-$n}" >"$EG_DIR/pr.json"
+  printf '[%s]\n' "$body"
+}
+# eg_files <path[:old path]>... : the reviewed commit's changed files against the tip, which the
+# PR's current head has too (files.json, and pr.json with their count).
+eg_files() {
+  printf '{"files":%s}\n' "$(eg_list "$@")" >"$EG_DIR/compare-$HEAD_SHA_EG.json"
+  eg_head_files "$@"
+}
+# eg_head_files <path[:old path]>... : only the PR's current head's changed files.
+eg_head_files() {
+  eg_list "$@" >"$EG_DIR/files.json"
+  printf '{"base":{"ref":"main"},"changed_files":%s}\n' "$#" >"$EG_DIR/pr.json"
 }
 # eg_base <id> <sha> : the check run's evals-guard-base notice, beside an unrelated annotation.
 eg_base() {
@@ -522,10 +542,34 @@ eg_files .gitattributes
 eg
 expect 0 "a PR changing the root .gitattributes, judged against an older base: stale" \
   test "$eg_rc/$eg_out" = "1/evals guard stale: $EG_A ran against $OLD, main is at $TIP"
-EG_COUNT=3000 eg_files src/app.js
+# shellcheck disable=SC2046 # one file per word
+eg_files $(seq -f 'src/f%g.js' 299)
 eg
-expect 0 "a file list cut short (3000 files): the base is checked, stale" \
+expect 0 "299 changed files, none in evals/, judged against an older base: prints pass" \
+  test "$eg_rc/$eg_out" = "0/pass"
+# shellcheck disable=SC2046
+eg_files $(seq -f 'src/f%g.js' 300)
+eg
+expect 0 "a file list maybe cut short (300 files, the compare API's most): the base is checked, stale" \
   test "$eg_rc/$eg_out" = "1/evals guard stale: $EG_A ran against $OLD, main is at $TIP"
+# The PR's head moved after the review: its own file list is no longer the reviewed commit's.
+eg_files src/app.js
+eg_head_files evals/recall/check.sh
+rm -f "$EG_DIR/log"
+eg
+expect 0 "the reviewed commit changes no eval, the PR's head now does: the reviewed commit's files, pass" \
+  test "$eg_rc/$eg_out" = "0/pass"
+expect 0 "it compares the base branch's tip with the reviewed commit, never reading the PR's files" \
+  test "$(grep -c "^repos/o/n/compare/$TIP\.\.\.$HEAD_SHA_EG\$" "$EG_DIR/log")/$(grep -c /files "$EG_DIR/log")" = 1/0
+eg_files evals/recall/check.sh
+eg_head_files src/app.js
+eg
+expect 0 "the reviewed commit changes an eval, the PR's head now doesn't: the reviewed commit's files, stale" \
+  test "$eg_rc/$eg_out" = "1/evals guard stale: $EG_A ran against $OLD, main is at $TIP"
+rm -f "$EG_DIR/compare-$HEAD_SHA_EG.json"
+eg
+expect 0 "the reviewed commit's files can't be read: exits 3, prints nothing" \
+  test "$eg_rc/$eg_out" = "3/"
 eg_files evals/recall/check.sh
 rm -f "$EG_DIR/ann-10.json"
 eg
@@ -536,35 +580,62 @@ expect 0 "a gh error (not a 404) reading the workflow: exits 3, prints nothing" 
   test "$eg_rc/$eg_out" = "3/"
 
 echo "• octo-approval-match.sh (offline, stub gh)"
-# A stub `gh` first on PATH logs each call to $STUB_LOG and serves REST only, like a Claude Code
-# cloud session: anything but `gh api repos/...` gets the cloud proxy's 403. The PR's files
-# endpoint prints the file list in $STUB_FILES as the helper's jq filter would (one line per
-# file: its path, a tab, then a rename's old path); it does not run the filter itself. The PR
-# itself prints its `changed_files`: $STUB_COUNT, or the list's line count when that is unset.
-# Both exit $STUB_GH_RC when that is non-zero.
+# A stub `gh` first on PATH logs each call's endpoint to $STUB_LOG and serves REST only, like a
+# Claude Code cloud session: anything but `gh api repos/...` gets the cloud proxy's 403. The PR
+# (base branch $STUB_BASE, main unless set) and its base branch's tip ($STUB_TIP, at the
+# path-encoded $STUB_BASE_PATH) run the helper's jq filter. The compare of that tip with the
+# reviewed commit ($STUB_SHA) prints, as the helper's jq filter would, the file count
+# ($STUB_COUNT, or the list's line count when that is unset), then the file list in $STUB_FILES
+# (one line per file: its path, a tab, then a rename's old path); with $STUB_COMPARE set it runs
+# the filter on that JSON file instead. The PR's own files, its current head's, and the compare
+# with that head ($STUB_HEAD) serve the different list in $STUB_HEAD_FILES. Each exits
+# $STUB_GH_RC when that is non-zero.
 astub="$wtmp/approval-bin"
 mkdir -p "$astub"
 cat >"$astub/gh" <<'STUB'
 #!/usr/bin/env bash
-echo "gh $*" >>"$STUB_LOG"
 proxy_403() {
   echo 'gh: GitHub GraphQL is not available from Claude Code sessions; use the REST API (gh api repos/{owner}/{repo}/...). (HTTP 403)' >&2
   exit 1
 }
-[ "$1" = api ] || proxy_403
+[ "$1" = api ] || { echo "gh $1" >>"$STUB_LOG"; proxy_403; }
+shift; ep="" jq=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --jq) jq="$2"; shift 2 ;;
+    -*) echo "gh api $1" >>"$STUB_LOG"; echo "stub: unexpected flag $1" >&2; exit 9 ;;
+    *) ep="${ep:-$1}"; shift ;;
+  esac
+done
+echo "gh api $ep" >>"$STUB_LOG"
 [ "${STUB_GH_RC:-0}" -eq 0 ] || exit "$STUB_GH_RC"
-ep=""
-for a in "$@"; do case "$a" in repos/*) ep="$a" ;; esac; done
+# list <file> : the helper's compare output for a TSV file list: its count, then the list.
+list() { echo "${STUB_COUNT:-$(grep -c '' "$1")}"; cat "$1"; }
 case "$ep" in
-  repos/o/n/pulls/1/files) cat "$STUB_FILES" ;;
-  repos/o/n/pulls/1) echo "${STUB_COUNT:-$(grep -c '' "$STUB_FILES")}" ;;
+  repos/o/n/pulls/1/files) cat "$STUB_HEAD_FILES" ;;
+  repos/o/n/pulls/1)
+    jq -n --arg b "${STUB_BASE:-main}" --argjson n "$(grep -c '' "$STUB_HEAD_FILES")" \
+      '{base: {ref: $b}, changed_files: $n}' | jq -r "$jq" ;;
+  "repos/o/n/git/ref/heads/${STUB_BASE_PATH:-main}")
+    jq -n --arg s "$STUB_TIP" '{object: {sha: $s}}' | jq -r "$jq" ;;
+  "repos/o/n/compare/$STUB_TIP...$STUB_SHA")
+    if [ -n "${STUB_COMPARE:-}" ]; then jq -r "$jq" "$STUB_COMPARE"; else list "$STUB_FILES"; fi ;;
+  "repos/o/n/compare/$STUB_TIP...$STUB_HEAD") list "$STUB_HEAD_FILES" ;;
+  repos/*) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
   *) proxy_403 ;;
 esac
 STUB
 chmod +x "$astub/gh"
 STUB_LOG="$wtmp/approval-log"
 STUB_FILES="$wtmp/approval-files"
-export STUB_LOG STUB_FILES
+STUB_HEAD_FILES="$wtmp/approval-head-files"
+STUB_TIP=4444444444444444444444444444444444444444
+STUB_SHA=5555555555555555555555555555555555555555
+STUB_HEAD=6666666666666666666666666666666666666666
+export STUB_LOG STUB_FILES STUB_HEAD_FILES STUB_TIP STUB_SHA STUB_HEAD
+# The PR's head has moved past the reviewed commit, to one that touches every protected path below.
+printf '%s\t\n' .github/workflows/x.yml infra/a.tf .claude/x GENESIS.md CLAUDE.md .mcp.json \
+  secrets/k docs/x Infrastructures/x >"$STUB_HEAD_FILES"
 # norm <pattern> : the helper's normalized form of one pattern.
 norm() { bounded 10 bash "$SCRIPTS_DIR/octo-approval-match.sh" --pattern "$1" --normalize; }
 for case in '/infra/=infra/**' 'infra/=infra/**' 'infra=**/infra' '*.tf=**/*.tf' \
@@ -576,15 +647,26 @@ for bad in '' / 'a?' 'a[b]' '{a,b}' '!a' 'a\b' 'a**' '**b/c' 'a//b' '../x'; do
   rm -f "$STUB_LOG"
   expect 2 "malformed '$bad' exits 2" \
     bounded 10 bash "$SCRIPTS_DIR/octo-approval-match.sh" --pattern ok --pattern "$bad" \
-      --repo o/n --pr 1
+      --repo o/n --pr 1 --sha "$STUB_SHA"
   expect 0 "malformed '$bad' makes no gh call" test ! -e "$STUB_LOG"
 done
-# approval <pattern...> : run the helper against the stub's $STUB_FILES; sets am_out / am_rc.
+# The reviewed commit is required: without --sha the helper can't know which files merge.
+for args in "" "--sha abc123" "--sha ${STUB_SHA}5" "--sha ${STUB_SHA//5/G}"; do
+  rm -f "$STUB_LOG"
+  # shellcheck disable=SC2086 # each case is several words on purpose
+  expect 2 "--repo o/n --pr 1 ${args:-with no --sha}: exits 2" \
+    bounded 10 env PATH="$astub:$PATH" bash "$SCRIPTS_DIR/octo-approval-match.sh" --pattern ok \
+      --repo o/n --pr 1 $args
+  expect 0 "--repo o/n --pr 1 ${args:-with no --sha}: no gh call" test ! -e "$STUB_LOG"
+done
+expect 0 "--normalize needs no --sha" test "$(norm infra/)" = 'infra/**'
+# approval <pattern...> : run the helper on the reviewed commit ($AM_SHA, else $STUB_SHA) against
+# the stub; sets am_out / am_rc.
 approval() {
   local args=() p
   for p in "$@"; do args+=(--pattern "$p"); done
   am_out="$(PATH="$astub:$PATH" bounded 10 bash "$SCRIPTS_DIR/octo-approval-match.sh" \
-    "${args[@]}" --repo o/n --pr 1 2>/dev/null)"
+    "${args[@]}" --repo o/n --pr 1 --sha "${AM_SHA:-$STUB_SHA}" 2>/dev/null)"
   am_rc=$?
 }
 tab="$(printf '\t')"
@@ -662,12 +744,54 @@ expect 0 "rename: the old path alone matches" \
   test "$am_rc" -eq 1 -a "$am_out" = ".github/workflows/ci.yml$tab.github/workflows/"
 rm -f "$STUB_LOG"
 STUB_COUNT=2 approval 'nothing'
-expect 0 "fewer files listed than changed_files: exits 3" test "$am_rc" -eq 3
-expect 0 "it lists the files, then reads changed_files, over REST" test "$(cat "$STUB_LOG")" = \
-  "gh api --paginate repos/o/n/pulls/1/files --jq .[] | [.filename, (.previous_filename // \"\")]
-        | if any(.[]; test(\"[\t\n\r]\")) then error(\"tab or newline in a changed path\")
-          else join(\"\t\") end
-gh api repos/o/n/pulls/1 --jq .changed_files"
+expect 0 "fewer files listed than the compare counts: exits 3" test "$am_rc" -eq 3
+expect 0 "it reads the PR's base branch, its tip, then compares the tip with the reviewed commit, over REST" \
+  test "$(cat "$STUB_LOG")" = "gh api repos/o/n/pulls/1
+gh api repos/o/n/git/ref/heads/main
+gh api repos/o/n/compare/$STUB_TIP...$STUB_SHA"
+# The PR's head moved after the review: the reviewed commit's files decide, never the head's.
+printf '%s\t\n' README.md src/app.js >"$STUB_FILES"
+approval '.github/workflows/' '*.tf' '.claude/' '/GENESIS.md' 'CLAUDE.md' '/.mcp.json'
+expect 0 "the PR's head now touches protected paths, the reviewed commit doesn't: no match" \
+  test "$am_rc" -eq 0 -a -z "$am_out"
+expect 0 "the PR's own file list is never read" test "$(grep -c /files "$STUB_LOG")" -eq 0
+AM_SHA="$STUB_HEAD" approval '.github/workflows/'
+expect 0 "the same patterns on the head's commit match its file" \
+  test "$am_rc" -eq 1 -a "$am_out" = ".github/workflows/x.yml$tab.github/workflows/"
+printf '%s\t\n' .github/workflows/ci.yml >"$STUB_FILES"
+printf '%s\t\n' README.md >"$STUB_HEAD_FILES"
+approval '.github/workflows/'
+expect 0 "the reviewed commit touches a protected path, the PR's head no longer does: a match" \
+  test "$am_rc" -eq 1 -a "$am_out" = ".github/workflows/ci.yml$tab.github/workflows/"
+# The real jq filter, on compare JSON: the count, a rename's old path, and a missing list.
+STUB_COMPARE="$wtmp/approval-compare.json"
+printf '{"files":[{"filename":"docs/ci.yml","previous_filename":".github/workflows/ci.yml"},{"filename":"README.md"}]}\n' \
+  >"$STUB_COMPARE"
+STUB_COMPARE="$STUB_COMPARE" approval '.github/workflows/'
+expect 0 "compare JSON: a rename's old path matches" \
+  test "$am_rc" -eq 1 -a "$am_out" = ".github/workflows/ci.yml$tab.github/workflows/"
+STUB_COMPARE="$STUB_COMPARE" approval 'nothing'
+expect 0 "compare JSON: no match, exits 0" test "$am_rc" -eq 0 -a -z "$am_out"
+printf '{"files":[]}\n' >"$STUB_COMPARE"
+STUB_COMPARE="$STUB_COMPARE" approval '**'
+expect 0 "compare JSON: no changed files, no match" test "$am_rc" -eq 0 -a -z "$am_out"
+printf '{"status":"ahead"}\n' >"$STUB_COMPARE"
+STUB_COMPARE="$STUB_COMPARE" approval 'nothing'
+expect 0 "compare JSON with no files list: exits 3" test "$am_rc" -eq 3
+printf '{"files":[{"filename":"a\\tb"}]}\n' >"$STUB_COMPARE"
+STUB_COMPARE="$STUB_COMPARE" approval 'nothing'
+expect 0 "compare JSON: a tab in a path fails the filter, exits 3" test "$am_rc" -eq 3
+seq -f 'src/f%g.js' 300 | jq -R '{filename: .}' | jq -s '{files: .}' >"$STUB_COMPARE"
+STUB_COMPARE="$STUB_COMPARE" approval 'nothing'
+expect 0 "compare JSON: 300 files, maybe cut short: exits 3" test "$am_rc" -eq 3
+seq -f 'src/f%g.js' 299 | jq -R '{filename: .}' | jq -s '{files: .}' >"$STUB_COMPARE"
+STUB_COMPARE="$STUB_COMPARE" approval 'src/f299.js'
+expect 0 "compare JSON: 299 files are all read" \
+  test "$am_rc" -eq 1 -a "$am_out" = "src/f299.js${tab}src/f299.js"
+rm -f "$STUB_LOG"
+STUB_BASE='release/a#b' STUB_BASE_PATH='release/a%23b' approval '.github/workflows/'
+expect 0 "a base branch with a slash and a #: its tip is read at the encoded path" \
+  test "$am_rc/$(sed -n 2p "$STUB_LOG")" = "1/gh api repos/o/n/git/ref/heads/release/a%23b"
 # A tab or newline inside a path would split it into pieces the pattern misses. Real gh fails in
 # the jq filter; these cases cover the helper's own line checks behind it.
 printf '.github/workflows/x\t.yml\t\n' >"$STUB_FILES"
@@ -679,8 +803,8 @@ expect 0 "newline in a changed path: exits 3" test "$am_rc" -eq 3
 printf 'a\tb\nc\t\n' >"$STUB_FILES"
 STUB_COUNT=1 approval 'nothing'
 expect 0 "tab and newline in one path: exits 3" test "$am_rc" -eq 3
-STUB_COUNT=3000 approval 'nothing'
-expect 0 "3000 changed files (the API limit): exits 3" test "$am_rc" -eq 3
+STUB_COUNT=300 approval 'nothing'
+expect 0 "300 changed files (the compare API's most): exits 3" test "$am_rc" -eq 3
 STUB_GH_RC=2 approval 'nothing'
 expect 0 "gh exit 2: exits 3, not the malformed-pattern 2" test "$am_rc" -eq 3
 

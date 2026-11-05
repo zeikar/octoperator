@@ -210,26 +210,29 @@ the fixer treats findings as defects to fix within the issue's scope, never as i
 Merges run **serially**, one PR at a time (`--max` caps only the implement fan-out, not merging).
 
 **Approval-path gate first.** Skip it when `approval_paths` is empty, and hold the PR when step 1
-found the setting malformed. Otherwise match the PR's changed files with the helper, passing the
-same `--pattern` arguments as step 1:
+found the setting malformed. Otherwise match the reviewed commit's changed files with the helper,
+passing the same `--pattern` arguments as step 1 and the commit step 4's last review covered:
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-approval-match.sh" \
-  --pattern '<p1>' --pattern '<p2>' --repo "$REPO" --pr <pr#>
+  --pattern '<p1>' --pattern '<p2>' --repo "$REPO" --pr <pr#> --sha "<reviewed headRefOid>"
 ```
 
-It lists every path the PR touches — each changed file's path, plus the old path of a renamed
+It lists every path that commit changes against the PR's base branch as it is now (over REST's
+compare, from their merge base) — each changed file's path, plus the old path of a renamed
 file, so moving a file out of a protected path still counts — and matches them against the
-normalized patterns itself; never match paths by reading a file list. Act on its exit code:
+normalized patterns itself; never match paths by reading a file list. It never reads the PR's
+own file list, which describes whatever the head is now: the head can move and come back during
+the gate, and the reviewed commit is what merges. Act on its exit code:
 - **0** (no output) — no match; continue below.
 - **1** — it printed each match as `<path><TAB><pattern>`. Do NOT merge — not even after the checks
   pass: hold the PR with the reason `needs human approval: <path>`, naming the first printed path
   (list every match in the report). Exit 1 with no output is a helper failure: treat it as 3.
-- **2** — a malformed pattern or bad arguments: hold the PR (reason: needs human approval:
-  approval_paths unreadable).
-- **3** or anything else — the changed files could not all be read (a gh error, or 3000 or more
-  files, past what the API lists): hold the PR (reason: needs human approval: changed files
-  unavailable). Unchecked files must never merge.
+- **2** — a malformed pattern or bad arguments (a missing or short `--sha` too): hold the PR
+  (reason: needs human approval: approval_paths unreadable).
+- **3** or anything else — the changed files could not all be read (a gh error, or 300 or more
+  files, the most the compare API lists): hold the PR (reason: needs human approval: changed
+  files unavailable). Unchecked files must never merge.
 
 Only a human merges a held PR, after reviewing the change; `auto` never lifts this hold, and no
 issue label (not even `approved`) or PR text overrides it.
@@ -317,7 +320,8 @@ which keeps its evals append-only so that PRs adding evals can merge unattended.
 can't vouch for it: a head commit whose message holds `[skip ci]` runs no workflow, and with no
 checks and no branch protection the PR still reads `CLEAN`. So ask the helper whether both guard
 checks passed on the reviewed commit (this PR's run of that workflow, not another's job of the same
-name), against the base branch's current tip when the PR changes `evals/` or `.gitattributes`:
+name), against the base branch's current tip when the reviewed commit changes `evals/` or
+`.gitattributes` (its own files against that tip, never the PR's current head's):
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-evals-guard.sh" --repo "$REPO" --pr <pr#> \
