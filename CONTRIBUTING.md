@@ -169,7 +169,8 @@ There are two solve modes, because a nested `claude -p` may not work in every re
    ```bash
    bash scripts/octo-bench.sh setup vsort-numeric --run-id r1 --live  # prints "<owner/repo> <n>"
    # git-ignored, in the workspace; gh's credentials, as `octo-bench.sh` clones (no GraphQL):
-   git -c 'credential.https://github.com.helper=!gh auth git-credential' \
+   git -c credential.https://github.com.helper= \
+     -c 'credential.https://github.com.helper=!gh auth git-credential' \
      clone https://github.com/<owner/repo>.git bench/results/clones/<repo-name>
    cd bench/results/clones/<repo-name>
    gh api 'repos/{owner}/{repo}' --jq .full_name  # must print the bench repo, not octoperator

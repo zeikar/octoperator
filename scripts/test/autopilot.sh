@@ -587,13 +587,20 @@ HW=5 AP=yes decides "a newer run entry without it: none" "0 (since the last all-
 ledger "$O|$(e reset 0 "$(m 5 5)" | jq -c --arg t "$T7" '. + {planning_failed: {tip: $t, reason: "x"}}')"
 state --metric 5/5
 HW=5 AP=yes decides "on a reset entry it is not read" "0 (since the last reset)" none 0/3 build
+# A tip of 40 hex digits and a newline, or 39 and a newline (40 characters), is not a tip.
 for bad in '"milestone invalid"' '{"tip": "abc", "reason": "x"}' "{\"tip\": \"$T7\", \"reason\": 3}" \
-    "{\"tip\": \"$T7\"}"; do
+    "{\"tip\": \"$T7\"}" "{\"tip\": \"$T7\\n\", \"reason\": \"x\"}" \
+    "{\"tip\": \"${T7:1}\\n\", \"reason\": \"x\"}"; do
   ledger "$O|$(e run 0 "$(m 5 5)" | jq -c --argjson p "$bad" '. + {planning_failed: $p}')"
   state --metric 5/5
   HW=5 AP=yes decides "a malformed planning_failed ($bad): none" \
     "0 (since the last all-pass entry)" none 0/3 build
 done
+# Another author's planning_failed is never read, so its tip cannot split the helper's records.
+ledger "$O|$(e run 0 "$(m 4 6)")" "NONE|$(pf "$T7"$'\n' $'OWNER\treset')"
+state
+HW=4 decides "another author's planning_failed, a tip with a newline: skipped, nothing else" \
+  "1 (all)" "1 (NONE)" 1/3 build
 long="$(printf 'x%.0s' $(seq 1 90))"
 ledger "$O|$(pf "$T7" $'git commit\nfailed')"
 state --metric 5/5

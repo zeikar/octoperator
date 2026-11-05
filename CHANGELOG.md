@@ -466,11 +466,14 @@ All notable changes to Octoperator are documented in this file. The format is ba
   `gh api 'repos/{owner}/{repo}' --jq '.full_name, .default_branch'` or
   `gh api repos/OWNER/NAME --jq .default_branch`. `smoke.sh`'s GraphQL check now covers every
   `scripts/octo-*.sh` and `bench/*.sh` too, besides the skills and agents, skipping a script's
-  comment lines. It fails on `gh api graphql`, `gh repo`, and `gh project` as well as `gh issue`,
-  `gh label`, and `gh pr`. `gh run` and `gh workflow` are REST and pass. genesis
-  (`skills/genesis/` and `octo-genesis-plan.sh`, which prints `--approve`'s local steps) is out of
-  scope, as it runs only locally. Its allowlist gives each entry a reason: four lines that only
-  mention a command, and the Projects v2 commands (#115). The autopilot suite's stub `gh`, and
+  comment lines and joining a line that ends in `\` with the next. It fails on `gh api graphql`,
+  `gh repo`, and `gh project` as well as `gh issue`, `gh label`, and `gh pr`. `gh run` and
+  `gh workflow` are REST and pass. genesis (`skills/genesis/` and `octo-genesis-plan.sh`, which
+  prints `--approve`'s local steps) is out of scope, as `--approve` runs only locally; genesis
+  `--next` (the `skills/genesis/references/next.md` calls), which autopilot runs, is the tracked
+  gap #127. Its allowlist gives each entry a reason: four lines that only mention a command, and
+  the Projects v2 commands (#115). An entry allows only its own text, so another command on the
+  same line still fails. The autopilot suite's stub `gh`, and
   `smoke.sh`'s setup, genesis-epic, and bench stubs, now serve REST only and refuse GraphQL and
   porcelain with the proxy's 403. The bench stub's `git` intercepts github.com clones and pushes.
   New tests cover an empty repo, a deleted fork's PR, the ledger and PR lists across pages, a PR

@@ -2018,11 +2018,14 @@ echo "• no script, skill, or agent outside genesis uses GraphQL"
 # and `gh workflow` are REST, so they pass.
 # Scope: every scripts/octo-*.sh, bench/*.sh, skill, and agent file, except genesis's:
 # skills/genesis/ and octo-genesis-plan.sh (which prints genesis --approve's own steps). genesis
-# --approve creates the repo, so it runs only locally, where GraphQL works. A script's comment
-# line (`#` its first non-blank character) only mentions a command, so it is not checked.
-# PORCELAIN_ALLOW lists the lines allowed, one "<path>|<text on the line>|<why>" each. An entry
-# that no longer matches any line fails the check.
-PORCELAIN_ALLOW='skills/github-conventions/references/gh-cli-cookbook.md|never the porcelain|a mention: the REST rule against `gh label create`
+# --approve creates the repo, so it runs only locally, where GraphQL works. genesis --next (the
+# skills/genesis/references/next.md calls), which autopilot runs, does reach a cloud session: that
+# gap is tracked in #127. A script's comment line (`#` its first non-blank character) only
+# mentions a command, so it is not checked. A line ending in `\` is joined with the next.
+# PORCELAIN_ALLOW lists the lines allowed, one "<path>|<text on the line>|<why>" each. A line
+# passes when, with the text of every entry it matches taken out, nothing on it is a hit. An
+# entry that no longer matches any line fails the check.
+PORCELAIN_ALLOW='skills/github-conventions/references/gh-cli-cookbook.md|never the porcelain `gh label create --force`|a mention: the REST rule against `gh label create`
 skills/github-conventions/references/gh-cli-cookbook.md|(`gh repo view`, `list`, `clone`, `create`, and `delete` too)|a mention: the REST rule itself
 skills/autopilot/references/milestone.md|`gh pr create failed`) may well pass then|a mention: genesis --next'"'"'s stop reason
 skills/autopilot/references/milestone.md|failure (`git fetch failed`, `gh repo view failed`|a mention: genesis --next'"'"'s stop reason
@@ -2034,14 +2037,28 @@ skills/github-conventions/references/settings.md|gh project|Projects v2 (#115): 
 skills/github-conventions/SKILL.md|When a `gh project ...` call fails|Projects v2 (#115): the board-failure rule
 skills/setup/SKILL.md|gh project create|Projects v2 (#115): setup creates a board
 skills/sync/SKILL.md|gh project item-list|Projects v2 (#115): sync reads the board'
-# porcelain_hits <file...> : "<path>:<line>:<text>" for each line naming gh issue, gh label, gh pr,
-# gh repo, or gh project, after any spaces and global flags (`gh -R o/n issue`, `gh --repo=o/n
-# label`), or gh api graphql, after any api flags (`gh api -X POST graphql`); in a .sh file, not
-# on a comment line.
+# porcelain_re : a gh issue, gh label, gh pr, gh repo, or gh project command, after any spaces and
+# global flags (`gh -R o/n issue`, `gh --repo=o/n label`), or gh api graphql, after any api flags
+# (`gh api -X POST graphql`), not inside a longer word.
+porcelain_flags='([[:space:]]+-[^[:space:]]*([[:space:]]+[^-[:space:]][^[:space:]]*)?)*'
+porcelain_cmd="gh${porcelain_flags}[[:space:]]+((issue|label|pr|repo|project)|api${porcelain_flags}[[:space:]]+graphql)([^[:alnum:]_-]|\$)"
+porcelain_re="(^|[^[:alnum:]_-])$porcelain_cmd"
+# porcelain_hits <file...> : "<path>:<line>:<text>" for each line matching porcelain_re, a line
+# ending in `\` joined with the next (numbered by its first line); in a .sh file, not on a comment
+# line, whose `\` continues nothing.
 porcelain_hits() {
-  local flags='([[:space:]]+-[^[:space:]]*([[:space:]]+[^-[:space:]][^[:space:]]*)?)*'
-  grep -nHE "(^|[^[:alnum:]_-])gh${flags}[[:space:]]+((issue|label|pr|repo|project)|api${flags}[[:space:]]+graphql)([^[:alnum:]_-]|$)" \
-    "$@" 2>/dev/null | grep -vE '^[^:]*\.sh:[0-9]+:[[:space:]]*#'
+  awk 'function flush() { if (open) print file ":" start ":" buf; open = 0 }
+    FNR == 1 { flush() }
+    {
+      if (!open) { open = 1; file = FILENAME; start = FNR; buf = "" }
+      line = $0
+      comment = (FILENAME ~ /\.sh$/ && start == FNR && line ~ /^[ \t]*#/)
+      if (!comment && sub(/\\$/, "", line)) { buf = buf line; next }
+      buf = buf line; flush()
+    }
+    END { flush() }' "$@" 2>/dev/null \
+    | grep -E "^[^:]*:[0-9]+:(.*[^[:alnum:]_-])?$porcelain_cmd" \
+    | grep -vE '^[^:]*\.sh:[0-9]+:[[:space:]]*#'
 }
 printf '%s\n' 'run `gh issue view 5` here' 'gh label create x' 'the gh issues page' \
   'gh -R o/n issue list' 'gh --repo o/n label create x' 'gh  issue view 5' \
@@ -2051,15 +2068,16 @@ printf '%s\n' 'run `gh issue view 5` here' 'gh label create x' 'the gh issues pa
   'gh project item-list 1 --owner o' 'gh api graphql -f query=x' 'gh api -X POST graphql' \
   'gh api repos/{owner}/{repo} --jq .default_branch' 'the gh repository and gh projects' \
   'gh run view 5 --json conclusion' 'gh workflow run evals.yml' 'gh api repos/o/n/graphql' \
-  'gh api graphqlx' >"$tmp/porcelain-sample.md"
-expect 0 "the check finds gh issue, label, pr, repo, project, and api graphql, after flags or extra spaces" \
+  'gh api graphqlx' 'gh \' '  issue view 5' 'gh api user \' '  --jq .login' \
+  >"$tmp/porcelain-sample.md"
+expect 0 "the check finds gh issue, label, pr, repo, project, and api graphql, after flags, extra spaces, or a \\" \
   test "$(porcelain_hits "$tmp/porcelain-sample.md" | cut -d: -f2 | tr '\n' ' ')" \
-    = "1 2 4 5 6 7 10 11 14 15 16 17 18 "
+    = "1 2 4 5 6 7 10 11 14 15 16 17 18 25 "
 printf '%s\n' '# gh repo view is GraphQL: a comment' '  # gh pr list, an indented one' \
   'echo "gh pr list"  # a command in a string' 'x=1 # gh issue view 5, after code' \
-  'gh api user # fine' >"$tmp/porcelain-sample.sh"
-expect 0 "in a script, a comment line only mentions a command; any other line counts" \
-  test "$(porcelain_hits "$tmp/porcelain-sample.sh" | cut -d: -f2 | tr '\n' ' ')" = "3 4 "
+  'gh api user # fine' '# a comment ending in \' 'gh pr list' >"$tmp/porcelain-sample.sh"
+expect 0 "in a script, a comment line only mentions a command (and continues nothing); any other line counts" \
+  test "$(porcelain_hits "$tmp/porcelain-sample.sh" | cut -d: -f2 | tr '\n' ' ')" = "3 4 7 "
 ROOT="$(cd "$SCRIPTS_DIR/.." && pwd)"
 scope=() code=()
 for f in "$ROOT"/skills/*/SKILL.md "$ROOT"/skills/*/references/*.md "$ROOT"/agents/*.md; do
@@ -2072,16 +2090,32 @@ expect 0 "the check covers the skills and agents (${#scope[@]} files)" test "${#
 expect 0 "the check covers the scripts (${#code[@]} files), octo-bench.sh and bench/validate.sh too" \
   test "${#code[@]}" -ge 25 -a -n "$(printf '%s\n' "${code[@]}" | grep -Fx scripts/octo-bench.sh)" \
     -a -n "$(printf '%s\n' "${code[@]}" | grep -Fx bench/validate.sh)"
+# porcelain_allowed <allowlist> <hit> : the hit's line is allowed, each entry it matches appended to
+# $used. Every matched entry's text is taken out first, so another command on the line still counts.
+porcelain_allowed() {
+  local file=${2%%:*} text=${2#*:*:} rest matched=0 af at
+  rest=$text
+  while IFS='|' read -r af at _; do
+    if [ "$file" = "$af" ] && [[ "$text" == *"$at"* ]]; then
+      matched=1; used="$used$af|$at"$'\n'; rest=${rest//"$at"/}
+    fi
+  done <<<"$1"
+  [ "$matched" -eq 1 ] && ! grep -qE -- "$porcelain_re" <<<"$rest"
+}
+used=""
+expect 0 "an allowlist entry allows its own text on a line" \
+  porcelain_allowed 'a.md|gh project list|why' 'a.md:1:run gh project list here'
+expect 1 "a second command on an allowed line still counts" \
+  porcelain_allowed 'a.md|gh project list|why' 'a.md:1:gh project list; gh pr view 5'
+expect 0 "two entries can share a line" \
+  porcelain_allowed $'a.md|gh project list|why\na.md|gh pr view 5|why' \
+    'a.md:1:gh project list; gh pr view 5'
+expect 1 "an entry for another file allows nothing" \
+  porcelain_allowed 'b.md|gh project list|why' 'a.md:1:gh project list'
 left="" used=""
 while IFS= read -r hit; do
   [ -n "$hit" ] || continue
-  file=${hit%%:*} text=${hit#*:*:} allowed=0
-  while IFS='|' read -r af at _; do
-    if [ "$file" = "$af" ] && [[ "$text" == *"$at"* ]]; then
-      allowed=1; used="$used$af|$at"$'\n'
-    fi
-  done <<<"$PORCELAIN_ALLOW"
-  [ "$allowed" -eq 1 ] || left="$left  $hit"$'\n'
+  porcelain_allowed "$PORCELAIN_ALLOW" "$hit" || left="$left  $hit"$'\n'
 done <<<"$(cd "$ROOT" && porcelain_hits "${scope[@]}" "${code[@]}")"
 if [ -z "$left" ]; then ok "no GraphQL or GraphQL-backed porcelain outside the allowlist"; else
   no "no GraphQL or GraphQL-backed porcelain outside the allowlist; found:"; printf '%s' "$left"; fi

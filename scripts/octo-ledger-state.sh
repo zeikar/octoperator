@@ -56,7 +56,7 @@ done
 [ -n "$REPO" ] && [ -n "$RUNS" ] || {
   echo "Usage: octo-ledger-state.sh --repo OWNER/NAME --runs N [--issue LEDGER]" \
     "[--metric P/T|none] [--resume]" >&2; exit 2; }
-# At most 9 digits and no leading zero: the values go into the jq filter as number literals.
+# At most 9 digits and no leading zero: the values go to awk as numbers, which 9 digits keep exact.
 int='(0|[1-9][0-9]{0,8})'
 [[ "$RUNS" =~ ^$int$ ]] && [ "$RUNS" -ge 1 ] || { echo "--runs must be a positive integer" >&2; exit 2; }
 [ -z "$ISSUE" ] || [[ "$ISSUE" =~ ^$int$ ]] || { echo "--issue must be a number" >&2; exit 2; }
@@ -82,8 +82,10 @@ fi
 # line per comment whose body holds ```json:
 #   <author_association> <kind, or - when it is no valid entry> <passed, or - when the metric is
 #   not numeric> <all-pass: 1 or 0> <merged >= 1: 1 or 0> <planning_failed: <tip> <reason> | none>
-# planning_failed is read for a run entry only. Its reason holds no control character (so no
-# tab), is at most 80 characters, and comes last.
+# planning_failed is read for a run entry by an allowed author only, and its tip is checked
+# without a regex, whose `$` jq's engine also matches before a final newline. Its reason holds no
+# control character and is at most 80 characters. Every field has its tabs and newlines turned
+# into spaces, so a line always splits into these six fields, under jq and gojq alike.
 # shellcheck disable=SC2016  # backticks and \(...) belong to the jq filter
 filter='
 def keys9: ["time", "mode", "cycles_used", "merged", "held", "proposals_filed", "metric",
@@ -101,19 +103,24 @@ def num: if type == "object" then
         and (.total >= 1) and (.passed <= .total)
     else false end)
   else false end;
-def failed($pf): if ($pf | type) == "object" and (($pf.tip | type) == "string")
-    and ($pf.tip | test("^[0-9a-f]{40}$")) and (($pf.reason | type) == "string") then
+def hex40: if type == "string" then
+    length == 40 and all(explode[]; (. >= 48 and . <= 57) or (. >= 97 and . <= 102))
+  else false end;
+def failed($pf): if ($pf | type) == "object" and ($pf.tip | hex40)
+    and (($pf.reason | type) == "string") then
     "\($pf.tip) \($pf.reason | gsub("[[:cntrl:]]"; " ") | .[0:80])"
   else "none" end;
 .[] | select((.body // "") | contains("```json"))
-| "\(.author_association)\t" + ([entry][0]
-  | if . == null then "-\t-\t0\t0\tnone"
-    else (if .kind == "run" then .planning_failed else null end) as $pf
-      | "\(.kind)\t\(if .metric | num then .metric.passed else "-" end)"
-        + "\t\(if (.metric | num) and (.metric.passed == .metric.total) then 1 else 0 end)"
-        + "\t\(if ((.merged | type) == "number") and (.merged >= 1) then 1 else 0 end)"
-        + "\t\(failed($pf))"
-    end)'
+| (.author_association | IN("OWNER", "MEMBER", "COLLABORATOR")) as $allowed
+| [.author_association] + ([entry][0]
+  | if . == null then ["-", "-", 0, 0, "none"]
+    else (if $allowed and .kind == "run" then .planning_failed else null end) as $pf
+      | [.kind, (if .metric | num then .metric.passed else "-" end),
+         (if (.metric | num) and (.metric.passed == .metric.total) then 1 else 0 end),
+         (if ((.merged | type) == "number") and (.merged >= 1) then 1 else 0 end),
+         failed($pf)]
+    end)
+| map(tostring | gsub("[\t\n]"; " ")) | join("\t")'
 
 err="$(mktemp)" && [ -n "$err" ] || { echo "mktemp failed" >&2; exit 3; }
 trap 'rm -f "$err"' EXIT
