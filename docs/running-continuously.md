@@ -2,9 +2,9 @@
 
 Autopilot is bounded, so running it continuously means re-invoking it on a schedule. Use Claude
 Code's own scheduling, on your machine. A local session uses your `gh` login, so the ledger entries
-come from you and convergence works, with no PAT or secret to store. `/schedule` cloud routines are
-not supported: cloud sessions block GitHub's GraphQL API, which `gh` relies on
-([#79](https://github.com/zeikar/octoperator/issues/79)).
+come from you and convergence works, with no PAT or secret to store. A Claude Code cloud session,
+such as a `/schedule` cloud routine, runs the lifecycle over REST, with the limits in
+[Claude Code cloud sessions](#claude-code-cloud-sessions).
 
 Every run ends with one status line: `autopilot: merged N`, `autopilot: converged → observe`,
 `autopilot: nothing to do`, `autopilot: all evals pass → planning next milestone`, or
@@ -161,3 +161,36 @@ PATH=/usr/local/bin:/usr/bin:/bin:/home/you/.local/bin
 If the log shows GitHub auth errors, run `gh auth status` first. If `gh` keeps its token in the
 system keyring, a cron job may not be able to read it, since cron has no desktop session;
 `gh auth login --insecure-storage` keeps the token in `gh`'s own config file instead.
+
+## Claude Code cloud sessions
+
+A Claude Code cloud session reaches GitHub through a proxy. A dogfood run on zeikar/elsewhere on
+2026-11-04 ([#79](https://github.com/zeikar/octoperator/issues/79)) found it differs from a local
+`gh` in these ways:
+
+- **No GraphQL.** The proxy refuses it by policy, with `HTTP 403: GitHub GraphQL is not available
+  from Claude Code sessions; use the REST API`, so most `gh` porcelain (`gh issue`, `gh pr`,
+  `gh repo`) fails there. So Octoperator's lifecycle runs over REST (`gh api repos/...`),
+  locally too; only `genesis` still uses GraphQL (see below).
+- **No Projects board.** Projects v2 has no REST API. `/octoperator:setup` reports
+  `projects_capable: false` with the note `Projects unavailable here`, `octo-doctor.sh` skips its
+  project checks, and every board step is skipped with one warning (`octo-project-status.sh` exits
+  3 with `skipped: projects unavailable here`). Nothing else changes.
+- **No branch delete.** After a merge, `auto` warns (`warn: branch <b> not deleted: ...`) and
+  leaves the branch. Delete it yourself.
+- **No Pages API.** A human enables GitHub Pages in the repo's settings.
+- **Only its own repo.** The session reaches only the repo it was started in, so
+  `genesis --approve`, which creates a repo, runs only locally. `genesis --next` in a cloud session
+  is planned in [#127](https://github.com/zeikar/octoperator/issues/127).
+- **An empty scopes header.** The proxy injects the credential, so `X-OAuth-Scopes` comes back
+  empty. The benchmark harness's preflight reads that as unknown scopes, warns, and goes on.
+
+For pull request features that only GraphQL has, the proxy serves these routes instead:
+
+| Feature | Route |
+|---|---|
+| Review threads | `GET /repos/{o}/{r}/pulls/{n}/ccr/review_threads` |
+| Resolve a thread | `POST /repos/{o}/{r}/pulls/{n}/ccr/comments/{id}/resolve` (and `/unresolve`) |
+| Auto-merge | `PUT` or `DELETE /repos/{o}/{r}/pulls/{n}/ccr/auto_merge` |
+| Ready for review | `POST /repos/{o}/{r}/pulls/{n}/ccr/ready_for_review` |
+| Back to draft | `POST /repos/{o}/{r}/pulls/{n}/ccr/convert_to_draft` |

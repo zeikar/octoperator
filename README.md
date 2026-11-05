@@ -244,6 +244,10 @@ traceability matrix). They live in
   board write goes through that mapping. Run `octo-doctor.sh` to list the real options.
 - **Sub-issues not linking** — the account/plan may lack the sub-issue API; Octoperator falls back to a
   `- [ ] #n` task list in the epic body automatically.
+- **`GitHub GraphQL is not available from Claude Code sessions`** — you're in a Claude Code cloud
+  session, whose proxy refuses GraphQL. The lifecycle runs over REST there, without a Projects
+  board; see [Claude Code cloud sessions](docs/running-continuously.md#claude-code-cloud-sessions)
+  for what else differs.
 
 ## License
 
