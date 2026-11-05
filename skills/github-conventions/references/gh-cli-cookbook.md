@@ -18,7 +18,7 @@ gate's checks wait, merge state, and merge. `gh run` and `gh workflow` are REST 
 Projects v2 has no REST API at all, so its board steps stay on `gh project` and are skipped where
 GraphQL is refused (`octo-project-status.sh` exits 3 with `skipped: projects unavailable here`).
 `scripts/test/smoke.sh` fails on any GraphQL call or GraphQL-backed porcelain in a script,
-skill, or agent outside genesis (which runs only locally), except the few lines its allowlist
+skill, or agent outside genesis `--approve` (local only), except the few lines its allowlist
 names, such as the Projects v2 commands.
 
 The rules every REST step follows:

@@ -14,7 +14,9 @@ every eval passes and nothing is buildable
 tool, so there it plans **ungrounded** unless the user's own permission settings allow WebSearch
 and WebFetch (milestone.md → Web access). A grounded milestone comes from a human running
 `/octoperator:genesis --next` by hand. `--next --dry-run` prints the milestone and the PR it would
-open, and writes nothing.
+open, and writes nothing. Every GitHub call is REST (`gh api`), by the cookbook's REST rules
+(`${CLAUDE_PLUGIN_ROOT}/skills/github-conventions/references/gh-cli-cookbook.md` → REST, not
+GraphQL), so it runs in a Claude Code cloud session too, whose proxy refuses GraphQL.
 
 ## Risks, and what bounds them
 
@@ -61,14 +63,15 @@ in literally. Stop at the first failure with the reason given; nothing is create
 1. **The repo.** Read `.claude/octoperator.local.md` for `repo`, and resolve the clone's own:
 
    ```bash
-   gh repo view --json nameWithOwner --jq .nameWithOwner
-   gh repo view <repo> --json defaultBranchRef --jq .defaultBranchRef.name
+   gh api 'repos/{owner}/{repo}' --jq '.full_name, .default_branch'
    git rev-parse --show-toplevel
    ```
 
-   `<repo>` is the settings' `repo`, else the first line; a settings `repo` that isn't the clone's
-   → stop with `settings repo mismatch`. The second is `<default>`, the third `<root>`. A failure
-   → `gh repo view failed` or `not a git work tree`.
+   The first call prints the clone's repo (`OWNER/NAME`, which `gh api` takes from the git
+   remote), then its default branch. `<repo>` is the settings' `repo`, else that first line; a
+   settings `repo` that isn't the clone's → stop with `settings repo mismatch`. The second line is
+   `<default>`, and the `git` call prints `<root>`. A failure → `gh repo view failed` or
+   `not a git work tree`. The stop reasons keep their names, which a status-line matcher may use.
 2. **The gate.** Read the evals metric, then pass its `rate:` and `head:` values to the gate:
 
    ```bash
@@ -114,13 +117,17 @@ in literally. Stop at the first failure with the reason given; nothing is create
    section, for the metric history and what merged or was held. And the earlier milestones:
 
    ```bash
-   gh pr list --repo <repo> --state all --limit 100 --json number,title,state,headRefName,url \
-     --jq '.[] | select(.state != "OPEN" and (.headRefName | startswith("milestone-")))
-           | "\(.number) \(.state) \(.title) \(.url)"'
+   gh api "repos/<repo>/pulls?state=closed&sort=created&direction=desc&per_page=100" --paginate \
+     --jq '.[] | select(.head.repo.full_name == .base.repo.full_name
+                        and (.head.ref | startswith("milestone-")))
+           | "\(.number) \(if .merged_at then "MERGED" else "CLOSED" end) \(.title) \(.html_url)"'
    ```
 
-   A `MERGED` one is a past milestone, with its `## Milestone` section in the PRD. A `CLOSED` one
-   is a plan a human turned down: never propose it again without new evidence.
+   It reads every closed PR, page by page, one line per milestone PR; REST's `closed` holds the
+   merged ones too. Like the milestone gate, it keeps only PRs from this repo on a `milestone-`
+   branch, so a fork's (or a deleted fork's, whose head repo is null) is never one. A `MERGED` one
+   is a past milestone, with its `## Milestone` section in the PRD. A `CLOSED` one is a plan a
+   human turned down: never propose it again without new evidence.
 5. **Research, bounded.** At most **6 WebSearch** and **10 WebFetch** calls per run, counted, never
    past either cap, inline (never in a `Task` subagent), as in stage 1. Look for what the prior art
    in `docs/research.md`, and projects like it, shipped since the newest `accessed` date in its
@@ -146,9 +153,11 @@ in literally. Stop at the first failure with the reason given; nothing is create
    list it in the PR body with the line that rules it out. It ships nothing the PRD or a merged
    milestone already has. Every requirement gets at least one scenario, at least one is
    `judge: script`, and each is something the product doesn't do yet at the tip, so its eval fails
-   there. Give it a short title, and derive `<slug>` from it by conventions.md → Branch naming
-   (lowercase kebab-case, at most 50 characters, cut at a hyphen, no trailing stop word such as
-   `a` or `and`): the branch is
+   there. Give it a short title of letters, digits, spaces, and `-,.:()` only: it is web-derived
+   text that step 9's commit message and step 10's PR title quote in a shell command, so replace
+   or drop any other character (`'`, `"`, a backtick, `$`, `\`, `<`, `&`, …); the check fails on
+   one. Derive `<slug>` from it by conventions.md → Branch naming (lowercase kebab-case, at most
+   50 characters, cut at a hyphen, no trailing stop word such as `a` or `and`): the branch is
    `milestone-<n>-<slug>`.
 7. **The files**, in these formats, written only in step 9:
    - **`docs/prd.md`**: append, never change a line above:
@@ -229,7 +238,7 @@ in literally. Stop at the first failure with the reason given; nothing is create
    ```bash
    git -C <wt> add -- docs/prd.md VISION.md docs/research.md evals/<id>/scenario.md \
      evals/<id>/check.sh
-   git -C <wt> commit -m "feat(milestone): plan milestone <n>: <title>"
+   git -C <wt> commit -m 'feat(milestone): plan milestone <n>: <title>'
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-genesis-next.sh" --check \
      --base origin/<default> --branch milestone-<n>-<slug> <wt>
    ```
@@ -259,13 +268,21 @@ in literally. Stop at the first failure with the reason given; nothing is create
 
     ```bash
     git -C <wt> push -u origin milestone-<n>-<slug>
-    gh pr create --repo <repo> --base <default> --head milestone-<n>-<slug> \
-      --title "feat: milestone <n>: <title>" --body '<the body below>'
+    gh api repos/<repo>/pulls -f title='feat: milestone <n>: <title>' \
+      -f head=milestone-<n>-<slug> -f base=<default> -F body=@- \
+      --jq '"\(.number) \(.html_url)"' <<'OCTO_BODY_EOF'
+    <the body below, verbatim>
+    OCTO_BODY_EOF
     ```
 
-    The body is one literal single-quoted argument, so keep apostrophes out of it. It names no
-    issue: there is none to close, so never write close, fix, or resolve next to a `#<number>`, or
-    GitHub closes that issue when the PR merges.
+    It prints the PR's number, `<M>`, and its URL. The title is single-quoted, and step 6 keeps
+    every quote out of it. The body goes on stdin in the quoted heredoc, so its apostrophes,
+    quotes, and backticks stay literal. It holds web-derived text, so mind the delimiter: if any
+    line of it is exactly `OCTO_BODY_EOF`, alter that line (indent it, for example), or bash ends
+    the body there and runs the rest as commands. The closing `OCTO_BODY_EOF` starts its line with
+    no indent, though it is shown indented in this list. The body names no issue: there is none to close, so
+    never write close, fix, or resolve next to a `#<number>`, or GitHub closes that issue when the
+    PR merges.
 
     ```markdown
     Milestone <n>: <title>, planned by `/octoperator:genesis --next` because every eval passes
@@ -299,7 +316,7 @@ in literally. Stop at the first failure with the reason given; nothing is create
     ```
 
     The `ungrounded` line only in an ungrounded run, whose Sources hold only the ledger. A failed
-    push → `git push failed`; a failed `gh pr create` → `gh pr create failed` (the branch is
+    push → `git push failed`; a failed `POST .../pulls` → `gh pr create failed` (the branch is
     pushed: open the PR from it by hand, or delete it and re-run). Both clean up as step 9 says.
     Otherwise clean up:
 

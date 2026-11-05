@@ -52,7 +52,7 @@ deletes nothing, and the access date is the session's current date.
 
 | Tool | Why |
 |---|---|
-| `Bash(gh:*)` | `gh api user` (the repo owner, first run); under `--approve`, the preflight, the name check, `gh repo create`, `gh label create`, and plan-epic's `gh issue create` and `gh issue edit`; under `--next`, `gh repo view`, the ledger and milestone reads, and `gh pr create` |
+| `Bash(gh:*)` | `gh api user` (the repo owner, first run); under `--approve`, the preflight, the name check, `gh repo create`, `gh label create`, and plan-epic's `gh issue create` and `gh issue edit`; under `--next`, only `gh api` (REST): the repo, the ledger and milestone reads, and the PR |
 | `Bash(git:*)` | `--approve`: `git init`, `git add`, `git commit`, and `git push` when a push must be retried; `--next`: `git fetch`, `git show`, `git ls-remote`, `git add`, `git commit`, `git push`, and `git branch -d` (`-D` when a stop cleans up) |
 | `Bash(bash:*)` | `octo-genesis-check.sh` (the preflight, the proposal check, the skeleton check), `octo-genesis-plan.sh` (the `--approve` stage and steps, and its re-check after the commit), setup's `octo-setup.sh` probe, `octo-genesis-epic.sh` (the MVP epic lookup), and plan-epic's `octo-subissue.sh`; `--next`: `octo-evals-metric.sh`, `octo-milestone-gate.sh`, `octo-genesis-next.sh`, and `octo-worktree.sh` |
 | `Read` | the formats in `references/proposal.md`, `references/skeleton.md`, and `references/evals.md`, `docs/research.md` for stage 2, the ADR for the skeleton, `docs/prd.md` and the eval templates in `templates/` for the evals, `docs/prd.md` and plan-epic's procedure for stage 4, and the files to summarize |
@@ -487,7 +487,8 @@ genesis: stopped: <reason>
 ## Notes
 
 - Local only: run genesis on your machine. Claude Code cloud sessions block GitHub's GraphQL API
-  (#79), which `--approve` needs; its preflight stops there with that reason.
+  (#79), which `--approve` needs; its preflight stops there with that reason. `--next` is the
+  exception: it calls GitHub only over REST, so autopilot can plan a milestone in a cloud session.
 - No GitHub write at all in stages 1 and 2. The one `gh` call is the read `gh api user`.
 - `--next` writes only its branch and its PR; it never merges, adds a label, or edits VISION.md's
   Immutable constraints or an existing eval.

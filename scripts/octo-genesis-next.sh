@@ -29,6 +29,8 @@
 #   - no CI skip token (`[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`, `[actions skip]`,
 #     or `skip-checks:`, in any case) in the ## Milestone title, which the PR title and so the
 #     merge commit carry, or in HEAD's commit message: the default branch's evals run must start;
+#   - the ## Milestone title holds only letters, digits, spaces, and `-,.:()`: it is web-derived
+#     text that the commit message and the PR title quote in a shell command;
 #   - docs/prd.md only grows: the merge base's file is a prefix of HEAD's, and the appended text
 #     is one `## Milestone <n>: <title>` section, with no other `## ` heading, holding
 #     `### R<k>: <title>` requirements (ids new to the PRD, each with `- ` acceptance criteria),
@@ -260,6 +262,14 @@ if [ "$prd" -eq 1 ]; then
     grep -m 1 '^## ' "$tmp/added" | grep -Eiq "$SKIP_RE" \
       && fail "docs/prd.md: the ## Milestone $N title holds a CI skip token: the PR title carries" \
            "it into the merge commit, so the evals run on the default branch would not start"
+    title="$(grep -m 1 '^## ' "$tmp/added" | sed 's/[[:space:]]*$//')"
+    case "$title" in
+      "## Milestone $N: "*)
+        printf '%s\n' "${title#"## Milestone $N: "}" | grep -q '[^A-Za-z0-9 ,.:()-]' \
+          && fail "docs/prd.md: the ## Milestone $N title holds a character other than letters," \
+               "digits, spaces, and -,.:(): the commit message and the PR title quote it in a shell" \
+               "command" ;;
+    esac
     printf '%s\n' "$out" | grep -qx UNGROUNDED && ungrounded=1
     urls="$(printf '%s\n' "$out" | grep -cx URL)"
     # Each new eval's scenario.md front matter agrees with its scenario.

@@ -70,7 +70,8 @@
 #                            a failed read), against a REST-only stub `gh`, a stub `git` for
 #                            github.com, and a stub `claude`; no call is refused
 #   - GraphQL check        : no scripts/octo-*.sh, bench/*.sh, skill, or agent file but
-#                            genesis's runs `gh api graphql` or GraphQL-backed porcelain
+#                            genesis's (its --next steps included) runs `gh api graphql` or
+#                            GraphQL-backed porcelain
 #                            (`gh issue`, `gh label`, `gh pr`, `gh repo`, `gh project`; a
 #                            script's comment lines skipped), outside a short allowlist, each
 #                            entry with its reason and every entry used
@@ -2011,7 +2012,7 @@ expect 0 "setup --owner <the gh user, any case> creates it under user/repos" \
 expect 0 "no octo-bench gh call was refused (no GraphQL, no porcelain)" \
   test ! -s "$STUB_REJECTED"
 
-echo "• no script, skill, or agent outside genesis uses GraphQL"
+echo "• no script, skill, or agent outside genesis --approve uses GraphQL"
 # A Claude Code cloud session's proxy refuses GraphQL, so nothing Octoperator runs there may use
 # it: no `gh api graphql`, and none of the porcelain that uses GraphQL under the hood: `gh issue`,
 # `gh label`, `gh pr`, `gh repo` (view, list, clone, create, and delete each read or write the
@@ -2020,15 +2021,17 @@ echo "• no script, skill, or agent outside genesis uses GraphQL"
 # and `gh workflow` are REST, so they pass.
 # Scope: every scripts/octo-*.sh, bench/*.sh, skill, and agent file, except genesis's:
 # skills/genesis/ and octo-genesis-plan.sh (which prints genesis --approve's own steps). genesis
-# --approve creates the repo, so it runs only locally, where GraphQL works. genesis --next (the
-# skills/genesis/references/next.md calls), which autopilot runs, does reach a cloud session: that
-# gap is tracked in #127. A script's comment line (`#` its first non-blank character) only
+# --approve creates the repo, so it runs only locally, where GraphQL works. genesis --next
+# (skills/genesis/references/next.md), which autopilot runs and so reaches a cloud session, is in
+# scope (#127). A script's comment line (`#` its first non-blank character) only
 # mentions a command, so it is not checked. A line ending in `\` is joined with the next.
 # PORCELAIN_ALLOW lists the lines allowed, one "<path>|<text on the line>|<why>" each. A line
 # passes when, with the text of every entry it matches taken out, nothing on it is a hit. An
 # entry that no longer matches any line fails the check.
 PORCELAIN_ALLOW='skills/github-conventions/references/gh-cli-cookbook.md|never the porcelain `gh label create --force`|a mention: the REST rule against `gh label create`
 skills/github-conventions/references/gh-cli-cookbook.md|(`gh repo view`, `list`, `clone`, `create`, and `delete` too)|a mention: the REST rule itself
+skills/genesis/references/next.md|`gh repo view failed`|a mention: genesis --next'"'"'s stop reason, named before REST
+skills/genesis/references/next.md|`gh pr create failed`|a mention: genesis --next'"'"'s stop reason, named before REST
 skills/autopilot/references/milestone.md|`gh pr create failed`) may well pass then|a mention: genesis --next'"'"'s stop reason
 skills/autopilot/references/milestone.md|failure (`git fetch failed`, `gh repo view failed`|a mention: genesis --next'"'"'s stop reason
 scripts/octo-project-status.sh|gh project|Projects v2: GraphQL only; skipped in cloud sessions (#115). The board write
@@ -2083,12 +2086,19 @@ expect 0 "in a script, a comment line only mentions a command (and continues not
 ROOT="$(cd "$SCRIPTS_DIR/.." && pwd)"
 scope=() code=()
 for f in "$ROOT"/skills/*/SKILL.md "$ROOT"/skills/*/references/*.md "$ROOT"/agents/*.md; do
-  case "$f" in "$ROOT"/skills/genesis/*) ;; *) scope+=("${f#"$ROOT"/}") ;; esac
+  case "$f" in
+    "$ROOT"/skills/genesis/references/next.md) scope+=("${f#"$ROOT"/}") ;;
+    "$ROOT"/skills/genesis/*) ;;
+    *) scope+=("${f#"$ROOT"/}") ;;
+  esac
 done
 for f in "$ROOT"/scripts/octo-*.sh "$ROOT"/bench/*.sh; do
   case "$f" in "$ROOT"/scripts/octo-genesis-plan.sh) ;; *) code+=("${f#"$ROOT"/}") ;; esac
 done
 expect 0 "the check covers the skills and agents (${#scope[@]} files)" test "${#scope[@]}" -ge 15
+expect 0 "the check covers genesis --next (next.md), and no other genesis file" \
+  test "$(printf '%s\n' "${scope[@]}" | grep '^skills/genesis/')" \
+    = skills/genesis/references/next.md
 expect 0 "the check covers the scripts (${#code[@]} files), octo-bench.sh and bench/validate.sh too" \
   test "${#code[@]}" -ge 25 -a -n "$(printf '%s\n' "${code[@]}" | grep -Fx scripts/octo-bench.sh)" \
     -a -n "$(printf '%s\n' "${code[@]}" | grep -Fx bench/validate.sh)"

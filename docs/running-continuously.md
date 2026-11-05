@@ -173,8 +173,8 @@ A Claude Code cloud session reaches GitHub through a proxy. A dogfood run on zei
 - **No GraphQL.** The proxy refuses it by policy, with `HTTP 403: GitHub GraphQL is not available
   from Claude Code sessions; use the REST API`, so most `gh` porcelain (`gh issue`, `gh pr`,
   `gh repo`) fails there. So Octoperator's lifecycle runs over REST (`gh api repos/...`),
-  locally too; only `genesis` and the optional Projects board (`gh project`) still use GraphQL
-  (see below).
+  locally too; only `genesis --approve` and the optional Projects board (`gh project`) still use
+  GraphQL (see below).
 - **No Projects board.** Projects v2 has no REST API. `/octoperator:setup` reports
   `projects_capable: false` with the note `Projects unavailable here`, `octo-doctor.sh` skips its
   project checks, and every board step is skipped with one warning (`octo-project-status.sh` exits
@@ -183,10 +183,10 @@ A Claude Code cloud session reaches GitHub through a proxy. A dogfood run on zei
   leaves the branch. Delete it yourself.
 - **No Pages API.** A human enables GitHub Pages in the repo's settings.
 - **Only its own repo.** The session reaches only the repo it was started in, so
-  `genesis --approve`, which creates a repo, runs only locally. `genesis --next` in a cloud session
-  is planned in [#127](https://github.com/zeikar/octoperator/issues/127). The benchmark harness
-  creates its own `octo-bench-*` repos, so whether it can run in a cloud session is unverified
-  (#69).
+  `genesis --approve`, which creates a repo, runs only locally. `genesis --next` runs over REST, so
+  it works in a cloud session ([#127](https://github.com/zeikar/octoperator/issues/127)). The
+  benchmark harness creates its own `octo-bench-*` repos, so whether it can run in a cloud session
+  is unverified (#69).
 - **An empty scopes header.** The proxy injects the credential, so `X-OAuth-Scopes` comes back
   empty. The benchmark harness's preflight reads that as unknown scopes, warns, and goes on.
 

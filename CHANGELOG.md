@@ -470,8 +470,8 @@ All notable changes to Octoperator are documented in this file. The format is ba
   `gh repo`, and `gh project` as well as `gh issue`, `gh label`, and `gh pr`. `gh run` and
   `gh workflow` are REST and pass. genesis (`skills/genesis/` and `octo-genesis-plan.sh`, which
   prints `--approve`'s local steps) is out of scope, as `--approve` runs only locally; genesis
-  `--next` (the `skills/genesis/references/next.md` calls), which autopilot runs, is the tracked
-  gap #127. Its allowlist gives each entry a reason: four lines that only mention a command, and
+  `--next` (the `skills/genesis/references/next.md` calls), which autopilot runs, came next, in
+  #127. Its allowlist gives each entry a reason: four lines that only mention a command, and
   the Projects v2 commands (#115). An entry allows only its own text, so another command on the
   same line still fails. The autopilot suite's stub `gh`, and
   `smoke.sh`'s setup, genesis-epic, and bench stubs, now serve REST only and refuse GraphQL and
@@ -498,6 +498,25 @@ All notable changes to Octoperator are documented in this file. The format is ba
   proxy's `ccr` routes for review threads, auto-merge, and draft state. New offline tests in
   `scripts/test/cloud.sh`, which CI runs, use a stub `gh` that answers `gh project` and
   `gh api graphql` with the proxy's 403.
+- `genesis --next` now calls GitHub only over REST, so autopilot can plan the next milestone in a
+  Claude Code cloud session, whose proxy refuses GraphQL (#127, part of #79). In
+  `skills/genesis/references/next.md`, step 1 reads the repo and its default branch with
+  `gh api 'repos/{owner}/{repo}' --jq '.full_name, .default_branch'` (was two `gh repo view`
+  calls). Step 4 reads the earlier milestone PRs from every closed PR,
+  `GET .../pulls?state=closed&sort=created&direction=desc` with `--paginate`, keeping, as the
+  milestone gate does, only this repo's (not a fork's) on a `milestone-` branch, and telling merged
+  from closed by `merged_at` (was `gh pr list --state all`). Step 10 opens the PR with
+  `POST .../pulls`, the body on stdin in a quoted `OCTO_BODY_EOF` heredoc, so its cited sources and
+  web-derived text may hold apostrophes (was `gh pr create` with a single-quoted body). The
+  milestone title, web-derived too, holds only letters, digits, spaces, and `-,.:()`, so the
+  single-quoted commit message (was double-quoted) and PR title need no escaping;
+  `octo-genesis-next.sh --check` fails on any other character in the `## Milestone` title. The
+  stop reasons keep their names
+  (`gh repo view failed`, `gh pr create failed`), since a status-line matcher may use them.
+  `smoke.sh`'s GraphQL check now covers `next.md`, with two allowlist entries for those
+  stop-reason mentions; the rest of genesis stays out of scope, as `--approve` runs only locally.
+  `scripts/test/genesis-next.sh` puts a stub `gh` first on `PATH` that refuses every call with
+  the cloud proxy's 403, and checks that nothing called it.
 - The conventions gain a rule for a flaky test found mid-run, unrelated to the current issue.
   Re-run it at most twice more on the PR head and run it on the base (`origin/<default>`); one
   that passes on the base but fails on the head is a regression, fixed in the PR. A real flake
