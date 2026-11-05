@@ -1,7 +1,7 @@
 {
   "name": "octoperator",
   "version": "0.2.0",
-  "description": "Autonomous GitHub-native execution for Claude Code: turn natural-language requests into traceable epics, issues, branches, PRs, and reviews — with optional Projects v2 status updates.",
+  "description": "Claude Code plugin that ships GitHub issues autonomously: request → issue → branch → PR → review → merge, all traceable.",
   "author": {
     "name": "zeikar",
     "email": "zeikar.dev@gmail.com"
@@ -10,6 +10,10 @@
   "repository": "https://github.com/zeikar/octoperator",
   "license": "MIT",
   "keywords": [
+    "claude-code",
+    "ai-agent",
+    "autonomous",
+    "code-review",
     "github",
     "issues",
     "projects",

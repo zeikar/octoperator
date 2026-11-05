@@ -323,6 +323,15 @@ All notable changes to Octoperator are documented in this file. The format is ba
   parameter, and its `Files changed` now counts every commit on the branch.
 
 ### Changed
+- README reworked for discoverability (#120). The lede now calls Octoperator a Claude Code plugin
+  and leads with the autonomous ship loop, followed by badges, a Quick start, and a short "Why
+  Octoperator". The Components table has one line per command, and its full descriptions moved
+  verbatim to `docs/commands.md`. "Running continuously" moved to `docs/running-continuously.md`,
+  "Starting a new project" to `docs/genesis.md`, and the helper-script list to `CONTRIBUTING.md`;
+  the skills' pointers and `genesis --approve`'s printed handoff link follow them. The plugin
+  manifests take the new repo description and add the `claude-code`, `ai-agent`, `autonomous`,
+  and `code-review` keywords. `docs/social-preview.html` is the source of the new 1280x640
+  `docs/social-preview.png`.
 - Issues, labels, and sub-issues now go over REST (`gh api repos/{o}/{r}/...`) in every skill and
   agent but `genesis`, so they work in a Claude Code cloud session, whose proxy refuses GraphQL
   (part of epic #79, #111). `issue`, `plan-epic`, `research`, `sync`, `implement`, `auto`,
