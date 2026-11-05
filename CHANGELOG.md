@@ -545,6 +545,16 @@ All notable changes to Octoperator are documented in this file. The format is ba
   change of 300 or more now holds, where the old limit was 3000. Output and exit codes are
   otherwise unchanged. New offline tests in `scripts/test/smoke.sh` serve a PR head whose files
   differ from the reviewed commit's.
+- `octo-genesis-check.sh` no longer fails a valid skeleton now and then on a busy machine (#123).
+  Under `pipefail`, a check that piped its text from `printf` into a reader that stops early
+  (`grep -q`, or an awk `exit`) could see the `printf` killed by SIGPIPE: the 141 read as a
+  failed check, such as `ci.yml: on: needs the push trigger` on a CI file that has it, or, under
+  `set -e`, ended the run with no output. On macOS CI this failed the smoke case
+  `--skeleton, evals.yml pushes from another branch too` in 0.3 seconds, so not by its 10-second
+  limit. Those readers now take their text from a here-string. Every test suite's `bounded` hang
+  guard now also prints `  ! TIMEOUT: killed after <n>s: <command>` on the suite's stderr when it
+  kills a command, even where the case hides the command's stderr, so a timeout no longer reads
+  as a wrong result.
 - `setup` no longer stops at `gh auth status`, which checks every stored host and token and so
   can fail where the token in use works (seen in a Claude Code cloud session). `octo-setup.sh`
   probes with the repo lookups it needs instead, and an `error` now carries gh's own message as
