@@ -153,35 +153,66 @@ branch.
 
 ## Flaky tests found mid-run
 
-A test that fails intermittently (it fails, then passes when the same commit runs it again) and
-that has nothing to do with the current issue is not that issue's work. Record it and carry on.
-Each command below is one plain `gh` call:
+A test that fails intermittently and has nothing to do with the current issue is not that issue's
+work: record it and carry on. Prove it is a flake first, because re-running the same commit only
+shows the test is intermittent, not that this change didn't cause it. Each command below is one
+plain `gh`, `git`, or `bash` call:
 
-1. Look for an open issue that already covers it, by the test's name:
+1. **Re-run it on the PR head**, at most twice more per commit (3 runs in total), and keep every
+   result.
+2. **Run it on the base** too, up to 3 times, in a throwaway detached checkout of
+   `origin/<default>` (fetch it first), then remove the checkout:
    ```bash
-   gh issue list --repo <owner>/<name> --state open --search "<test name> in:title,body" \
-     --json number,title,url
+   git fetch origin <default>
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-worktree.sh" detach --name "flake-base" --ref "origin/<default>"
+   git worktree remove --force "<printed path>"
    ```
-2. One covers it → comment the new occurrence there (the error, how often it failed, the commit):
-   ```bash
-   gh issue comment <n> --repo <owner>/<name> --body "<occurrence>"
-   ```
-3. None does → file one. See whether the repo has a label named exactly `flaky`:
-   ```bash
-   gh label list --repo <owner>/<name> --search flaky --json name
-   ```
-   Then file the issue labeled `bug`, plus `flaky` when it exists. The body names the test, quotes
-   the error, and says how often it failed (e.g. 1 of 3 runs) and on which commit:
-   ```bash
-   gh issue create --repo <owner>/<name> --title "Flaky test: <test name>" \
-     --label bug [--label flaky] --body "<body>"
-   ```
-   If `bug` is missing, create it first with the cookbook's ensure-labels line for `bug`.
-4. Carry on with the current issue. Its PR's test status gives the last run's result plus a line
-   `Flaky: #<n> (<test name> failed <k> of <m> runs)`, with no closing keyword next to that number.
+3. **Decide.** A test that passes on the base but fails at least once on the PR head is a
+   regression from this change, not a flake: fix it in this PR. It is a flake only when it also
+   fails at least once on the base and passes at least once on the head. Then:
+   1. Look for an open issue that already covers it, by the test's name:
+      ```bash
+      gh issue list --repo <owner>/<name> --state open --search "<test name> in:title,body" \
+        --json number,title,url
+      ```
+   2. One covers it → comment the new occurrence there (the error, the runs, the commits):
+      ```bash
+      gh issue comment <n> --repo <owner>/<name> --body "<occurrence>"
+      ```
+   3. None does → file one, with exactly one priority label: `p2` by default, or `p1` when the test
+      fails CI on the default branch or blocks merges. List the repo's labels once and check the
+      exact names `bug`, `flaky`, and that priority in the output:
+      ```bash
+      gh label list --repo <owner>/<name> --json name --limit 200
+      ```
+      Create `bug` or the priority label when missing, one plain call each, with the colours from
+      the cookbook's ensure-labels lines:
+      ```bash
+      gh label create bug --repo <owner>/<name> --color d73a4a --description "Defect" --force
+      gh label create p2 --repo <owner>/<name> --color ededed --force
+      ```
+      `flaky` is added only when it is already there; it is never created. The body names the
+      test, quotes the error, and gives every run on the head and the base, with their commits:
+      ```bash
+      gh issue create --repo <owner>/<name> --title "Flaky test: <test name>" \
+        --label bug --label <p2|p1> [--label flaky] --body "<body>"
+      ```
+      If a duplicate flake issue for the same test appears (e.g. filed by a parallel implementer),
+      close the newer one as a duplicate of the older:
+      ```bash
+      gh issue close <newer> --repo <owner>/<name> --reason "not planned" \
+        --comment "Duplicate of #<older>."
+      ```
+4. **Report every run and carry on** with the current issue. The PR's test status never says a
+   bare `pass`: it reads e.g. `Result: fail (1 of 3), flaky per #<n>`, plus a line
+   `Flaky: #<n> (<test name> failed <k> of <m> runs on the head, <j> of <l> on the base)`, with no
+   closing keyword next to either number. A fix-mode round has no PR body, so the fixer puts both
+   lines in its result's `Failure reason`, and the orchestrator posts them as a PR comment.
 
 Never weaken, skip, or retry-loop the test inside an unrelated PR: no skip marker, looser
-assertion, longer timeout, or retry wrapper. Fixing it is the flaky issue's work.
+assertion, longer timeout, or retry wrapper. Fixing it is the flaky issue's work. This rule never
+relaxes the merge gate either: a PR whose CI failed, flake or not, still holds until its checks
+are green.
 
 ## Pull request linking
 

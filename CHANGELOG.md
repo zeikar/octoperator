@@ -285,14 +285,19 @@ All notable changes to Octoperator are documented in this file. The format is ba
   fix loop use it.
 
 ### Changed
-- The conventions gain a rule for a flaky test found mid-run, unrelated to the current issue:
-  comment the new occurrence on an open issue that covers it, or file one labeled `bug` (plus
-  `flaky` where that label exists) with the test, the error, and how often it failed; then carry
-  on, never weakening, skipping, or retry-looping the test in the unrelated PR. `implement`,
-  `auto`, and `issue-implementer` point to it. Branch slugs, including `milestone-<n>-<slug>`,
-  now drop trailing stop words (`a`, `and`, `as`, `each`, …) after the 50-character truncation,
-  keeping at least one segment, so `add-seeded-hashing-as-a` becomes `add-seeded-hashing`. No
-  script computes slugs, so only the docs change (#110).
+- The conventions gain a rule for a flaky test found mid-run, unrelated to the current issue.
+  Re-run it at most twice more on the PR head and run it on the base (`origin/<default>`); one
+  that passes on the base but fails on the head is a regression, fixed in the PR. A real flake
+  gets a comment on an open issue that covers it, or a new issue labeled `bug`, one priority
+  (`p2`, or `p1` when it fails CI on the default branch or blocks merges), and `flaky` where that
+  label exists, with the test, the error, and every run. The PR's test status reports every run
+  (`Result: fail (1 of 3), flaky per #<n>`); in a fix round, `auto` posts it as a PR comment. The
+  test is never weakened, skipped, or retry-looped in the unrelated PR, and the merge gate still
+  holds a PR until its checks are green. `implement`, `auto`, and `issue-implementer` point to
+  it. Branch slugs, including `milestone-<n>-<slug>`, now drop trailing stop words (`a`, `and`,
+  `as`, `each`, …) after the 50-character truncation, keeping at least one segment, so
+  `add-seeded-hashing-as-a` becomes `add-seeded-hashing`. No script computes slugs, so only the
+  docs change (#110).
 
 ### Fixed
 - `setup` no longer stops at `gh auth status`, which checks every stored host and token and so

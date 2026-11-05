@@ -98,7 +98,10 @@ than re-resolving them. Collect each resulting PR and its implement status (`suc
 `tests-failed` / `no-changes` / `error`). Here and in step 4's fix loop, a test that fails
 intermittently and is unrelated to the issue follows
 `${CLAUDE_PLUGIN_ROOT}/skills/github-conventions/references/conventions.md` → Flaky tests found
-mid-run: file or update its issue, carry on, and never weaken, skip, or retry-loop it in the PR.
+mid-run: prove it against the base, file or update its issue, carry on, and never weaken, skip, or
+retry-loop it in the PR. A fix round has no PR body, so the fixer returns that rule's `Result:` and
+`Flaky: #<n> (…)` lines in its `Failure reason`; post them on the PR, whatever the fixer's status,
+with `gh pr comment <pr#> --repo "$REPO" --body "<those lines>"`.
 
 **Hold (do not review or merge) any PR that is not ready:**
 - a PR opened as **draft** (implement opens drafts on test failure or no commits),
