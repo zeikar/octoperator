@@ -117,12 +117,15 @@ in literally. Stop at the first failure with the reason given; nothing is create
    section, for the metric history and what merged or was held. And the earlier milestones:
 
    ```bash
-   gh api "repos/<repo>/pulls?state=closed&sort=created&direction=desc&per_page=100" \
-     --jq '.[] | select(.head.ref | startswith("milestone-"))
+   gh api "repos/<repo>/pulls?state=closed&sort=created&direction=desc&per_page=100" --paginate \
+     --jq '.[] | select(.head.repo.full_name == .base.repo.full_name
+                        and (.head.ref | startswith("milestone-")))
            | "\(.number) \(if .merged_at then "MERGED" else "CLOSED" end) \(.title) \(.html_url)"'
    ```
 
-   It reads the 100 newest closed PRs; REST's `closed` holds the merged ones too. A `MERGED` one
+   It reads every closed PR, page by page, one line per milestone PR; REST's `closed` holds the
+   merged ones too. Like the milestone gate, it keeps only PRs from this repo on a `milestone-`
+   branch, so a fork's (or a deleted fork's, whose head repo is null) is never one. A `MERGED` one
    is a past milestone, with its `## Milestone` section in the PRD. A `CLOSED` one is a plan a
    human turned down: never propose it again without new evidence.
 5. **Research, bounded.** At most **6 WebSearch** and **10 WebFetch** calls per run, counted, never
@@ -150,9 +153,11 @@ in literally. Stop at the first failure with the reason given; nothing is create
    list it in the PR body with the line that rules it out. It ships nothing the PRD or a merged
    milestone already has. Every requirement gets at least one scenario, at least one is
    `judge: script`, and each is something the product doesn't do yet at the tip, so its eval fails
-   there. Give it a short title, and derive `<slug>` from it by conventions.md → Branch naming
-   (lowercase kebab-case, at most 50 characters, cut at a hyphen, no trailing stop word such as
-   `a` or `and`): the branch is
+   there. Give it a short title of letters, digits, spaces, and `-,.:()` only: it is web-derived
+   text that step 9's commit message and step 10's PR title quote in a shell command, so replace
+   or drop any other character (`'`, `"`, a backtick, `$`, `\`, `<`, `&`, …); the check fails on
+   one. Derive `<slug>` from it by conventions.md → Branch naming (lowercase kebab-case, at most
+   50 characters, cut at a hyphen, no trailing stop word such as `a` or `and`): the branch is
    `milestone-<n>-<slug>`.
 7. **The files**, in these formats, written only in step 9:
    - **`docs/prd.md`**: append, never change a line above:
@@ -233,7 +238,7 @@ in literally. Stop at the first failure with the reason given; nothing is create
    ```bash
    git -C <wt> add -- docs/prd.md VISION.md docs/research.md evals/<id>/scenario.md \
      evals/<id>/check.sh
-   git -C <wt> commit -m "feat(milestone): plan milestone <n>: <title>"
+   git -C <wt> commit -m 'feat(milestone): plan milestone <n>: <title>'
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-genesis-next.sh" --check \
      --base origin/<default> --branch milestone-<n>-<slug> <wt>
    ```
@@ -270,12 +275,12 @@ in literally. Stop at the first failure with the reason given; nothing is create
     OCTO_BODY_EOF
     ```
 
-    It prints the PR's number, `<M>`, and its URL. The title is single-quoted, each `'` in it
-    written `'\''`. The body goes on stdin in the quoted heredoc, so its apostrophes, quotes, and
-    backticks stay literal. It holds web-derived text, so mind the delimiter: if any line of it is
-    exactly `OCTO_BODY_EOF`, alter that line (indent it, for example), or bash ends the body there
-    and runs the rest as commands. The closing `OCTO_BODY_EOF` starts its line with no indent,
-    though it is shown indented in this list. The body names no issue: there is none to close, so
+    It prints the PR's number, `<M>`, and its URL. The title is single-quoted, and step 6 keeps
+    every quote out of it. The body goes on stdin in the quoted heredoc, so its apostrophes,
+    quotes, and backticks stay literal. It holds web-derived text, so mind the delimiter: if any
+    line of it is exactly `OCTO_BODY_EOF`, alter that line (indent it, for example), or bash ends
+    the body there and runs the rest as commands. The closing `OCTO_BODY_EOF` starts its line with
+    no indent, though it is shown indented in this list. The body names no issue: there is none to close, so
     never write close, fix, or resolve next to a `#<number>`, or GitHub closes that issue when the
     PR merges.
 

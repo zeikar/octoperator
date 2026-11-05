@@ -502,11 +502,16 @@ All notable changes to Octoperator are documented in this file. The format is ba
   Claude Code cloud session, whose proxy refuses GraphQL (#127, part of #79). In
   `skills/genesis/references/next.md`, step 1 reads the repo and its default branch with
   `gh api 'repos/{owner}/{repo}' --jq '.full_name, .default_branch'` (was two `gh repo view`
-  calls). Step 4 reads the earlier milestone PRs from the 100 newest closed PRs,
-  `GET .../pulls?state=closed&sort=created&direction=desc`, telling merged from closed by
-  `merged_at` (was `gh pr list --state all`). Step 10 opens the PR with `POST .../pulls`, the body
-  on stdin in a quoted `OCTO_BODY_EOF` heredoc, so its cited sources and web-derived text may hold
-  apostrophes (was `gh pr create` with a single-quoted body). The stop reasons keep their names
+  calls). Step 4 reads the earlier milestone PRs from every closed PR,
+  `GET .../pulls?state=closed&sort=created&direction=desc` with `--paginate`, keeping, as the
+  milestone gate does, only this repo's (not a fork's) on a `milestone-` branch, and telling merged
+  from closed by `merged_at` (was `gh pr list --state all`). Step 10 opens the PR with
+  `POST .../pulls`, the body on stdin in a quoted `OCTO_BODY_EOF` heredoc, so its cited sources and
+  web-derived text may hold apostrophes (was `gh pr create` with a single-quoted body). The
+  milestone title, web-derived too, holds only letters, digits, spaces, and `-,.:()`, so the
+  single-quoted commit message (was double-quoted) and PR title need no escaping;
+  `octo-genesis-next.sh --check` fails on any other character in the `## Milestone` title. The
+  stop reasons keep their names
   (`gh repo view failed`, `gh pr create failed`), since a status-line matcher may use them.
   `smoke.sh`'s GraphQL check now covers `next.md`, with two allowlist entries for those
   stop-reason mentions; the rest of genesis stays out of scope, as `--approve` runs only locally.

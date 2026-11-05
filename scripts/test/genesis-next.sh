@@ -15,7 +15,9 @@
 #               an existing eval, a file outside the allowed set, a product doc's mode changed, a
 #               symlink (a new eval's check.sh, or deeper in it), a submodule, a .gitattributes in
 #               a new eval, a CI skip token in the ## Milestone title or HEAD's commit message (each
-#               token, any case, and a skip-checks: trailer), no new eval, a new eval without
+#               token, any case, and a skip-checks: trailer), a ## Milestone title with a character
+#               outside letters, digits, spaces, and -,.:() (one of those passes), no new eval, a
+#               new eval without
 #               check.sh, changed PRD
 #               text, a second ## heading or a misnumbered one, a reused requirement id, a
 #               scenario without an eval or an eval without a scenario, a scenario.md that
@@ -279,6 +281,24 @@ sed -i.bak 's/^## Milestone 2: Export conversations$/## Milestone 2: Export conv
 check
 fails "a CI skip token in the ## Milestone title fails, in any case" \
   "docs/prd.md: the ## Milestone 2 title holds a CI skip token: the PR title carries it into the merge commit, so the evals run on the default branch would not start"
+# retitle <title> : rewrite $c's ## Milestone 2 heading to that title, taken literally, and commit.
+retitle() {
+  T="$1" awk '$0 == "## Milestone 2: Export conversations" { $0 = "## Milestone 2: " ENVIRON["T"] }
+    1' "$c/docs/prd.md" >"$c/prd.tmp" && mv "$c/prd.tmp" "$c/docs/prd.md" && commit "$c" title
+}
+case_repo
+retitle 'Export v2 (CSV, JSON): fast-path 1.0'
+check
+same "a ## Milestone title of letters, digits, spaces, and -,.:() passes" \
+  "0|ok: milestone 2: export-200-turns" "$rc|$out"
+for title in "Export \$(touch pwned)" "Export 'quoted'" 'Export "quoted"' 'Export `id`' \
+    'Export a\b' 'Export Result<T>' 'Export & share' 'Export; rm' $'Export\tit' 'Café export'; do
+  case_repo
+  retitle "$title"
+  check
+  fails "a ## Milestone title with a character outside the safe set fails ($title)" \
+    "docs/prd.md: the ## Milestone 2 title holds a character other than letters, digits, spaces, and -,.:(): the commit message and the PR title quote it in a shell command"
+done
 for token in '[skip ci]' '[ci skip]' '[NO CI]' '[skip actions]' '[actions skip]' \
     $'\n\nSkip-checks: true'; do
   case_repo
