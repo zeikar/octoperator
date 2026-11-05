@@ -1911,10 +1911,16 @@ done <<<"$(cd "$ROOT" && porcelain_hits "${scope[@]}")"
 if [ -z "$left" ]; then ok "no gh issue / gh label outside the allowlist"; else
   no "no gh issue / gh label outside the allowlist; found:"; printf '%s' "$left"; fi
 # A body is `-F body=@-` with a quoted heredoc (the cookbook's REST rules), never a quoted
-# `-f body=` argument, where one missed `'` turns the rest of the text into shell.
-left="$(cd "$ROOT" && grep -nE -- "(-f|--raw-field)[[:space:]]+['\"]?body=" "${scope[@]}")"
-if [ -z "$left" ]; then ok "no body sent as a -f argument"; else
-  no "no body sent as a -f argument; found:"; printf '  %s\n' "$left"; fi
+# literal (`-f`, `-F`, `--field`, `--raw-field`), where one missed `'` turns the rest of the text
+# into shell (and `-F` would also turn a body like `123` into a number).
+body_hits() { grep -nE -- "(-[fF]|--(raw-)?field)[[:space:]=]+['\"]?body=" "$@" | grep -v 'body=@-'; }
+sample="$(printf '%s\n' "gh api x -f body='a'" "gh api x -F body='a'" "gh api x --field body=a" \
+  "gh api x --raw-field=body=a" "gh api x -F body=@- <<'OCTO_BODY_EOF'" | body_hits -)"
+expect 0 "the body check catches -f, -F, --field and --raw-field literals, not -F body=@-" \
+  test "$(printf '%s\n' "$sample" | grep -c .)" -eq 4
+left="$(cd "$ROOT" && body_hits "${scope[@]}")"
+if [ -z "$left" ]; then ok "no body sent as a quoted literal"; else
+  no "no body sent as a quoted literal; found:"; printf '  %s\n' "$left"; fi
 
 echo
 echo "smoke: $pass passed, $fail failed"

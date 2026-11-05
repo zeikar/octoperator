@@ -40,7 +40,10 @@ The rules every REST step follows:
   The quoted delimiter means bash expands nothing in the body, so `'`, `"`, `\`, `$( )`,
   backticks, and `;` reach GitHub as written, with no escaping, temp file, or Write. gh sends
   what it reads through `@` as a string: the `123`/`true`/`null` conversion applies only to a
-  literal value. The one rule left: no body line may be exactly `OCTO_BODY_EOF`. The body is
+  literal value. Two rules are left: no body line may be exactly `OCTO_BODY_EOF`, and the closing
+  `OCTO_BODY_EOF` starts its line with no indent, even where a recipe is shown inside a list (an
+  indented one never closes the body, and bash silently takes the rest of the call as text). The
+  body is
   the call's only stdin, so it never shares the call with `--input -` or a second `@-`. Bash ends
   the body with a newline, which renders as nothing.
 - **Short values stay single-quoted.** A title or other one-line value is `-f title='…'`;

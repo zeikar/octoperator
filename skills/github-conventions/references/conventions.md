@@ -10,13 +10,16 @@ that are missing (see the cookbook's "ensure labels" recipe).
 
 ### Type labels (exactly one per issue)
 
-| Label     | Meaning                                   | Color (suggested) |
-|-----------|-------------------------------------------|-------------------|
-| `epic`    | A large body of work decomposed into children | `#6f42c1`     |
-| `feature` | New user-facing capability                | `#0e8a16`         |
-| `bug`     | Defect in existing behavior               | `#d73a4a`         |
-| `chore`   | Maintenance, tooling, refactor, deps      | `#fbca04`         |
-| `docs`    | Documentation only                        | `#0075ca`         |
+| Label     | Meaning                                   |
+|-----------|-------------------------------------------|
+| `epic`    | A large body of work decomposed into children |
+| `feature` | New user-facing capability                |
+| `bug`     | Defect in existing behavior               |
+| `chore`   | Maintenance, tooling, refactor, deps      |
+| `docs`    | Documentation only                        |
+
+Colours and descriptions of every label: the cookbook's "Ensure labels exist" table, which
+`scripts/octo-labels.sh` and `scripts/test/rest.sh` use.
 
 ### Priority labels (exactly one per issue; default `p2`)
 
