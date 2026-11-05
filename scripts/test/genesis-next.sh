@@ -27,6 +27,8 @@
 #               grounded milestone that leaves docs/research.md as it is, an ungrounded one that
 #               changes it or cites a URL, and a research file the proposal check rejects
 #   - bad arguments
+#   - no gh call: a stub `gh` first on PATH refuses every call, GraphQL and porcelain included,
+#     with a Claude Code cloud session proxy's 403, and logs it; the log must stay empty
 #
 # Nothing here calls gh or the network. Git config is isolated (GIT_CONFIG_GLOBAL=/dev/null).
 # Exits 0 when every check passes, 1 when any fails.
@@ -52,6 +54,20 @@ bounded() { perl -e '$t = shift; alarm $t; exec @ARGV' "$@"; }
 
 tmp="$(mktemp -d)" && [ -n "$tmp" ] || { echo "genesis-next: mktemp failed" >&2; exit 1; }
 trap 'rm -rf "$tmp"' EXIT
+
+# genesis --next runs in a cloud session too, whose proxy refuses GraphQL; its helper calls no gh
+# at all, so a stub that refuses everything (and logs it) must never be reached.
+mkdir -p "$tmp/bin"
+GH_LOG="$tmp/gh.log"
+export GH_LOG
+cat >"$tmp/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$GH_LOG"
+echo 'gh: GitHub GraphQL is not available from Claude Code sessions; use the REST API (gh api repos/{owner}/{repo}/...). (HTTP 403)' >&2
+exit 1
+STUB
+chmod +x "$tmp/bin/gh"
+export PATH="$tmp/bin:$PATH"
 
 G() { git -C "$1" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false \
   "${@:2}"; }
@@ -412,6 +428,10 @@ for args in "" "--rev main" "--check --base main $c" "--check --branch b $c" \
   out="$(bounded 10 bash "$NEXT" $args 2>/dev/null)"; rc=$?
   same "bad arguments (${args:-none}) exit 2" "2|" "$rc|$out"
 done
+
+echo "• no gh call"
+same "octo-genesis-next.sh never called gh (the stub refuses GraphQL and porcelain)" "" \
+  "$(cat "$GH_LOG" 2>/dev/null)"
 
 echo
 echo "genesis-next: $pass passed, $fail failed"
