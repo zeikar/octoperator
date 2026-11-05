@@ -84,6 +84,9 @@ set -euo pipefail
 # Bracket ranges like A-Z then match ASCII only, as GitHub's repo names do, in every locale, and
 # git prints its messages untranslated, so --preflight can match them.
 export LC_ALL=C
+# A reader that can stop early (grep -q, an awk exit) takes its text from a here-string, never
+# from `printf | …`: under pipefail, a busy machine can give the printf SIGPIPE, and the 141 reads
+# as a failed check or, under set -e, ends the run with no output (#123).
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # The files genesis copies into the new repo for its scenario evals.
@@ -197,14 +200,14 @@ front_matter() {
 # pair of matching quotes, or an unquoted value's ` # comment` (one that starts the value or
 # follows whitespace), removed (empty when the key is missing or has no inline value).
 fm_value() {
-  printf '%s\n' "$1" | awk -v k="$2" 'index($0, k ":") == 1 {
+  awk -v k="$2" 'index($0, k ":") == 1 {
     v = substr($0, length(k) + 2); gsub(/^[ \t]+|[ \t\r]+$/, "", v)
     q = substr(v, 1, 1)
     if (q == "\"" || q == "\047") {
       end = index(substr(v, 2), q)
       if (end && substr(v, end + 2) ~ /^([ \t]+#.*)?$/) v = substr(v, 2, end - 1)
     } else sub(/(^|[ \t]+)#.*$/, "", v)
-    print v; exit }'
+    print v; exit }' <<<"$1"
 }
 
 # sentence_lines <front-matter> : prints the sentence, one line per line of it: an inline value as
@@ -212,13 +215,13 @@ fm_value() {
 sentence_lines() {
   local v
   v="$(fm_value "$1" sentence)"
-  if printf '%s\n' "$v" | grep -Eqx '[|>][-+]?'; then
-    printf '%s\n' "$1" | awk '
+  if grep -Eqx '[|>][-+]?' <<<"$v"; then
+    awk '
       { line = $0; sub(/[ \t\r]+$/, "", line) }
       block && line == "" { next }
       block && line ~ /^[ \t]/ { sub(/^[ \t]+/, "", line); print line; next }
       block { exit }
-      index($0, "sentence:") == 1 { block = 1 }'
+      index($0, "sentence:") == 1 { block = 1 }' <<<"$1"
   else
     printf '%s\n' "$v"
   fi
@@ -234,7 +237,7 @@ check_genesis_md() {
   GENESIS_FM="$fm"
   has_text "$(sentence_lines "$fm")" || fail "GENESIS.md: front matter needs a non-empty sentence"
   repo="$(fm_value "$fm" repo)"
-  if ! printf '%s\n' "$repo" | grep -Eqx '[A-Za-z0-9_-]+/[A-Za-z0-9._-]+'; then
+  if ! grep -Eqx '[A-Za-z0-9_-]+/[A-Za-z0-9._-]+' <<<"$repo"; then
     fail "GENESIS.md: front matter needs repo as OWNER/NAME (got '$repo')"
   fi
   vis="$(fm_value "$fm" visibility)"
@@ -266,7 +269,7 @@ section() {
 items() { printf '%s\n' "$1" | grep -E '^- ' || true; }
 
 # has_text <text> : exits 0 when the text has a non-blank character.
-has_text() { printf '%s\n' "$1" | grep -q '[^[:space:]]'; }
+has_text() { grep -q '[^[:space:]]' <<<"$1"; }
 
 # report <lines> : prints the `FAIL:` lines an awk check produced, counting each.
 report() {
@@ -311,7 +314,7 @@ check_research_md() {
   done
   [ "$missing" -eq 0 ] || return 0
 
-  printf '%s\n' "$problem" | grep -q '[^[:space:]]' \
+  has_text "$problem" \
     || fail "docs/research.md: ## Problem is empty"
 
   # Prior art: the header row, then each data row's kind and URL.
@@ -526,7 +529,7 @@ check_vision() {
             || fail "VISION.md: ## Immutable constraints needs the baseline line '- $b'"
         done ;;
       Roadmap)
-        printf '%s\n' "$body" | grep -Eq '^1\. .*MVP' \
+        grep -Eq '^1\. .*MVP' <<<"$body" \
           || fail "VISION.md: ## Roadmap item 1. must be the MVP"
         # The guard's own rule: once committed, a body it holds can't be fixed unattended.
         rc=0; out="$(bash "$HERE/octo-vision-guard.sh" --plain-roadmap "$f")" || rc=$?
@@ -626,7 +629,7 @@ EOF
   esac
   t="$(triggers "$f" | sort -u)"
   for w in "$@"; do
-    printf '%s\n' "$t" | grep -Fxq "$w" || fail ".github/workflows/$name: on: needs the $w trigger"
+    grep -Fxq "$w" <<<"$t" || fail ".github/workflows/$name: on: needs the $w trigger"
   done
   while IFS= read -r w; do
     [ -n "$w" ] || continue
@@ -726,7 +729,7 @@ check_skeleton() {
   else
     trig="$(triggers "$f")"
     for want in push pull_request; do
-      printf '%s\n' "$trig" | grep -Fxq "$want" \
+      grep -Fxq "$want" <<<"$trig" \
         || fail ".github/workflows/ci.yml: on: needs the $want trigger"
     done
     awk -v c="$TEST_CMD" '{ line = $0; sub(/^[ \t]*(-[ \t]+)?/, "", line)
