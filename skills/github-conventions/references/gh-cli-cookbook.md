@@ -187,7 +187,8 @@ pending when it expires, let the gate hold the PR. When `approval_paths` is set,
 holds any PR whose changed files match it, and it holds any PR that changes `VISION.md` outside
 its Roadmap body (see `skills/auto/SKILL.md`, step 5). `--merge` keeps
 every commit; do not substitute `--squash` or `--rebase`. The PR's `Closes #N` auto-closes the
-issue.
+issue; `auto` then runs `scripts/octo-after-merge.sh`, which closes it when GitHub didn't and
+closes the epic once its last child is closed.
 
 ## Sync queries (read-only)
 

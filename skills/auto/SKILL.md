@@ -83,7 +83,8 @@ If `--dry-run` is present, print the plan and STOP with no mutation:
   gate (only where the base branch has `.github/workflows/evals-guard.yml`), the gate each PR
   must pass (last review not blocking and taken at the current head, `state OPEN`, not draft,
   `mergeStateStatus == CLEAN`), and that passing PRs merge with a **regular merge commit**
-  (`--merge`, never squash/rebase).
+  (`--merge`, never squash/rebase), after which `octo-after-merge.sh` closes the PR's issue if
+  GitHub left it open, and any epic whose children are then all closed.
 
 Do NOT implement, review, or merge under `--dry-run`. (`auto --dry-run` stops here rather than
 delegating to the phases' own dry-run handling.)
@@ -355,7 +356,8 @@ gh pr merge <pr#> --repo "$REPO" --merge --delete-branch --match-head-commit "<r
 ```
 
 **Never use `--squash` or `--rebase`** — a regular merge preserves the full per-commit history (e.g.
-the per-task commits from the implement phase). The PR's `Closes #N` auto-closes the linked issue.
+the per-task commits from the implement phase). The PR's `Closes #N` normally auto-closes the
+linked issue; the after-merge step below closes it when GitHub doesn't.
 
 `gh pr merge` can exit non-zero even though the remote merge went through (e.g. the branch delete
 that follows it failed). So on a non-zero exit, re-read the PR before deciding:
@@ -364,9 +366,9 @@ that follows it failed). So on a non-zero exit, re-read the PR before deciding:
 gh pr view <pr#> --repo "$REPO" --json state --jq '.state'
 ```
 
-`MERGED` → treat the merge as a success (continue to the `Done` write below) and report the `gh pr
-merge` error separately as a cleanup issue (e.g. "merged; branch not deleted: <error>"). Any other
-state → the merge failed: hold the PR with the error as the reason.
+`MERGED` → treat the merge as a success (continue to the `Done` write and the after-merge step
+below) and report the `gh pr merge` error separately as a cleanup issue (e.g. "merged; branch not
+deleted: <error>"). Any other state → the merge failed: hold the PR with the error as the reason.
 
 When the gate does NOT pass, do NOT merge and do NOT force: leave the PR open and record the precise
 reason — `new commits since the last review` for a `headRefOid` mismatch, otherwise the
@@ -384,21 +386,55 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-project-status.sh" \
 
 A board failure never aborts the run (report "board sync skipped" once and continue).
 
+**Then close what the merge finished**, after every confirmed merge, with one helper call. It uses
+REST only (`gh api repos/...`), so it works in a Claude Code cloud session, and it never fails the
+run. Pass the issue the PR closes: on the issue path, the issue this PR implemented; with
+`--pr`, the subject issue from step 3 (the at-most-one issue the PR closes in `$REPO`):
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-after-merge.sh" --repo "$REPO" --pr <pr#> --issue <issue#>
+```
+
+For a PR that closes no issue (such as a genesis milestone PR, whose subject is the PR itself),
+leave `--issue` out:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/octo-after-merge.sh" --repo "$REPO" --pr <pr#>
+```
+
+The helper closes only the `--issue` it is given, never one it reads from the PR body, and never a
+pull request. It acts only on a PR merged into the default branch. GitHub closes the issue itself
+within seconds, but not always, so the helper waits about 10 seconds and then closes it if it is
+still open, as completed, with the comment `Closed by #<pr> (merged)`. Then it closes each epic of
+that issue (the native sub-issue parent, or an open `epic` issue whose `## Children` list has an
+item for it) once every child is closed, with a comment naming the PR. It never closes an epic
+with an open child, with no children, or with a `## Children` item that doesn't start with an
+issue as `#N`. It prints a `closed issue #N` or `closed epic #E` line per close, `warn: …` for a
+read or write that failed, `warn: epic #E kept open: a ## Children item does not start with #N`
+when such an item is all that keeps an epic open, or `nothing to close`, and exits 0 (2 only on
+bad arguments). Put those lines in the report's Closed column (step 6). A `warn:` line is
+reported, never a hold: the PR is already merged. Without `--issue` there is nothing to close and
+no epic to check, so for a PR that closes no issue the helper prints `nothing to close`.
+
 ### 6. Report
 
 Print a per-issue table — every input issue appears, nothing silently dropped:
 
-| Issue | PR | Review | Merge | Board (current) |
-|-------|----|--------|-------|-----------------|
-| `#42` | `<url>` | `comment` (after 2 fix rounds) | `merged` | `Done` |
-| `#46` | `<url>` | `approve` (1 fix round, 1 minor left) | `merged` | `Done` |
-| `#43` | `<url>` | `comment` | `held: UNSTABLE (checks not green)` | `In Review` |
-| `#44` | `—` | `—` | `held: no PR (no-changes)` | `In Progress` |
-| `#45` | `<url>` | `request_changes` (6 fix rounds) | `held: review still blocking` | `In Review` |
-| `#47` | `<url>` | `approve` | `held: needs human approval: infra/main.tf` | `In Review` |
-| `PR #31` | `<url>` | `approve` | `merged` | `—` |
+| Issue | PR | Review | Merge | Closed | Board (current) |
+|-------|----|--------|-------|--------|-----------------|
+| `#42` | `<url>` | `comment` (after 2 fix rounds) | `merged` | `closed epic #39` | `Done` |
+| `#46` | `<url>` | `approve` (1 fix round, 1 minor left) | `merged` | `closed issue #46` | `Done` |
+| `#43` | `<url>` | `comment` | `held: UNSTABLE (checks not green)` | `—` | `In Review` |
+| `#44` | `—` | `—` | `held: no PR (no-changes)` | `—` | `In Progress` |
+| `#45` | `<url>` | `request_changes` (6 fix rounds) | `held: review still blocking` | `—` | `In Review` |
+| `#47` | `<url>` | `approve` | `held: needs human approval: infra/main.tf` | `—` | `In Review` |
+| `PR #31` | `<url>` | `approve` | `merged` | `nothing to close` | `—` |
 
 With `--pr`, the one row's first cell is the closed issue, or `PR #<pr#>` when it closes none.
+
+The Closed column is what step 5's after-merge helper printed for a merged PR: its `closed issue`
+and `closed epic` lines as printed (joined with `; ` when there are several), or `nothing to
+close`; `—` for a held PR. List its `warn:` lines under the table.
 
 The Review column shows the latest **intended** verdict, how many fix rounds ran, and any minors left.
 Under the table, list each PR's outstanding blocker/major/minor findings (`path:line` — issue) and the

@@ -43,6 +43,10 @@ jobs:
       - name: VISION.md guard tests
         # Offline: auto's VISION.md check (only the Roadmap body changes) against throwaway repos.
         run: bash scripts/test/vision.sh
+      - name: After-merge helper tests
+        # Offline: closing the merged PR's issue and a finished epic, against a stub gh that
+        # serves REST and refuses GraphQL and porcelain, as a Claude Code cloud session does.
+        run: bash scripts/test/after-merge.sh
       - name: Benchmark task validation
         # Offline: each task's hidden check must fail on its seed and pass with its reference patch.
         run: bash bench/validate.sh

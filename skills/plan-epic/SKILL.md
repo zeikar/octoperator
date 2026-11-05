@@ -34,7 +34,9 @@ exact commands. Octoperator is autonomous: execute the creation immediately unle
 
 5. **Create the epic issue.** `gh issue create` with the `epic` label + priority, the configured
    milestone, and a body containing: the original request, a short summary, acceptance criteria, and a
-   `## Children` section (placeholder for the task-list fallback). Capture its number/URL.
+   `## Children` heading with no list items under it. Never pre-fill it with planned children: the
+   only lines ever added there are step 7's `- [ ] #<child#>` fallback lines, since an item that
+   doesn't start with `#N` keeps the epic from being closed. Capture its number/URL.
 
 6. **Create each child issue.** For each child: `gh issue create` with its type+priority labels and the
    milestone; the body opens with `Part of #<epic>` then context + acceptance criteria. Capture each
